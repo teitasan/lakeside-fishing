@@ -1,7 +1,10 @@
 # 湖畔のフィッシング — Lakeside Fishing
 
+### ▶ **[ブラウザで遊ぶ（GitHub Pages）](https://teitasan.github.io/lakeside-fishing/)**
+
 Three.js だけで作った、ブラウザで完結する 3D 釣りゲームです。
 外部アセット・外部通信は一切なし（three.js もリポジトリ内に同梱）。
+インストール不要、リンクを開くだけで遊べます（**音が出ます** 🔊 / PC + マウス推奨）。
 
 ![プレイ画面](docs/screenshot.png)
 
@@ -10,9 +13,10 @@ Three.js だけで作った、ブラウザで完結する 3D 釣りゲームで�
 <img src="docs/journal.png" width="49%" alt="さかな図鑑">
 </p>
 
-## 遊び方（起動）
+## ローカルで動かす
 
-ES Modules を使うので `file://` では動きません。ローカルサーバー経由で開いてください。
+公開版は上のリンクから遊べます。手元で動かす場合、ES Modules を使うので
+`file://` では動きません。ローカルサーバー経由で開いてください。
 
 ```bash
 cd "Fishing Game"
@@ -103,3 +107,8 @@ src/
 描画品質はメッシュ密度にも関わるため、完全に反映するにはリロードしてください。
 
 重い場合は「軽量」を選ぶか、ブラウザのウィンドウを小さくしてください。
+
+## デプロイ
+
+`main` ブランチのルートをそのまま GitHub Pages で配信しています（ビルド不要）。
+`main` に push すると数十秒で https://teitasan.github.io/lakeside-fishing/ に反映されます。
