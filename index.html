@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<title>湖畔のフィッシング — Lakeside Fishing</title>
+<link rel="stylesheet" href="./css/style.css" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.min.js"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="scene"></canvas>
+  <div id="underwater-tint"></div>
+  <div id="vignette"></div>
+
+  <!-- ============ HUD ============ -->
+  <div id="hud">
+    <div class="hud-top-left panel">
+      <div class="money-row">
+        <span class="coin">◉</span><span id="money">0</span><span class="unit">G</span>
+      </div>
+      <div class="level-row">
+        <span class="lv">Lv <b id="level">1</b></span>
+        <div class="xp-bar"><i id="xp-fill"></i></div>
+        <span id="xp-text" class="xp-text">0 / 60</span>
+      </div>
+      <div class="gear-row">
+        <span id="gear-rod">🎣 竹の釣り竿</span>
+        <span id="gear-bait">🪱 ミミズ</span>
+      </div>
+    </div>
+
+    <div class="hud-top-right panel">
+      <div class="clock-row"><span id="weather-icon">☀️</span><span id="clock">06:00</span><span id="daylabel">朝</span></div>
+      <div class="info-row"><span class="lbl">天候</span><span id="weather-name">晴れ</span></div>
+      <div class="info-row"><span class="lbl">水深</span><span id="depth">-- m</span></div>
+      <div class="info-row"><span class="lbl">釣果</span><span id="caught-count">0</span></div>
+    </div>
+
+    <div id="reticle"><span></span></div>
+
+    <div id="bite-alert">!</div>
+
+    <div id="prompt-wrap">
+      <div id="prompt"></div>
+      <div id="power-meter"><div class="pm-track"><i id="power-fill"></i><span class="pm-mark"></span></div><label>キャスト力</label></div>
+    </div>
+
+    <div id="fight-panel">
+      <div class="fp-head"><span id="fight-name">???</span><span id="fight-sub"></span></div>
+      <div class="fp-row">
+        <label>ライン<br>テンション</label>
+        <div class="tension-track">
+          <i id="tension-fill"></i>
+          <span class="safe-zone" id="safe-zone"></span>
+          <span class="danger-flash" id="danger-flash"></span>
+        </div>
+      </div>
+      <div class="fp-row">
+        <label>残り距離</label>
+        <div class="dist-track"><i id="dist-fill"></i></div>
+      </div>
+      <div class="fp-row">
+        <label>魚の体力</label>
+        <div class="stam-track"><i id="stam-fill"></i></div>
+      </div>
+      <div id="fight-hint">クリック/スペースを<b>押し続けて</b>巻く / 魚が走ったら<b>離す</b></div>
+    </div>
+
+    <div id="toasts"></div>
+
+    <div id="hint-bar">
+      <span><b>移動</b> WASD</span>
+      <span><b>視点</b> マウス</span>
+      <span><b>キャスト/巻く</b> クリック or Space</span>
+      <span><b>図鑑</b> Q</span>
+      <span><b>ショップ</b> B</span>
+      <span><b>水中カメラ</b> V</span>
+      <span><b>メニュー</b> Esc</span>
+    </div>
+  </div>
+
+  <!-- ============ タイトル ============ -->
+  <div id="title-screen" class="modal open">
+    <div class="title-inner">
+      <h1>湖畔のフィッシング</h1>
+      <p class="sub">— Lakeside Fishing —</p>
+      <div class="title-desc">
+        朝焼けの湖で、静かに糸を垂れる。<br />
+        深場には <b>湖の主</b> が眠っているという。
+      </div>
+      <div class="title-keys">
+        <div><kbd>クリック</kbd> または <kbd>Space</kbd> を長押しで力をため、離してキャスト</div>
+        <div><kbd>WASD</kbd> で岸を歩き、マウスで狙いを定める</div>
+        <div>ウキが沈んだら すぐに<kbd>クリック</kbd>で アワセ！</div>
+        <div>ヒット後は <kbd>押し続けて巻く</kbd> / <kbd>離してテンションを抜く</kbd></div>
+      </div>
+      <button id="btn-start" class="btn big">釣りをはじめる</button>
+      <button id="btn-continue" class="btn ghost hidden">セーブデータから続ける</button>
+      <div class="title-foot">Three.js 製 / 音が出ます 🔊</div>
+    </div>
+  </div>
+
+  <!-- ============ 釣果カード ============ -->
+  <div id="catch-card" class="modal">
+    <div class="card">
+      <div class="card-ribbon" id="card-rarity">レア</div>
+      <canvas id="fish-icon" width="320" height="150"></canvas>
+      <h2 id="card-name">ニジマス</h2>
+      <div class="card-stats">
+        <div><span>全長</span><b id="card-len">42.1 cm</b></div>
+        <div><span>重さ</span><b id="card-weight">0.86 kg</b></div>
+        <div><span>買値</span><b id="card-value">320 G</b></div>
+        <div><span>経験値</span><b id="card-xp">+38</b></div>
+      </div>
+      <div id="card-record" class="record hidden">🏆 自己最高記録！</div>
+      <div id="card-new" class="newfish hidden">✨ 図鑑に新規登録！</div>
+      <p id="card-flavor" class="flavor"></p>
+      <button id="btn-card-ok" class="btn">よし、次！ <small>(Space)</small></button>
+    </div>
+  </div>
+
+  <!-- ============ ショップ ============ -->
+  <div id="shop" class="modal">
+    <div class="sheet">
+      <header>
+        <h2>🏪 釣具店「ひとやすみ」</h2>
+        <div class="wallet">所持金 <b id="shop-money">0</b> G</div>
+        <button class="close" data-close="shop">✕</button>
+      </header>
+      <nav class="tabs">
+        <button class="tab active" data-tab="rod">ロッド</button>
+        <button class="tab" data-tab="line">ライン</button>
+        <button class="tab" data-tab="bait">エサ・ルアー</button>
+      </nav>
+      <div class="shop-list" id="shop-list"></div>
+      <footer class="shop-foot">上位ロッドは<b>レベル</b>で解禁されます。エサは水深と魚種の相性を変えます。</footer>
+    </div>
+  </div>
+
+  <!-- ============ 図鑑 ============ -->
+  <div id="journal" class="modal">
+    <div class="sheet">
+      <header>
+        <h2>📖 さかな図鑑</h2>
+        <div class="wallet"><b id="journal-progress">0 / 0</b></div>
+        <button class="close" data-close="journal">✕</button>
+      </header>
+      <div class="journal-grid" id="journal-grid"></div>
+      <footer class="shop-foot" id="journal-ach"></footer>
+    </div>
+  </div>
+
+  <!-- ============ ポーズ ============ -->
+  <div id="pause" class="modal">
+    <div class="card small">
+      <h2>メニュー</h2>
+      <div class="settings">
+        <label class="row"><span>音量</span><input id="opt-volume" type="range" min="0" max="100" value="70" /></label>
+        <label class="row"><span>マウス感度</span><input id="opt-sens" type="range" min="20" max="300" value="100" /></label>
+        <label class="row"><span>描画品質</span>
+          <select id="opt-quality">
+            <option value="low">軽量</option>
+            <option value="mid" selected>標準</option>
+            <option value="high">高品質</option>
+          </select>
+        </label>
+        <label class="row"><span>影</span><input id="opt-shadow" type="checkbox" checked /></label>
+      </div>
+      <button id="btn-rest" class="btn ghost">🍵 ひと休み（1時間進める）</button>
+      <button id="btn-resume" class="btn">釣りに戻る</button>
+      <button id="btn-reset" class="btn danger ghost">セーブデータを消す</button>
+    </div>
+  </div>
+
+  <div id="loading"><div class="spinner"></div><span>湖を生成中…</span></div>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+<noscript><p style="color:#fff">このゲームには JavaScript が必要です。</p></noscript>
+</body>
+</html>
