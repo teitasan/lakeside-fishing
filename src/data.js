@@ -26,11 +26,84 @@ const W = {
   cloudy: { clear: 0.85, cloudy: 1.4, rain: 1.15 },
 };
 
+/* ===========================================================
+   ファイトの型（str/sta/agg の上に薄く載せる振る舞いパターン）
+
+   すべて既存の更新式に掛ける倍率。1.0 で従来と同じ挙動になる。
+   新しい操作・新しいメーターは増やさない。
+   =========================================================== */
+export const FIGHT_PATTERNS = {
+  dash: {
+    id: 'dash', name: 'スプリンター', hint: '短い突進を繰り返す',
+    runGap: 0.62, runDur: 0.70, runPull: 1.28,   // 頻繁・短く・強い
+    pull: 0.92, lineOut: 1.35,                   // 走ると一気に糸が出る
+    tensionGain: 1.0, tensionDecay: 1.18,        // 抜けも速い＝テンポが速い
+    staminaDrain: 1.18,                          // 短距離型なのでバテやすい
+    jump: 0, shake: 0,
+  },
+  tank: {
+    id: 'tank', name: '重量級', hint: '重い引きが延々と続く',
+    runGap: 1.75, runDur: 1.20, runPull: 0.85,   // 走りは稀
+    pull: 1.12, lineOut: 0.85,                   // 常に重い
+    tensionGain: 1.0, tensionDecay: 0.70,        // 抜けが遅い＝休めない
+    staminaDrain: 0.72,                          // なかなかバテない
+    jump: 0, shake: 0,
+  },
+  jumper: {
+    id: 'jumper', name: 'ジャンパー', hint: '水面に跳ねる — 跳んだら糸を送れ',
+    runGap: 0.95, runDur: 1.0, runPull: 1.05,
+    pull: 0.95, lineOut: 1.05,
+    tensionGain: 1.0, tensionDecay: 1.05,
+    staminaDrain: 1.0,
+    jump: 1,                                     // 走りの途中でジャンプ（走りは跳ね終わるまで続く）
+    jumpDur: 0.62,
+    jumpGrace: 0.22,                             // 跳ね始めは猶予（演出が先・危険は後）
+    jumpTension: 2.3,                            // 猶予後に巻いていると危険
+    jumpDrain: 0.20,                             // 糸を送れば魚が消耗する
+    shake: 0,
+  },
+  shake: {
+    id: 'shake', name: '首振り', hint: '首を振る — 振っている間は巻かない',
+    runGap: 1.30, runDur: 1.05, runPull: 0.95,
+    pull: 1.0, lineOut: 0.95,
+    tensionGain: 1.0, tensionDecay: 1.0,
+    staminaDrain: 0.88,
+    jump: 0,
+    shake: 1,                                    // 小刻みに首を振る
+    shakeOn: [0.34, 0.62],                       // 振っている時間（反応できる長さ）
+    shakeOff: [0.65, 1.35],                      // 振りの合間
+    shakeGrace: 0.15,                            // 振り始めは猶予
+    shakeGain: 1.95,                             // 振っている間に巻くと一気に張る
+    shakeReel: 0.42,                             // しかも巻き取れない
+  },
+  deadweight: {
+    id: 'deadweight', name: '重り', hint: 'ただ重いだけ',
+    runGap: 999, runDur: 1, runPull: 1,          // 走らない・跳ねない
+    pull: 1.0, lineOut: 0.5,
+    tensionGain: 1.0, tensionDecay: 1.15,
+    staminaDrain: 1.5,
+    jump: 0, shake: 0,
+  },
+};
+
+/** 魚種のファイト型（未指定ならタグ・体型から自動割当） */
+export function fightPattern(sp) {
+  const P = FIGHT_PATTERNS;
+  if (sp.fight && P[sp.fight]) return P[sp.fight];
+  if (sp.rarity === 0) return P.deadweight;
+  if (sp.tags.includes('trout')) return P.jumper;
+  if (sp.tags.includes('carp')) return P.tank;
+  if (sp.shape === 'eel') return P.shake;
+  if (sp.tags.includes('predator')) return P.dash;
+  return sp.str >= 1.6 ? P.tank : P.dash;
+}
+
 /**
  * shape: 'slim' | 'deep' | 'round' | 'eel' | 'wide' | 'gar' | 'sturgeon' | 'junk'
  * len: [最小cm, 最大cm]   wc: 体重係数 (kg = wc * len^3 / 1e5)
  * depth: [好む水深min, max] (m)
  * str: 引きの強さ  sta: 体力  agg: 突進頻度
+ * fight: ファイトの型（省略時は fightPattern() が自動判定）
  */
 export const SPECIES = [
   /* ---------------- ゴミ ---------------- */
@@ -38,6 +111,7 @@ export const SPECIES = [
     id: 'boot', name: '長靴', rarity: 0, tags: ['bottom', 'junk'], shape: 'junk',
     len: [26, 30], wc: 1.0, depth: [0.4, 20], spawn: 0, times: T.any, weather: W.any,
     str: 0.25, sta: 0.3, agg: 0, value: 12, perCm: 0,
+    fight: 'deadweight',
     colors: { top: '#4a4a52', mid: '#5c5c66', belly: '#3a3a42', fin: '#2e2e34' },
     flavor: 'よくある釣果。中に何か入っている気がする。',
   },
@@ -45,6 +119,7 @@ export const SPECIES = [
     id: 'can', name: '空き缶', rarity: 0, tags: ['bottom', 'junk'], shape: 'junk',
     len: [11, 14], wc: 0.4, depth: [0.4, 20], spawn: 0, times: T.any, weather: W.any,
     str: 0.2, sta: 0.25, agg: 0, value: 8, perCm: 0,
+    fight: 'deadweight',
     colors: { top: '#8f98a3', mid: '#b9c3cf', belly: '#6d757f', fin: '#5a6169' },
     flavor: '湖はきれいに使いましょう。',
   },
@@ -52,6 +127,7 @@ export const SPECIES = [
     id: 'weeds', name: '藻の塊', rarity: 0, tags: ['weed', 'junk'], shape: 'junk',
     len: [20, 45], wc: 0.5, depth: [0.4, 12], spawn: 0, times: T.any, weather: W.any,
     str: 0.35, sta: 0.35, agg: 0, value: 5, perCm: 0,
+    fight: 'deadweight',
     colors: { top: '#3f5a2c', mid: '#587a3a', belly: '#2e441f', fin: '#26381a' },
     flavor: 'ずっしり重い。魚じゃなかった。',
   },
@@ -59,6 +135,7 @@ export const SPECIES = [
     id: 'driftwood', name: '流木', rarity: 0, tags: ['bottom', 'junk'], shape: 'junk',
     len: [40, 90], wc: 0.6, depth: [0.4, 16], spawn: 0, times: T.any, weather: W.any,
     str: 0.5, sta: 0.4, agg: 0, value: 18, perCm: 0,
+    fight: 'deadweight',
     colors: { top: '#6b4f36', mid: '#8a6a49', belly: '#4d3927', fin: '#3d2d1f' },
     flavor: '見事な形。飾ればインテリアになるかも。',
   },
@@ -68,6 +145,7 @@ export const SPECIES = [
     id: 'moroko', name: 'モロコ', rarity: 1, tags: ['bottom', 'mid'], shape: 'slim',
     len: [7, 16], wc: 1.4, depth: [0.5, 3.5], spawn: 34, times: T.dayish, weather: W.any,
     str: 0.35, sta: 0.4, agg: 0.2, value: 14, perCm: 1.2,
+    fight: 'dash',
     colors: { top: '#6d7a5c', mid: '#a8b291', belly: '#e8e6d6', fin: '#c9c3a6' },
     flavor: '群れで泳ぐ小さな魚。佃煮がうまい。',
   },
@@ -75,6 +153,7 @@ export const SPECIES = [
     id: 'bluegill', name: 'ブルーギル', rarity: 1, tags: ['mid', 'weed'], shape: 'deep',
     len: [9, 25], wc: 3.1, depth: [0.8, 5], spawn: 32, times: T.dayish, weather: W.any,
     str: 0.55, sta: 0.55, agg: 0.4, value: 20, perCm: 1.6,
+    fight: 'dash',
     colors: { top: '#31513f', mid: '#5d8b63', belly: '#e9d98a', fin: '#2b3f38' },
     flavor: '青い頬。どこにでもいて、何にでも食いつく。',
   },
@@ -82,6 +161,7 @@ export const SPECIES = [
     id: 'funa', name: 'マブナ', rarity: 1, tags: ['bottom', 'carp'], shape: 'deep',
     len: [14, 36], wc: 2.7, depth: [1, 6.5], spawn: 30, times: T.any, weather: W.cloudy,
     str: 0.7, sta: 0.7, agg: 0.3, value: 26, perCm: 2.0,
+    fight: 'tank',
     colors: { top: '#5b5535', mid: '#9c9257', belly: '#ded7ad', fin: '#7c7143' },
     flavor: '「釣りはフナに始まりフナに終わる」。',
   },
@@ -89,6 +169,7 @@ export const SPECIES = [
     id: 'ugui', name: 'ウグイ', rarity: 1, tags: ['mid'], shape: 'slim',
     len: [14, 42], wc: 1.35, depth: [0.5, 5.5], spawn: 28, times: T.any, weather: W.rain,
     str: 0.65, sta: 0.6, agg: 0.5, value: 24, perCm: 1.7,
+    fight: 'jumper',
     colors: { top: '#4b5b6b', mid: '#8fa2ae', belly: '#f0f2f0', fin: '#c98a70' },
     flavor: '婚姻色の朱い帯が美しい。引きは意外に強い。',
   },
@@ -96,6 +177,7 @@ export const SPECIES = [
     id: 'dojo', name: 'ドジョウ', rarity: 1, tags: ['bottom'], shape: 'eel',
     len: [8, 19], wc: 0.45, depth: [0.5, 4], spawn: 22, times: T.nightish, weather: W.rain,
     str: 0.4, sta: 0.45, agg: 0.2, value: 22, perCm: 2.4,
+    fight: 'shake',
     colors: { top: '#4a3d2a', mid: '#7b6743', belly: '#d8c79a', fin: '#5b4b32' },
     flavor: '泥の中からにゅるり。にょろにょろと手強い。',
   },
@@ -105,6 +187,7 @@ export const SPECIES = [
     id: 'rainbow', name: 'ニジマス', rarity: 2, tags: ['trout', 'mid'], shape: 'slim',
     len: [21, 54], wc: 1.3, depth: [1, 8.5], spawn: 20, times: T.twilight, weather: W.cloudy,
     str: 1.0, sta: 0.95, agg: 0.8, value: 90, perCm: 4.2,
+    fight: 'jumper',
     colors: { top: '#3f6a63', mid: '#93b3a8', belly: '#f2efe4', fin: '#d97a86' },
     flavor: '横腹に虹。銀鱗を翻して跳ねる。',
   },
@@ -112,6 +195,7 @@ export const SPECIES = [
     id: 'bass', name: 'ブラックバス', rarity: 2, tags: ['predator', 'weed'], shape: 'wide',
     len: [24, 58], wc: 1.55, depth: [1, 7.5], spawn: 19, times: T.twilight, weather: W.cloudy,
     str: 1.15, sta: 1.0, agg: 1.1, value: 110, perCm: 4.6,
+    fight: 'dash',
     colors: { top: '#2f4a2c', mid: '#6f8f52', belly: '#e3e0bd', fin: '#33472b' },
     flavor: '大口を開けてルアーを襲う。エラ洗いに注意。',
   },
@@ -119,6 +203,7 @@ export const SPECIES = [
     id: 'yamame', name: 'ヤマメ', rarity: 2, tags: ['trout'], shape: 'slim',
     len: [17, 42], wc: 1.2, depth: [0.5, 5], spawn: 16, times: T.dawnOnly, weather: W.rain,
     str: 0.95, sta: 0.9, agg: 0.9, value: 130, perCm: 5.0,
+    fight: 'jumper',
     colors: { top: '#3d5560', mid: '#96a8a6', belly: '#f4f0e2', fin: '#8d9a8e' },
     flavor: 'パーマークが並ぶ渓流の女王。神経質で警戒心が強い。',
   },
@@ -126,6 +211,7 @@ export const SPECIES = [
     id: 'namazu', name: 'ナマズ', rarity: 2, tags: ['bottom', 'predator', 'deep'], shape: 'eel',
     len: [34, 84], wc: 1.25, depth: [3.5, 15], spawn: 15, times: T.nightish, weather: W.rain,
     str: 1.35, sta: 1.3, agg: 0.6, value: 150, perCm: 4.0,
+    fight: 'shake',
     colors: { top: '#3a3a2e', mid: '#6b6550', belly: '#cfc7a4', fin: '#4a463a' },
     flavor: '長いヒゲでゆらり。掛かると重量感のある首振り。',
   },
@@ -133,6 +219,7 @@ export const SPECIES = [
     id: 'koi', name: 'コイ', rarity: 2, tags: ['carp', 'bottom'], shape: 'deep',
     len: [38, 92], wc: 2.5, depth: [1.5, 9.5], spawn: 14, times: T.any, weather: W.cloudy,
     str: 1.5, sta: 1.55, agg: 0.5, value: 170, perCm: 3.6,
+    fight: 'tank',
     colors: { top: '#5a4a2c', mid: '#a3854a', belly: '#e6dcb4', fin: '#7c6234' },
     flavor: '悠然と泳ぐ湖の主候補。走り出すと止まらない。',
   },
@@ -142,6 +229,7 @@ export const SPECIES = [
     id: 'iwana', name: 'イワナ', rarity: 3, tags: ['trout', 'deep'], shape: 'slim',
     len: [24, 62], wc: 1.25, depth: [3, 13], spawn: 9, times: T.dawnOnly, weather: W.rain,
     str: 1.25, sta: 1.15, agg: 1.0, value: 340, perCm: 8.0,
+    fight: 'shake',
     colors: { top: '#2f4048', mid: '#7d8f8c', belly: '#f0e9d2', fin: '#c9a06d' },
     flavor: '白い斑点をまとう冷水の主。深い淵の底に潜む。',
   },
@@ -149,6 +237,7 @@ export const SPECIES = [
     id: 'snakehead', name: 'ライギョ', rarity: 3, tags: ['predator', 'weed'], shape: 'eel',
     len: [38, 94], wc: 1.15, depth: [0.5, 4.5], spawn: 8, times: T.dayish, weather: W.clear,
     str: 1.6, sta: 1.4, agg: 1.5, value: 380, perCm: 7.2,
+    fight: 'dash',
     colors: { top: '#33402a', mid: '#6d7a45', belly: '#d3cf9d', fin: '#3e4a2c' },
     flavor: '藻の陰から爆発的に襲いかかる雷魚。ドラグが鳴る。',
   },
@@ -156,6 +245,7 @@ export const SPECIES = [
     id: 'grasscarp', name: 'ソウギョ', rarity: 3, tags: ['carp', 'weed'], shape: 'slim',
     len: [52, 118], wc: 1.7, depth: [1.5, 8], spawn: 7, times: T.dayish, weather: W.clear,
     str: 1.85, sta: 1.8, agg: 0.7, value: 420, perCm: 6.4,
+    fight: 'tank',
     colors: { top: '#4d5340', mid: '#95a077', belly: '#e5e3c6', fin: '#6c7452' },
     flavor: '水草を食べる巨体。一度走られたら覚悟が必要。',
   },
@@ -163,6 +253,7 @@ export const SPECIES = [
     id: 'biwatrout', name: 'ビワマス', rarity: 3, tags: ['trout', 'deep'], shape: 'slim',
     len: [29, 68], wc: 1.35, depth: [6, 19], spawn: 7, times: T.twilight, weather: W.cloudy,
     str: 1.45, sta: 1.3, agg: 1.2, value: 460, perCm: 8.6,
+    fight: 'jumper',
     colors: { top: '#2b4a5e', mid: '#8fa8b6', belly: '#f5f1e6', fin: '#b06a72' },
     flavor: '深層を回遊する幻の鱒。銀色の魚体に淡い紅。',
   },
@@ -172,6 +263,7 @@ export const SPECIES = [
     id: 'sturgeon', name: 'チョウザメ', rarity: 4, tags: ['deep', 'bottom'], shape: 'sturgeon',
     len: [78, 168], wc: 1.05, depth: [10, 24], spawn: 3.0, times: T.nightish, weather: W.cloudy,
     str: 2.3, sta: 2.3, agg: 0.9, value: 1400, perCm: 16,
+    fight: 'tank',
     colors: { top: '#3d4a55', mid: '#7d8d99', belly: '#dfe3e0', fin: '#4d5a63' },
     flavor: '古代の姿を残す魚。背の硬鱗が水中でぬめりと光る。',
   },
@@ -179,6 +271,7 @@ export const SPECIES = [
     id: 'gar', name: 'アリゲーターガー', rarity: 4, tags: ['predator', 'deep'], shape: 'gar',
     len: [86, 196], wc: 0.9, depth: [4, 16], spawn: 2.6, times: T.nightish, weather: W.clear,
     str: 2.6, sta: 2.1, agg: 1.7, value: 1700, perCm: 17,
+    fight: 'dash',
     colors: { top: '#3c4433', mid: '#7c8560', belly: '#d6d3ab', fin: '#4a5238' },
     flavor: 'ワニのような顎。誰が湖に放したのか、誰も知らない。',
   },
@@ -188,6 +281,7 @@ export const SPECIES = [
     id: 'nushi', name: '湖の主', rarity: 5, tags: ['deep', 'predator', 'legend'], shape: 'eel',
     len: [138, 232], wc: 1.6, depth: [14, 28], spawn: 0.85, times: T.nightish, weather: W.rain,
     str: 3.3, sta: 3.2, agg: 1.4, value: 7000, perCm: 34,
+    fight: 'tank',
     colors: { top: '#22262a', mid: '#4b5157', belly: '#9aa3a6', fin: '#2c3135' },
     flavor: '湖底の岩屋に潜む巨大ナマズ。村の古老が「あれには触るな」と言った。',
   },
@@ -195,6 +289,7 @@ export const SPECIES = [
     id: 'dragonfish', name: '白龍魚', rarity: 5, tags: ['deep', 'legend'], shape: 'gar',
     len: [118, 268], wc: 0.75, depth: [17, 30], spawn: 0.45, times: T.dawnOnly, weather: W.clear,
     str: 3.8, sta: 3.6, agg: 2.0, value: 12000, perCm: 46,
+    fight: 'jumper',
     colors: { top: '#c9d6e2', mid: '#eef4fb', belly: '#ffffff', fin: '#9fd0e8' },
     flavor: '夜明けの霧の中、白い影が水面を割る。龍の子ともいわれる。',
   },

@@ -14,7 +14,7 @@ import { AudioEngine } from './audio.js';
 import * as Save from './save.js';
 import {
   REAL_FISH, JUNK, GEAR, ACHIEVEMENTS,
-  weightOf, valueOf, xpOf, rollLength,
+  weightOf, valueOf, xpOf, rollLength, fightPattern,
 } from './data.js';
 import {
   clamp, clamp01, lerp, damp, rand, pick, weightedPick, TAU, timeBand, fmt1,
@@ -615,11 +615,12 @@ export class Game {
     const sp = f.species;
     f.state = 'hooked';
     const sizeF = 0.55 + (f.length / sp.len[1]) * 0.75;
+    const pattern = fightPattern(sp);
     this.fight = {
       dist: 0.88,
       tension: 0,
       stamina: 1,
-      runTimer: rand(1.4, 3.2),
+      runTimer: rand(1.4, 3.2) * pattern.runGap,
       running: false,
       runDur: 0,
       lateral: 0,
@@ -627,15 +628,22 @@ export class Game {
       pull0: sp.str * sizeF,
       time: 0,
       jumps: 0,
+      pattern,
+      jumpQueued: 0,   // 走りの途中で跳ねるまでの秒数
+      jumpT: 0,        // 跳ねている残り時間
+      shakeT: rand(0.6, 1.3),
+      shakeOn: false,
+      shakeAge: 0,
     };
     this.fs = 'fight';
     this.stateTime = 0;
     this.water.addSplash(this.bobber.x, this.water.surfaceY(this.bobber.x, this.bobber.z), this.bobber.z, 14, 1.0);
     this.water.addRipple(this.bobber.x, this.bobber.z, 1.1, 1.4);
-    // レア度ではなく「手応え」で知らせる（種は取り込むまで伏せる）
+    // レア度ではなく「手応え」と「ファイトの型」で知らせる（種は取り込むまで伏せる）
     const heavy = this.fight.pull0;
     this.ui.toast(
-      `ヒット！ <b>${heavy >= 2.0 ? '重い…！' : heavy >= 1.2 ? 'ぐんと重い！' : '掛かった！'}</b>`,
+      `ヒット！ <b>${heavy >= 2.0 ? '重い…！' : heavy >= 1.2 ? 'ぐんと重い！' : '掛かった！'}</b>`
+      + `<small style="opacity:.75"> — ${pattern.hint}</small>`,
       heavy >= 2.0 ? 'gold' : 'good'
     );
   }
@@ -1266,40 +1274,82 @@ export class Game {
     const cap = this.line.cap;
     F.time += dt;
 
+    const P = F.pattern;
+
     /* --- 突進 --- */
     F.runTimer -= dt;
     if (F.running) {
       F.runDur -= dt;
-      if (F.runDur <= 0) {
+      // 跳ねている間は突進を終わらせない（「走ったら離す」だけで跳ねにも対応できる）
+      if (F.runDur <= 0 && F.jumpT <= 0 && F.jumpQueued <= 0) {
         F.running = false;
-        F.runTimer = rand(1.8, 4.2) / (0.6 + sp.agg * 0.8);
+        F.runTimer = rand(1.8, 4.2) * P.runGap / (0.6 + sp.agg * 0.8);
       }
-    } else if (F.runTimer <= 0 && F.stamina > 0.16) {
+    } else if (F.runTimer <= 0 && F.stamina > 0.16 && P.runGap < 50) {
       F.running = true;
-      F.runDur = rand(0.7, 1.9) * (0.7 + sp.agg * 0.5);
+      F.runDur = rand(0.7, 1.9) * P.runDur * (0.7 + sp.agg * 0.5);
       this.audio.drag();
-      if (F.pull0 >= 1.2 && Math.random() < 0.4) this.ui.toast('走った！ <b>糸を送れ</b>', 'bad');
+      // ジャンパーは走りの途中で跳ねる
+      if (P.jump > 0 && F.jumps < 4 && Math.random() < 0.8) F.jumpQueued = F.runDur * rand(0.3, 0.55);
+      else if (F.pull0 >= 1.2 && Math.random() < 0.4) this.ui.toast('走った！ <b>糸を送れ</b>', 'bad');
     }
 
+    /* --- 首振り（振っている間は巻いても進まず、張力だけ上がる） --- */
+    if (P.shake > 0 && F.stamina > 0.12) {
+      F.shakeT -= dt;
+      if (F.shakeOn) F.shakeAge += dt;
+      if (F.shakeT <= 0) {
+        F.shakeOn = !F.shakeOn;
+        F.shakeAge = 0;
+        const span = F.shakeOn ? (P.shakeOn || [0.34, 0.62]) : (P.shakeOff || [0.65, 1.35]);
+        F.shakeT = rand(span[0], span[1]);
+        if (F.shakeOn) this.audio.drag();
+      }
+    } else {
+      F.shakeOn = false;
+    }
+    // 演出は始まった瞬間から、ペナルティは猶予の後から
+    const shakeBite = F.shakeOn && F.shakeAge > (P.shakeGrace || 0);
+
+    /* --- ジャンプ（予告 → 0.62秒の空中） --- */
+    if (F.jumpQueued > 0) {
+      F.jumpQueued -= dt;
+      if (F.jumpQueued <= 0) {
+        F.jumpT = P.jumpDur || 0.62;
+        F.jumps++;
+        this.audio.splash(1.0);
+        this.ui.toast('跳ねた！ <b>糸を送れ</b>', 'bad');
+      }
+    }
+    if (F.jumpT > 0) F.jumpT = Math.max(0, F.jumpT - dt);
+    const jumping = F.jumpT > 0;
+    const jumpDur = P.jumpDur || 0.62;
+    const jumpBite = jumping && F.jumpT < jumpDur - (P.jumpGrace || 0);
+
     const reeling = this.actionHeld;
-    const pull = F.pull0 * (F.running ? 2.0 : 1.0) * (0.5 + 0.5 * F.stamina);
+    const pull = F.pull0 * P.pull * (F.running ? 2.0 * P.runPull : 1.0) * (0.5 + 0.5 * F.stamina);
 
     if (reeling) {
-      const resist = clamp(1.70 - pull * 0.75, 0.35, 1.60);
+      const resist = clamp(1.70 - pull * 0.75, 0.35, 1.60) * (shakeBite ? P.shakeReel : 1);
       const rate = this.rod.reel * 0.28 * resist;
       F.dist -= rate * dt;
-      F.tension += (0.08 + pull * 0.55) * dt / this.rod.power;
+      let gain = (0.08 + pull * 0.55) * P.tensionGain;
+      if (shakeBite) gain *= P.shakeGain;
+      if (jumpBite) gain *= P.jumpTension;
+      F.tension += gain * dt / this.rod.power;
       this.audio.reelTick(0.7 + resist);
     } else {
-      F.dist += pull * 0.032 * dt;
-      F.tension -= (1.30 + pull * 0.30) * dt;
+      F.dist += pull * 0.032 * P.lineOut * dt;
+      F.tension -= (1.30 + pull * 0.30) * P.tensionDecay * dt;
       if (F.running) F.tension += pull * 0.30 * dt;
+      // 跳ねている間に糸を送れていれば、魚が余計に消耗する
+      if (jumping) F.stamina -= (P.jumpDrain || 0) * dt;
     }
     F.tension = clamp(F.tension, 0, cap * 1.2);
 
     // 体力（テンションを掛け続けると疲れる）
     const tRatio = clamp01(F.tension / cap);
-    F.stamina -= (0.022 + tRatio * 0.17 + (reeling ? 0.02 : 0)) * dt / Math.max(0.4, sp.sta);
+    F.stamina -= (0.022 + tRatio * 0.17 + (reeling ? 0.02 : 0)) * P.staminaDrain * dt / Math.max(0.4, sp.sta);
     F.stamina = clamp01(F.stamina);
 
     /* --- 魚の位置（見た目） --- */
@@ -1323,28 +1373,40 @@ export class Game {
     const surf = this.water.surfaceY(wx, wz);
     // 疲れると浮いてくる
     const wantDepth = clamp(lerp(0.35, 2.4, F.stamina) * lerp(0.4, 1.4, t), 0.2, Math.max(0.25, depth - 0.25));
-    f.pos.set(wx, Math.min(surf - 0.12, -wantDepth + surf), wz);
+    let fy = Math.min(surf - 0.12, -wantDepth + surf);
+    if (jumping) {
+      // 空中に跳ね上がる（0 → 1 → 0 の弧）
+      const jt = 1 - F.jumpT / (P.jumpDur || 0.62);
+      fy = surf + Math.sin(Math.PI * jt) * (0.45 + Math.min(1.1, F.pull0 * 0.32));
+      if (Math.random() < dt * 26) {
+        this.water.addSplash(wx, surf, wz, 6, 1.0);
+        this.water.addRipple(wx, wz, 0.8, 1.2);
+      }
+    }
+    f.pos.set(wx, fy, wz);
     f.state = 'hooked';
     f.mesh.position.copy(f.pos);
-    // 向き（プレイヤーに引かれる方向を向く）
-    _v1.set(near.x - wx, 0.05, near.z - wz).normalize();
-    f._orient(dt, _v1, Math.sin(F.time * 7) * 0.5 * (F.running ? 1 : 0.35));
-    f._wiggle(dt, 2.2 + (F.running ? 2.2 : 0), 0.1 + (F.running ? 0.09 : 0));
+    // 向き（プレイヤーに引かれる方向を向く／跳ねている間は上向き）
+    const jumpUp = jumping && F.jumpT > (P.jumpDur || 0.62) * 0.5;
+    _v1.set(near.x - wx, jumping ? (jumpUp ? 0.85 : -0.85) : 0.05, near.z - wz).normalize();
+    const roll = jumping ? Math.sin(F.time * 22) * 0.9
+      : F.shakeOn ? Math.sin(F.time * 26) * 0.55
+        : Math.sin(F.time * 7) * 0.5 * (F.running ? 1 : 0.35);
+    f._orient(dt, _v1, roll);
+    f._wiggle(dt,
+      2.2 + (F.running ? 2.2 : 0) + (F.shakeOn ? 3.4 : 0) + (jumping ? 3.0 : 0),
+      0.1 + (F.running ? 0.09 : 0) + (F.shakeOn ? 0.13 : 0));
 
     // 水面の演出
-    if (f.pos.y > surf - 0.35) {
+    if (!jumping && f.pos.y > surf - 0.35) {
       if (Math.random() < dt * 14) {
         this.water.addSplash(wx, surf, wz, 4, 0.5 + F.pull0 * 0.2);
         this.water.addRipple(wx, wz, 0.55, 1.0);
       }
     }
-    // エラ洗い（レア度ではなく引きの強さで発生）
-    if (F.running && F.pull0 >= 0.9 && F.jumps < 3 && Math.random() < dt * 0.35 && t > 0.2 && t < 0.75) {
-      F.jumps++;
-      this.water.addSplash(wx, surf, wz, 26, 1.4);
-      this.water.addRipple(wx, wz, 1.5, 1.8);
-      this.audio.splash(1.0);
-      this.ui.toast('跳ねた！', 'gold');
+    // 首振りは水面にも波紋を出す（見て分かるように）
+    if (F.shakeOn && Math.random() < dt * 9) {
+      this.water.addRipple(wx, wz, 0.5, 0.8);
     }
 
     /* --- ウキ / 糸 --- */
@@ -1362,15 +1424,22 @@ export class Game {
     this.hudDepth = depth;
     this.ui.showFight(true, {
       name: pullLabel(F.pull0),
-      sub: F.running ? '⚠ 走っている' : reeling ? '巻いている' : '待機',
+      sub: jumping ? '⚠ 跳ねた！'
+        : F.shakeOn ? '⚠ 首を振っている'
+          : F.running ? '⚠ 走っている'
+            : `${P.name}｜${reeling ? '巻いている' : '待機'}`,
       tension: tRatio,
       dist: t,
       stam: F.stamina,
       reeling,
     });
-    this.ui.setPrompt(F.running
-      ? '走っている！ <b>ボタンを離して</b>糸を送れ'
-      : '<b>押し続けて</b>巻き上げろ（テンションは白線の内側で）');
+    this.ui.setPrompt(jumping
+      ? '跳ねている！ <b>離して</b>糸を送れ（送れれば魚が消耗する）'
+      : F.shakeOn
+        ? '首を振っている！ <b>巻くのを止めて</b>やり過ごせ'
+        : F.running
+          ? '走っている！ テンションが上がる — <b>危なければ離せ</b>'
+          : '<b>押し続けて</b>巻き上げろ（テンションは白線の内側で）');
 
     /* --- 決着 --- */
     if (F.tension >= cap) return this._lineSnap();

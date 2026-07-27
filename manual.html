@@ -282,6 +282,27 @@ F.runTimer = rand(<span class="n">1.4</span>, <span class="n">3.2</span>)       
       ヒット時のメッセージ・突進の警告・エラ洗いの発生も、レア度ではなく <code>pull0</code> を基準にしています。
     </div>
 
+    <h3>ファイトの型（魚種ごとの振る舞い）</h3>
+    <p>
+      魚種には <code>fight</code> で <b>型</b>が1つ割り当てられています。型は上の更新式に掛ける<b>倍率と追加イベントだけ</b>で、
+      新しいメーターや操作は増えません（1.0 なら従来と同じ挙動）。
+      <code>fight</code> が無い魚種は <code>fightPattern()</code> がタグ・体型から自動で決めます。
+    </p>
+    <div class="tw" id="patTable"></div>
+    <div class="grid c2">
+      <div class="card tight"><h4>ジャンプの扱い</h4><p>ジャンプは<b>突進の途中で発生し、跳ね終わるまで突進が終わりません</b>。
+        つまり「走ったら糸を送る」という基本ルールを守っていれば自動的に対応できます。
+        送れていれば魚が余計に消耗し（<code>jumpDrain</code> /秒だけ体力が減る）、
+        巻いたままだと張力の増加が <code>jumpTension</code> 倍になります。</p></div>
+      <div class="card tight"><h4>首振りの扱い</h4><p>数値そのものを揺らすのではなく、<b>振っている間だけ巻き取り効率が
+        <code>shakeReel</code> 倍に落ち、張力の増加が <code>shakeGain</code> 倍になります</b>。
+        メーターは正直な値のままなので「振っている間は手を止める」という判断が生まれます。</p></div>
+    </div>
+    <div class="note">
+      型はレア度が偏らないように割り当てています（各型にコモン〜レア以上が混在）。
+      ファイト中に型が分かってもレア度や魚種は特定できません。
+    </div>
+
     <h3>質問への回答</h3>
 
     <div class="note q">
@@ -343,6 +364,8 @@ F.runTimer = rand(<span class="n">1.4</span>, <span class="n">3.2</span>)       
         <span><i style="background:#7ee0ff"></i>残り距離</span>
         <span><i style="background:#ff8fa3"></i>魚の体力</span>
         <span><i style="background:#ff6b6b"></i>突進中</span>
+        <span><i style="background:#ffb84d"></i>首振り</span>
+        <span><i style="background:#7ee0ff"></i>ジャンプ</span>
         <span style="opacity:.6">— 破線 = 離す閾値</span>
       </div>
     </div>
@@ -651,7 +674,10 @@ y(t) = lerp(先端, 着水点, t) − sin(πt) × min(距離×<span class="n">0.
 </footer>
 
 <script type="module">
-import { SPECIES, RARITY, RODS, LINES, BAITS, ACHIEVEMENTS, weightOf, valueOf, xpOf } from './src/data.js';
+import {
+  SPECIES, RARITY, RODS, LINES, BAITS, ACHIEVEMENTS,
+  FIGHT_PATTERNS, fightPattern, weightOf, valueOf, xpOf,
+} from './src/data.js';
 import { xpForLevel } from './src/save.js';
 import { timeBand } from './src/util.js';
 import { makeLake, validateLake, randomSeed } from './src/lakefield.js';
@@ -710,8 +736,11 @@ function simulate(sp, len, rod, line, policy, delay, dt = 1 / 60, record = null)
   const cap = line.cap;
   const sizeF = 0.55 + (len / sp.len[1]) * 0.75;
   const pull0 = sp.str * sizeF;
+  const P = fightPattern(sp);
   let dist = 0.88, tension = 0, stamina = 1, t = 0;
-  let running = false, runTimer = rand(1.4, 3.2), runDur = 0;
+  let running = false, runTimer = rand(1.4, 3.2) * P.runGap, runDur = 0;
+  let jumpQueued = 0, jumpT = 0, jumps = 0;
+  let shakeT = rand(0.6, 1.3), shakeOn = false, shakeAge = 0;
   let reeling = true, wish = true, lastSwitch = -99;
 
   while (t < 300) {
@@ -719,32 +748,59 @@ function simulate(sp, len, rod, line, policy, delay, dt = 1 / 60, record = null)
     runTimer -= dt;
     if (running) {
       runDur -= dt;
-      if (runDur <= 0) { running = false; runTimer = rand(1.8, 4.2) / (0.6 + sp.agg * 0.8); }
-    } else if (runTimer <= 0 && stamina > 0.16) {
+      // 跳ねている間は突進が終わらない
+      if (runDur <= 0 && jumpT <= 0 && jumpQueued <= 0) {
+        running = false; runTimer = rand(1.8, 4.2) * P.runGap / (0.6 + sp.agg * 0.8);
+      }
+    } else if (runTimer <= 0 && stamina > 0.16 && P.runGap < 50) {
       running = true;
-      runDur = rand(0.7, 1.9) * (0.7 + sp.agg * 0.5);
+      runDur = rand(0.7, 1.9) * P.runDur * (0.7 + sp.agg * 0.5);
+      if (P.jump > 0 && jumps < 4 && Math.random() < 0.8) jumpQueued = runDur * rand(0.3, 0.55);
     }
-    const pull = pull0 * (running ? 2.0 : 1.0) * (0.5 + 0.5 * stamina);
+    // 首振り
+    if (P.shake > 0 && stamina > 0.12) {
+      shakeT -= dt;
+      if (shakeOn) shakeAge += dt;
+      if (shakeT <= 0) {
+        shakeOn = !shakeOn; shakeAge = 0;
+        const span = shakeOn ? (P.shakeOn || [0.34, 0.62]) : (P.shakeOff || [0.65, 1.35]);
+        shakeT = rand(span[0], span[1]);
+      }
+    } else shakeOn = false;
+    const shakeBite = shakeOn && shakeAge > (P.shakeGrace || 0);
+    // ジャンプ
+    if (jumpQueued > 0) { jumpQueued -= dt; if (jumpQueued <= 0) { jumpT = P.jumpDur || 0.62; jumps++; } }
+    if (jumpT > 0) jumpT = Math.max(0, jumpT - dt);
+    const jumping = jumpT > 0;
+    const jumpBite = jumping && jumpT < (P.jumpDur || 0.62) - (P.jumpGrace || 0);
 
-    // プレイヤーの操作（反応遅れ付き）
-    const want = tension / cap < policy;
+    const pull = pull0 * P.pull * (running ? 2.0 * P.runPull : 1.0) * (0.5 + 0.5 * stamina);
+
+    // プレイヤーの操作（反応遅れ付き。跳ね・首振りには反応できるものとする）
+    const want = tension / cap < policy && !jumping && !shakeOn;
     if (want !== wish) { wish = want; lastSwitch = t; }
     if (t - lastSwitch >= delay) reeling = wish;
 
     if (reeling) {
-      const resist = clamp(1.70 - pull * 0.75, 0.35, 1.60);
+      const resist = clamp(1.70 - pull * 0.75, 0.35, 1.60) * (shakeBite ? P.shakeReel : 1);
       dist -= rod.reel * 0.28 * resist * dt;
-      tension += ((0.08 + pull * 0.55) * dt) / rod.power;
+      let gain = (0.08 + pull * 0.55) * P.tensionGain;
+      if (shakeBite) gain *= P.shakeGain;
+      if (jumpBite) gain *= P.jumpTension;
+      tension += (gain * dt) / rod.power;
     } else {
-      dist += pull * 0.032 * dt;
-      tension -= (1.30 + pull * 0.30) * dt;
+      dist += pull * 0.032 * P.lineOut * dt;
+      tension -= (1.30 + pull * 0.30) * P.tensionDecay * dt;
       if (running) tension += pull * 0.30 * dt;
+      if (jumping) stamina -= (P.jumpDrain || 0) * dt;
     }
     tension = clamp(tension, 0, cap * 1.2);
     const tRatio = clamp01(tension / cap);
-    stamina = clamp01(stamina - ((0.022 + tRatio * 0.17 + (reeling ? 0.02 : 0)) * dt) / Math.max(0.4, sp.sta));
+    stamina = clamp01(stamina - ((0.022 + tRatio * 0.17 + (reeling ? 0.02 : 0)) * P.staminaDrain * dt) / Math.max(0.4, sp.sta));
 
-    if (record && record.length < 4000) record.push({ t, tr: tRatio, d: clamp01(dist), s: stamina, run: running });
+    if (record && record.length < 4000) {
+      record.push({ t, tr: tRatio, d: clamp01(dist), s: stamina, run: running, shake: shakeOn, jump: jumping });
+    }
 
     if (tension >= cap) return { r: 'snap', t };
     if (dist >= 1.0) return { r: 'escape', t };
@@ -881,16 +937,21 @@ function drawChart(rec) {
     ctx.beginPath(); ctx.moveTo(X(s), H - pad); ctx.lineTo(X(s), pad * .6); ctx.stroke();
     ctx.fillText(s + 's', X(s) - 6, H - pad + 15);
   }
-  // 突進帯
-  ctx.fillStyle = 'rgba(255,107,107,.13)';
-  let runStart = null;
-  rec.forEach((p, i) => {
-    if (p.run && runStart === null) runStart = p.t;
-    if ((!p.run || i === rec.length - 1) && runStart !== null) {
-      ctx.fillRect(X(runStart), pad * .6, Math.max(1, X(p.t) - X(runStart)), H - pad - pad * .6);
-      runStart = null;
-    }
-  });
+  // 突進・首振り・ジャンプの帯
+  const band = (key, color) => {
+    ctx.fillStyle = color;
+    let s0 = null;
+    rec.forEach((p, i) => {
+      if (p[key] && s0 === null) s0 = p.t;
+      if ((!p[key] || i === rec.length - 1) && s0 !== null) {
+        ctx.fillRect(X(s0), pad * .6, Math.max(1, X(p.t) - X(s0)), H - pad - pad * .6);
+        s0 = null;
+      }
+    });
+  };
+  band('run', 'rgba(255,107,107,.13)');
+  band('shake', 'rgba(255,184,77,.20)');
+  band('jump', 'rgba(126,224,255,.22)');
   // 閾値
   ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.setLineDash([5, 4]);
   ctx.beginPath(); ctx.moveTo(pad, Y(simState.policy)); ctx.lineTo(W - pad * .4, Y(simState.policy)); ctx.stroke();
@@ -936,7 +997,7 @@ function runTbl() {
   const bar = (v, col) => `<div class="bar"><i style="width:${(v * 100).toFixed(0)}%;background:${col}"></i></div>`;
   document.getElementById('tblOut').innerHTML = `
   <table><thead><tr>
-    <th class="l">魚</th><th class="l">レア度</th><th class="num">全長</th><th class="num">str</th><th class="num">sta</th>
+    <th class="l">魚</th><th class="l">レア度</th><th class="l">型</th><th class="num">全長</th><th class="num">str</th><th class="num">sta</th>
     <th class="num">pull0</th><th class="num">取込率</th><th style="width:90px"></th>
     <th class="num">切れ</th><th class="num">逃走</th><th class="num">時間</th><th class="l">判定</th>
   </tr></thead><tbody>
@@ -946,6 +1007,7 @@ function runTbl() {
     return `<tr>
       <td class="l name">${sp.name}</td>
       <td class="l"><span class="pill" style="color:${rcolor(sp.rarity)};background:${rcolor(sp.rarity)}1a">${rlabel(sp.rarity)}</span></td>
+      <td class="l" style="font-size:11px">${fightPattern(sp).name}</td>
       <td class="num">${f1(len)}</td><td class="num">${sp.str}</td><td class="num">${sp.sta}</td>
       <td class="num" style="color:var(--gold)">${f2(pull0)}</td>
       <td class="num">${pct(e.land)}</td><td>${bar(e.land, ok[1])}</td>
@@ -956,7 +1018,7 @@ function runTbl() {
     </tr>`;
   }).join('')}
   </tbody>
-  <tfoot><tr><td colspan="12" class="l">${rod.name}（reel ${rod.reel} / power ${rod.power}）+ ${line.name}（cap ${line.cap}）／
+  <tfoot><tr><td colspan="13" class="l">${rod.name}（reel ${rod.reel} / power ${rod.power}）+ ${line.name}（cap ${line.cap}）／
   テンション比 ${pct(tblState.policy)} で離す・反応遅れ ${tblState.delay.toFixed(2)}s・各 120 回試行</td></tr></tfoot></table>`;
 }
 
@@ -1059,6 +1121,43 @@ function runRoll() {
 }
 
 /* ============================================================
+   ファイトの型の表
+   ============================================================ */
+(function patternTable() {
+  const members = {};
+  for (const sp of SPECIES) {
+    const id = fightPattern(sp).id;
+    (members[id] = members[id] || []).push(sp);
+  }
+  const col = (v, base = 1) => {
+    if (v === undefined) return '<td class="num" style="opacity:.35">—</td>';
+    const c = v > base * 1.05 ? 'var(--bad)' : v < base * 0.95 ? 'var(--good)' : 'inherit';
+    return `<td class="num" style="color:${c}">${f2(v)}</td>`;
+  };
+  const rows = Object.values(FIGHT_PATTERNS).map((P) => {
+    const ms = (members[P.id] || []);
+    return `<tr>
+      <td class="l name">${P.name}<br><span style="opacity:.5;font-family:var(--mono);font-size:10px">${P.id}</span></td>
+      <td class="l" style="white-space:normal;color:var(--fg-dim);min-width:170px">${P.hint}</td>
+      ${col(P.runGap)}${col(P.runDur)}${col(P.runPull)}${col(P.pull)}
+      ${col(P.lineOut)}${col(P.tensionDecay)}${col(P.staminaDrain)}
+      <td class="num">${P.jump ? `跳 ×${f2(P.jumpTension)}<br><span style="opacity:.6">体力 −${f2(P.jumpDrain)}/s</span>` : P.shake ? `振 ×${f2(P.shakeGain)}<br><span style="opacity:.6">巻取 ×${f2(P.shakeReel)}</span>` : '—'}</td>
+      <td class="l" style="white-space:normal;font-size:11px">${ms.map((s) => `<span class="pill" style="color:${rcolor(s.rarity)};background:${rcolor(s.rarity)}14">${s.name}</span>`).join(' ')}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('patTable').innerHTML = `<table><thead><tr>
+    <th class="l">型</th><th class="l">体感</th>
+    <th class="num">走り<br>間隔</th><th class="num">走り<br>長さ</th><th class="num">走り<br>強さ</th>
+    <th class="num">平常<br>引き</th><th class="num">出る<br>糸</th><th class="num">張力<br>回復</th><th class="num">体力<br>減り</th>
+    <th class="num">特殊</th><th class="l">割り当て</th>
+    </tr></thead><tbody>${rows}</tbody>
+    <tfoot><tr><td colspan="11" class="l">
+      すべて既存の更新式に掛ける倍率（1.00 = 従来どおり）。<span style="color:var(--bad)">赤</span>＝プレイヤーに不利側、<span style="color:var(--good)">緑</span>＝有利側。
+      走り間隔は大きいほど走りが稀。張力回復は「離している間の減少速度」で、小さいほど休みにくい。
+    </td></tr></tfoot></table>`;
+})();
+
+/* ============================================================
    3. 魚データ表
    ============================================================ */
 (function spTables() {
@@ -1068,7 +1167,7 @@ function runRoll() {
     let sep = '';
     if (sp.rarity !== cur) {
       cur = sp.rarity;
-      sep = `<tr class="sep"><td colspan="14">${rlabel(sp.rarity)}${sp.rarity === 0 ? '（ゴミ・出現重み 0：専用抽選）' : ''}</td></tr>`;
+      sep = `<tr class="sep"><td colspan="15">${rlabel(sp.rarity)}${sp.rarity === 0 ? '（ゴミ・出現重み 0：専用抽選）' : ''}</td></tr>`;
     }
     const L = avgLen(sp);
     return sep + `<tr>
@@ -1082,6 +1181,7 @@ function runRoll() {
       <td class="num" style="color:var(--gold)">${sp.str}</td>
       <td class="num" style="color:#ff8fa3">${sp.sta}</td>
       <td class="num" style="color:#ff6b6b">${sp.agg}</td>
+      <td class="l" style="font-size:11px">${fightPattern(sp).name}</td>
       <td class="num">${sp.value}</td>
       <td class="num">${sp.perCm}</td>
       <td class="num">${valueOf(sp, L)}</td>
@@ -1093,10 +1193,10 @@ function runRoll() {
     <th class="num">全長 cm</th><th class="num">平均<br>全長</th><th class="num">水深 m</th>
     <th class="num">wc<br><span style="opacity:.6">体重係数</span></th><th class="num">平均<br>重量kg</th>
     <th class="num">str<br><span style="opacity:.6">引き</span></th><th class="num">sta<br><span style="opacity:.6">体力</span></th>
-    <th class="num">agg<br><span style="opacity:.6">突進</span></th>
+    <th class="num">agg<br><span style="opacity:.6">突進</span></th><th class="l">ファイト<br>の型</th>
     <th class="num">value<br><span style="opacity:.6">基礎額</span></th><th class="num">perCm</th><th class="num">平均<br>売値G</th>
     <th class="l">タグ</th></tr></thead><tbody>${rows}</tbody>
-    <tfoot><tr><td colspan="14" class="l">平均全長 = 範囲の 32%（<code>random()^2.1</code> の期待値）。平均重量・売値はその全長での計算値。</td></tr></tfoot></table>`;
+    <tfoot><tr><td colspan="15" class="l">平均全長 = 範囲の 32%（<code>random()^2.1</code> の期待値）。平均重量・売値はその全長での計算値。</td></tr></tfoot></table>`;
 
   // 時間帯・天候
   const cell = (v) => `<td class="num" style="color:${v >= 1.3 ? 'var(--good)' : v <= 0.5 ? 'var(--bad)' : v < 1 ? 'var(--warn)' : 'inherit'}">${f2(v)}</td>`;
