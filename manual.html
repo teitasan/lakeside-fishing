@@ -404,9 +404,9 @@ depth &gt; d1 + <span class="n">3</span>             → <span class="n">0.18</s
 
 <span class="cm">// ⑥ σ = max(2.5, (d1 − d0) × 0.75)、エサ層 = min(bait.depth, max(0.35, 水深 − 0.35))</span>
 
-<span class="cm">// ⑦ レベル解禁</span>
-レア度4（エピック）  × clamp01((Lv − <span class="n">2</span>) / <span class="n">5</span>)    <span class="cm">// Lv3 から出始め Lv7 で全開</span>
-レア度5（レジェンド）× clamp01((Lv − <span class="n">5</span>) / <span class="n">6</span>)    <span class="cm">// Lv6 から出始め Lv11 で全開</span></pre>
+<span class="cm">// ⑦ レベル解禁（伝説タグ以外は下限 0.03 = 解禁前でも極低確率で掛かる）</span>
+レア度4（エピック）  × max(<span class="n">0.03</span>, clamp01((Lv − <span class="n">2</span>) / <span class="n">5</span>))   <span class="cm">// Lv3 から出始め Lv7 で全開</span>
+レア度5（レジェンド）× clamp01((Lv − <span class="n">5</span>) / <span class="n">6</span>)           <span class="cm">// 湖の主・白龍魚は tags に legend → 下限なし</span></pre>
 
     <div class="note">
       <b>エサ相性（⑤）</b>は、魚の <code>tags</code> のうちエサの <code>aff</code> に載っているものの<b>平均</b>です。
@@ -457,8 +457,9 @@ depth &gt; d1 + <span class="n">3</span>             → <span class="n">0.18</s
         <b>見えている魚種＝その場所・その時刻に釣れる魚</b>の目安になります。最初は自分の周り 6〜52 m に配置され、
         78 m 以上離れる／水深 0.35 m 未満に乗り上げると 26〜58 m 先へ入れ替わります。</p></div>
       <div class="card tight"><h4>ただし条件は違う</h4><p>泳いでいる魚の抽選には<b>エサ・エサの層・ロッド・レベル解禁が掛かりません</b>。
-        つまり Lv1 でも<b>レジェンドが泳いでいるのは見えます</b>が、アタリの抽選では
-        レア度 4 が Lv3〜7、レア度 5 が Lv6〜11 で徐々に解禁されるため、まだ食いつきません。</p></div>
+        つまり Lv1 でも<b>レジェンドが泳いでいるのは見えます</b>。アタリの抽選ではレア度 4 が Lv3〜7、
+        レア度 5 が Lv6〜11 で解禁されますが、<b>伝説（湖の主・白龍魚）以外は解禁前も重み 0.03 で残る</b>ので、
+        Lv1 でもエピックが掛かることがあります。</p></div>
     </div>
 
     <h3>魚が逃げる条件</h3>
@@ -1118,7 +1119,12 @@ function biteWeights({ depth, hour, weather, baitId, rodId, level }) {
     parts.layer = 0.14 + 1.4 * Math.exp(-((baitDepth - mid) ** 2) / (2 * spread * spread));
     parts.rare = sp.rarity >= 3 ? bait.rare : 1;
     parts.attract = rod.attract;
-    parts.lv = sp.rarity === 4 ? clamp01((level - 2) / 5) : sp.rarity === 5 ? clamp01((level - 5) / 6) : 1;
+    // レベル解禁：伝説タグ以外は解禁前も 0.03 の重みで残る（ゲーム本体の LV_FLOOR）
+    const gate = (from, span) => {
+      const g = clamp01((level - from) / span);
+      return sp.tags.includes('legend') ? g : Math.max(0.03, g);
+    };
+    parts.lv = sp.rarity === 4 ? gate(2, 5) : sp.rarity === 5 ? gate(5, 6) : 1;
     w = sp.spawn * fit * parts.time * parts.weather * parts.aff * parts.layer * parts.rare * parts.attract * parts.lv;
     return { sp, w, parts, baitDepth };
   });
@@ -1273,7 +1279,10 @@ function runRoll() {
       <td class="l"><span class="pill" style="color:${rcolor(sp.rarity)};background:${rcolor(sp.rarity)}1a">${rlabel(sp.rarity)}</span></td>
       ${cell(sp.times.dawn)}${cell(sp.times.day)}${cell(sp.times.dusk)}${cell(sp.times.night)}
       ${cell(sp.weather.clear)}${cell(sp.weather.cloudy)}${cell(sp.weather.rain)}
-      <td class="num">${sp.rarity >= 4 ? (sp.rarity === 4 ? 'Lv3〜7' : 'Lv6〜11') : '—'}</td>
+      <td class="num">${sp.rarity >= 4
+        ? (sp.rarity === 4 ? 'Lv3〜7' : 'Lv6〜11')
+          + (sp.tags.includes('legend') ? '' : '<br><span style="opacity:.55;font-size:10px">前も 0.03</span>')
+        : '—'}</td>
     </tr>`).join('');
   document.getElementById('spTable2').innerHTML = `<table><thead><tr>
     <th class="l">魚</th><th class="l">レア度</th>

@@ -31,6 +31,8 @@ const CAST_TOL = 0.06;         // 目印に合っていると見なすパワー�
 const HOURS_PER_SEC = 24 / 720;   // 実時間12分で1日
 const MAX_LINE = 62;
 const EYE_H = 1.62;
+/* レベル解禁前でも残る重みの下限（伝説タグの魚は対象外＝完全に解禁待ち） */
+const LV_FLOOR = 0.03;
 /* カメラ距離（三人称）。CAM_MIN からさらに手前へ回すと一人称 */
 const CAM_MIN = 1.6;
 const CAM_MAX = 9;
@@ -512,10 +514,17 @@ export class Game {
         w *= 0.14 + 1.4 * Math.exp(-((baitDepth - mid) ** 2) / (2 * spread * spread));
         if (sp.rarity >= 3) w *= bait.rare;
         w *= this.rod.attract;
-        // 序盤に強すぎる魚が来て理不尽にならないよう、レベルで解禁
+        /* 序盤に強すぎる魚が来て理不尽にならないよう、レベルで解禁。
+           ただし伝説（湖の主・白龍魚）以外は解禁前も LV_FLOOR の重みで抽選に残し、
+           「レベルが足りないうちに掛かってしまう大物」が極低確率で起きるようにする
+           （道具が足りなければ切られるが、それはそれで一つの体験） */
         const lv = this.state.level;
-        if (sp.rarity === 4) w *= clamp01((lv - 2) / 5);
-        if (sp.rarity === 5) w *= clamp01((lv - 5) / 6);
+        const gate = (from, span) => {
+          const g = clamp01((lv - from) / span);
+          return sp.tags.includes('legend') ? g : Math.max(LV_FLOOR, g);
+        };
+        if (sp.rarity === 4) w *= gate(2, 5);
+        if (sp.rarity === 5) w *= gate(5, 6);
       }
       return w;
     });
