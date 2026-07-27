@@ -273,11 +273,14 @@ export class Debug {
     if (this.playerRing) {
       this.playerRing.position.set(g.pos.x, g.visY + 0.05, g.pos.z);
     }
-    if (this.blockBoxes) {
-      // いま糸が桟橋を貫通しているかで色を変える
+    // いま糸が何かを貫通しているか
+    this.lineObstruct = null;
+    if (g.fs !== 'idle') {
       const tip = g.angler.getRodTip(_v);
-      const hit = g.fs !== 'idle' && g.terrain.dockBlocksSegment(
-        tip.x, tip.y, tip.z, g.bobber.x, g.bobber.y, g.bobber.z);
+      this.lineObstruct = g.lineObstruction(tip, g.bobber, 0.62);
+    }
+    if (this.blockBoxes) {
+      const hit = this.lineObstruct === 'dock';
       for (const b of this.blockBoxes) b.material.color.setHex(hit ? 0xffffff : 0xff5a4a);
     }
     if (this.baitMark) {
@@ -336,6 +339,7 @@ ${kv('yaw/pitch', `${g.yaw.toFixed(2)} / ${g.pitch.toFixed(2)}`)}${kv('move', fm
 ${kv('bite in', g.fs === 'wait' ? fmt1(Math.max(0, g.biteTimer)) + 's' : '—')}${kv('approach', g.hookFish ? fmt1(g.approachT) + 's' : '—')}
 ${kv('depth', fmt1(g.hudDepth) + ' m')}${kv('bait depth', ['wait', 'nibble', 'bite'].includes(g.fs) ? fmt1(-g.baitY) + ' m' : '—')}
 ${kv('charge', fmt2(g.charge))}${kv('cast dist', fmt1(g.castDist) + ' m')}
+${kv('line hit', this.lineObstruct ? `<span class="bad">${this.lineObstruct}</span>` : 'clear')}${kv('cast warn', g.fs === 'charge' && g.castObstruction ? `<span class="bad">${g.castObstruction}</span>` : '—')}
 ${kv('hooked', g.hookFish ? `${g.hookFish.species.name} ${fmt1(g.hookFish.length)}cm` : '—')}
 ${F ? `${kv('dist', fmt2(F.dist))}${kv('tension', `${fmt2(F.tension)} / ${g.line.cap} (${(F.tension / g.line.cap * 100).toFixed(0)}%)`)}
 ${kv('stamina', fmt2(F.stamina))}${kv('pull0', fmt2(F.pull0))}

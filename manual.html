@@ -475,8 +475,28 @@ power = 往復値
 糸の最大長 = <span class="n">62</span> m（超えるとその場で着水／待機中に超えると強制回収）</pre>
     <p class="src">src/game.js — _castVelocity(), _predictLanding(), MAX_LINE</p>
     <div class="grid c2">
-      <div class="card tight"><h4>飛距離の目安</h4><p>視点を水平にした全力キャストで <b>約 45 m</b>、パワー 50% で約 15 m。ためている間に表示される<b>着水予測リング</b>は、この式を 0.045 秒刻みで積分した実際の落下点です（表示水深も同地点の値）。</p></div>
+      <div class="card tight"><h4>飛距離の目安</h4><p>視点を水平にした全力キャストで <b>約 45 m</b>、パワー 50% で約 15 m。ためている間に表示される<b>着水予測リング</b>は、この式を 0.055 秒刻みで積分した実際の落下点です（表示水深も同地点の値）。</p></div>
       <div class="card tight"><h4>好キャストの効果</h4><p>驚かす半径が 2.6+ → <b>1.4 m</b> に縮小、アタリまでの時間が <b>÷1.18</b>。</p></div>
+    </div>
+
+    <h4>糸が掛かる判定</h4>
+    <p>
+      糸（ロッド先端 → ウキ）が<b>桟橋・陸の張り出し・岩</b>を貫通する向きには投げられません。
+      ためている間に判定して<b>着水予測リングが赤くなり</b>、それでも投げると着水時に
+      「〜に糸が掛かった」で自動回収されます。待機中に歩いて障害物を挟んだ場合も同じです。
+    </p>
+    <pre><span class="cm">// 桟橋：線分 vs OBB（スラブ法）。床（桁を含む厚み）と先端の手すりの2箱</span>
+床  : along[<span class="n">0</span>, 長さ] × side[−<span class="n">1.62</span>, <span class="n">1.62</span>] × y[床−<span class="n">0.42</span>, 床+<span class="n">0.18</span>]
+手すり: along[長さ−<span class="n">2.3</span>, 長さ] × 同 × y[床−<span class="n">0.42</span>, 床+<span class="n">1.05</span>]
+
+<span class="cm">// 地形・岩：たるみ込みの曲線を 1.6m 刻みでサンプリング</span>
+サンプル数 = clamp(ceil(距離 / <span class="n">1.6</span>), <span class="n">8</span>, <span class="n">40</span>)
+y(t) = lerp(先端, 着水点, t) − sin(πt) × min(距離×<span class="n">0.16</span>, <span class="n">1.2</span>) × たるみ
+掛かる条件: y(t) + <span class="n">0.22</span> &lt; 地面の高さ（または岩の上端）</pre>
+    <p class="src">src/terrain.js — dockBlocksSegment(), lineBlocked()</p>
+    <div class="note">
+      判定に <b>0.22 m の余裕</b>を入れているので、岸をかすめる程度では掛かりません。
+      岩は<b>実際の当たり判定の円＋上端の高さ</b>を使っており、デバッグ表示（<kbd>F3</kbd>）で可視化できます。
     </div>
   </section>
 

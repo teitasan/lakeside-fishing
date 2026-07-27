@@ -521,14 +521,14 @@ export class Game {
     this.angler.getRodTip(_v1);
     _v2.copy(_v1);
     this._castVelocity(power, _v3);
-    const dt = 0.045;
-    for (let i = 0; i < 200; i++) {
+    // マーカー用の概算なので、水面は y=0 とみなして地形サンプルを半分に減らす
+    const dt = 0.055;
+    for (let i = 0; i < 160; i++) {
       _v3.y -= GRAVITY * dt;
       _v3.multiplyScalar(1 - 0.055 * dt * _v3.length() * 0.1);
       _v2.addScaledVector(_v3, dt);
       const ground = this.terrain.heightAt(_v2.x, _v2.z);
-      const surf = ground < 0 ? this.water.surfaceY(_v2.x, _v2.z) : ground;
-      if (_v2.y <= surf) break;
+      if (_v2.y <= (ground < 0 ? 0 : ground)) break;
       if (_v2.distanceTo(_v1) > MAX_LINE) break;
     }
     return out.copy(_v2);
@@ -558,10 +558,28 @@ export class Game {
     return this.terrain.dockBlocksSegment(tip.x, tip.y, tip.z, end.x, end.y, end.z);
   }
 
+  /**
+   * 糸が何かを貫通しているか。'dock' | 'terrain' | 'rock' | null
+   * 桟橋・陸の張り出し・岩を同じ枠組みで扱う。
+   */
+  lineObstruction(tip, end, slack = 0.5) {
+    if (this._lineHitsDock(tip, end)) return 'dock';
+    const hit = this.terrain.lineBlocked(tip.x, tip.y, tip.z, end.x, end.y, end.z, { slack });
+    return hit ? hit.kind : null;
+  }
+
   _snagOnDock(msg) {
     this.ui.toast(msg, 'bad');
     this.audio.deny();
     this._retrieve();
+  }
+
+  /** 障害の種類に応じたメッセージで回収 */
+  _snagLine(kind) {
+    const msg = kind === 'dock' ? '桟橋に糸が掛かった…回収します'
+      : kind === 'rock' ? '岩に糸が掛かった…回収します'
+        : '陸に糸が掛かった…回収します';
+    this._snagOnDock(msg);
   }
 
   /* ---------------- 回収 ---------------- */
@@ -867,22 +885,32 @@ export class Game {
 
       /* ---------------- 力をためる ---------------- */
       case 'charge': {
+        if (this.stateTime < dt * 1.5) { this.castObstruction = null; this._obsCheckT = 1; }
         const rate = 1.05;
         this.charge += this.chargeDir * rate * dt;
         if (this.charge >= 1) { this.charge = 1; this.chargeDir = -1; }
         if (this.charge <= 0.02) { this.charge = 0.02; this.chargeDir = 1; }
         ui.showPower(true, this.charge);
         ui.setPrompt('離してキャスト！ <b>目印（白線）</b>付近が好キャスト');
-        // 着水点予測（桟橋を挟む場合は赤くして知らせる）
+        // 着水点予測（糸が何かに掛かる場合は赤くして知らせる）
         this._predictLanding(this.charge, _v2);
         const d = this.terrain.depthAt(_v2.x, _v2.z);
-        const overDock = this._lineHitsDock(_v1, _v2);
+        // 糸の判定は毎フレームやると重いので 12Hz で更新
+        this._obsCheckT = (this._obsCheckT || 0) + dt;
+        if (this._obsCheckT > 0.08) {
+          this._obsCheckT = 0;
+          this.castObstruction = d > 0.25 ? this.lineObstruction(_v1, _v2, 0.62) : null;
+        }
+        const obstruct = this.castObstruction;
         this.hudDepth = d;
         this.marker.visible = true;
         this.marker.position.set(_v2.x, (d > 0 ? this.water.surfaceY(_v2.x, _v2.z) : this.terrain.heightAt(_v2.x, _v2.z)) + 0.06, _v2.z);
         this.marker.scale.setScalar(1 + (1 - this.charge) * 0.5);
-        this.marker.material.color.setHex(overDock ? 0xff5a4a : d > 0.4 ? 0xfff0b0 : 0xff8a6a);
-        if (overDock) ui.setPrompt('⚠ <b>桟橋が邪魔</b>：このままだと糸が掛かります');
+        this.marker.material.color.setHex(obstruct ? 0xff5a4a : d > 0.4 ? 0xfff0b0 : 0xff8a6a);
+        if (obstruct) {
+          const what = obstruct === 'dock' ? '桟橋' : obstruct === 'rock' ? '岩' : '陸';
+          ui.setPrompt(`⚠ <b>${what}が邪魔</b>：このままだと糸が掛かります`);
+        }
         bob.visible = false;
         this.angler.hideLine();
         break;
@@ -986,10 +1014,10 @@ export class Game {
           this._retrieve();
           break;
         }
-        // 歩いて桟橋を挟んでしまったら糸が掛かる
-        if (this.moveAmt > 0.02 && this._lineHitsDock(_v1, this.bobber)) {
-          this._snagOnDock('桟橋に糸が掛かった…回収します');
-          break;
+        // 歩いて障害物を挟んでしまったら糸が掛かる
+        if (this.moveAmt > 0.02) {
+          const obs = this.lineObstruction(_v1, this.bobber, 0.62);
+          if (obs) { this._snagLine(obs); break; }
         }
 
         // アタリ抽選
@@ -1086,9 +1114,10 @@ export class Game {
   /* ---------------- 着水 ---------------- */
   _onLandWater() {
     const x = this.bobber.x, z = this.bobber.z;
-    // 桟橋を挟んで着水した場合は糸が桟橋に掛かっている
-    if (this._lineHitsDock(this.angler.getRodTip(_v1), this.bobber)) {
-      this._snagOnDock('桟橋越しには投げられない…回収します');
+    // 桟橋・陸の張り出し・岩を挟んで着水した場合は糸が掛かっている
+    const obstruct = this.lineObstruction(this.angler.getRodTip(_v1), this.bobber, 0.62);
+    if (obstruct) {
+      this._snagLine(obstruct);
       return;
     }
     this.fs = 'wait';

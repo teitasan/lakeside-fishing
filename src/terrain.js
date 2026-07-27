@@ -296,7 +296,7 @@ export class Terrain {
     this.lampLight = new THREE.PointLight(0xffb060, 0, 26, 2);
     this.lampLight.position.copy(bulb.position);
     g.add(this.lampLight);
-    this.addObstacle(lampBase.x, lampBase.z, 0.26);
+    this.addObstacle(lampBase.x, lampBase.z, 0.26, this.dockY + 2.3);
 
     // 小舟（雰囲気）
     const boat = new THREE.Group();
@@ -321,7 +321,7 @@ export class Terrain {
     g.add(boat);
     // 小舟にも当たり判定（船体に沿って2点）
     for (const t of [-0.9, 0.9]) {
-      this.addObstacle(boat.position.x + dir.x * t, boat.position.z + dir.z * t, 0.85);
+      this.addObstacle(boat.position.x + dir.x * t, boat.position.z + dir.z * t, 0.85, boat.position.y + 0.95);
     }
 
     this.dock = g;
@@ -374,12 +374,13 @@ export class Terrain {
   }
 
   /* ---------------- 障害物（岩・木） ---------------- */
-  addObstacle(x, z, r) {
-    this.obstacles.push(x, z, r);
+  /** @param top 上端の高さ（糸の判定に使う） */
+  addObstacle(x, z, r, top = 0) {
+    this.obstacles.push(x, z, r, top);
     const key = ((Math.floor(x / OBS_CELL) & 1023) << 10) | (Math.floor(z / OBS_CELL) & 1023);
     let arr = this._obsGrid.get(key);
     if (!arr) { arr = []; this._obsGrid.set(key, arr); }
-    arr.push(this.obstacles.length - 3);
+    arr.push(this.obstacles.length - 4);
   }
 
   /** (x,z) が半径 rad の円として障害物にぶつかるか */
@@ -398,6 +399,51 @@ export class Terrain {
       }
     }
     return false;
+  }
+
+  /** (x,z) を覆っている障害物の上端の最大値（無ければ -Infinity） */
+  obstacleTopAt(x, z) {
+    const cx = Math.floor(x / OBS_CELL), cz = Math.floor(z / OBS_CELL);
+    const o = this.obstacles;
+    let top = -Infinity;
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const arr = this._obsGrid.get((((cx + dx) & 1023) << 10) | ((cz + dz) & 1023));
+        if (!arr) continue;
+        for (let k = 0; k < arr.length; k++) {
+          const i = arr[k];
+          const ddx = x - o[i], ddz = z - o[i + 1], rr = o[i + 2];
+          if (ddx * ddx + ddz * ddz < rr * rr && o[i + 3] > top) top = o[i + 3];
+        }
+      }
+    }
+    return top;
+  }
+
+  /**
+   * 糸（ロッド先端 → 到達点）が地形や岩を貫通するか。
+   * たるみ（sag）も考慮した曲線でサンプリングする。
+   * @returns {null|{x:number,y:number,z:number,ground:number,kind:string}}
+   */
+  lineBlocked(x0, y0, z0, x1, y1, z1, opts = {}) {
+    const tol = opts.tol ?? 0.22;
+    const slack = opts.slack ?? 0.5;
+    const dx = x1 - x0, dz = z1 - z0;
+    const dist = Math.hypot(dx, dz, y1 - y0);
+    if (dist < 1) return null;
+    const sag = Math.min(dist * 0.16, 1.2) * slack;
+    // 地形の細部ノイズは波長 18m 程度なので 1.6m 刻みで十分
+    const N = Math.min(40, Math.max(8, Math.ceil(dist / 1.6)));
+    for (let i = 1; i < N; i++) {
+      const t = i / N;
+      const x = x0 + dx * t, z = z0 + dz * t;
+      const y = y0 + (y1 - y0) * t - Math.sin(t * Math.PI) * sag;
+      const g = this.heightAt(x, z);
+      if (y + tol < g) return { x, y, z, ground: g, kind: 'terrain' };
+      const ot = this.obstacleTopAt(x, z);
+      if (ot > -Infinity && y + tol < ot) return { x, y, z, ground: ot, kind: 'rock' };
+    }
+    return null;
   }
 
   /* ---------------- 岸辺の装飾 ---------------- */
@@ -447,8 +493,8 @@ export class Terrain {
       s.set(tsx, scale, tsz);
       m.compose(p, qt, s);
       trunks.setMatrixAt(ti, m);
-      // 幹の当たり判定（根元の半径 0.34 × スケール）
-      this.addObstacle(x, z, Math.max(tsx, tsz) * 0.34 * 0.62);
+      // 幹の当たり判定（根元の半径 0.34 × スケール／上端は幹の高さ）
+      this.addObstacle(x, z, Math.max(tsx, tsz) * 0.34 * 0.62, h - 0.2 + scale * 0.95);
 
       // 葉（2段の円錐）
       const cold = clamp01((h - 30) / 40);
@@ -498,8 +544,10 @@ export class Terrain {
       s.set(rsx, rsy, rsz);
       m.compose(p, qt, s);
       rocks.setMatrixAt(ri++, m);
-      // 岩の当たり判定（水中の小石は無視）
-      if (h > -0.9 && sc > 0.65) this.addObstacle(x, z, Math.max(rsx, rsz) * 0.72);
+      // 岩の当たり判定（水中の小石は無視／上端は岩の高さ）
+      if (h > -0.9 && sc > 0.65) {
+        this.addObstacle(x, z, Math.max(rsx, rsz) * 0.72, h + sc * 0.15 + rsy * 0.82);
+      }
     }
     rocks.count = ri;
     rocks.instanceMatrix.needsUpdate = true;
