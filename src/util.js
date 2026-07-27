@@ -127,6 +127,8 @@ export function makeNoise2D(seed = 1337) {
 export const fmtInt = (n) => Math.round(n).toLocaleString('ja-JP');
 export const fmt1 = (n) => (Math.round(n * 10) / 10).toFixed(1);
 export const fmt2 = (n) => (Math.round(n * 100) / 100).toFixed(2);
+/** 重さ：小物（100g 未満）は g 表示にする（0.00 kg にならないように） */
+export const fmtWeight = (kg) => (kg < 0.1 ? `${Math.max(1, Math.round(kg * 1000))} g` : `${fmt2(kg)} kg`);
 
 export function fmtClock(hour) {
   const h = Math.floor(hour) % 24;

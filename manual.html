@@ -404,8 +404,8 @@ depth &gt; d1 + <span class="n">3</span>             → <span class="n">0.18</s
 
 <span class="cm">// ⑥ σ = max(2.5, (d1 − d0) × 0.75)、エサ層 = min(bait.depth, max(0.35, 水深 − 0.35))</span>
 
-<span class="cm">// ⑦ レベル解禁（伝説タグ以外は下限 0.03 = 解禁前でも極低確率で掛かる）</span>
-レア度4（エピック）  × max(<span class="n">0.03</span>, clamp01((Lv − <span class="n">2</span>) / <span class="n">5</span>))   <span class="cm">// Lv3 から出始め Lv7 で全開</span>
+<span class="cm">// ⑦ レベル解禁（伝説タグ以外は下限 0.022 = 解禁前でも極低確率で掛かる）</span>
+レア度4（エピック）  × max(<span class="n">0.022</span>, clamp01((Lv − <span class="n">2</span>) / <span class="n">5</span>))  <span class="cm">// Lv3 から出始め Lv7 で全開</span>
 レア度5（レジェンド）× clamp01((Lv − <span class="n">5</span>) / <span class="n">6</span>)           <span class="cm">// 湖の主・白龍魚は tags に legend → 下限なし</span></pre>
 
     <div class="note">
@@ -458,7 +458,7 @@ depth &gt; d1 + <span class="n">3</span>             → <span class="n">0.18</s
         78 m 以上離れる／水深 0.35 m 未満に乗り上げると 26〜58 m 先へ入れ替わります。</p></div>
       <div class="card tight"><h4>ただし条件は違う</h4><p>泳いでいる魚の抽選には<b>エサ・エサの層・ロッド・レベル解禁が掛かりません</b>。
         つまり Lv1 でも<b>レジェンドが泳いでいるのは見えます</b>。アタリの抽選ではレア度 4 が Lv3〜7、
-        レア度 5 が Lv6〜11 で解禁されますが、<b>伝説（湖の主・白龍魚）以外は解禁前も重み 0.03 で残る</b>ので、
+        レア度 5 が Lv6〜11 で解禁されますが、<b>伝説（湖の主・白龍魚）以外は解禁前も重み 0.022 で残る</b>ので、
         Lv1 でもエピックが掛かることがあります。</p></div>
     </div>
 
@@ -491,10 +491,14 @@ depth &gt; d1 + <span class="n">3</span>             → <span class="n">0.18</s
 
   <!-- ============================================================ -->
   <section id="s3">
-    <h2><span class="num">3</span>魚データ（全 22 種）</h2>
+    <h2><span class="num">3</span>魚データ（全 34 種）</h2>
     <p>
       <code>src/data.js</code> の <code>SPECIES</code> をそのまま表にしています。
       <b>str</b>＝引きの強さ、<b>sta</b>＝体力（粘り）、<b>agg</b>＝突進頻度。
+      内訳は<b>魚 30 種＋ゴミ 4 種</b>で、魚のうち 3 種は甲殻類（テナガエビ・ザリガニ・モクズガニ）です。
+      甲殻類は体型が魚と違うため専用メッシュで作られ、<code>shape</code> が
+      <code>shrimp / crayfish / crab</code> になっています（扱いは魚と同じ。図鑑でも「魚」として数えます）。
+      カニの <code>len</code> は甲幅、<code>wc</code> はそれに合わせた係数です。
     </p>
     <div class="tw tall" id="spTable"></div>
 
@@ -761,6 +765,8 @@ const lerp = (a, b, t) => a + (b - a) * t;
 const f1 = (n) => (Math.round(n * 10) / 10).toFixed(1);
 const f2 = (n) => (Math.round(n * 100) / 100).toFixed(2);
 const pct = (n) => (n * 100).toFixed(0) + '%';
+// 小物は 0.00 kg になってしまうので g 表示に切り替える（ゲーム本体の fmtWeight と同じ）
+const fw = (kg) => (kg < 0.1 ? `${Math.max(1, Math.round(kg * 1000))} g` : f2(kg) + ' kg');
 
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
 
@@ -1119,10 +1125,10 @@ function biteWeights({ depth, hour, weather, baitId, rodId, level }) {
     parts.layer = 0.14 + 1.4 * Math.exp(-((baitDepth - mid) ** 2) / (2 * spread * spread));
     parts.rare = sp.rarity >= 3 ? bait.rare : 1;
     parts.attract = rod.attract;
-    // レベル解禁：伝説タグ以外は解禁前も 0.03 の重みで残る（ゲーム本体の LV_FLOOR）
+    // レベル解禁：伝説タグ以外は解禁前も 0.022 の重みで残る（ゲーム本体の LV_FLOOR）
     const gate = (from, span) => {
       const g = clamp01((level - from) / span);
-      return sp.tags.includes('legend') ? g : Math.max(0.03, g);
+      return sp.tags.includes('legend') ? g : Math.max(0.022, g);
     };
     parts.lv = sp.rarity === 4 ? gate(2, 5) : sp.rarity === 5 ? gate(5, 6) : 1;
     w = sp.spawn * fit * parts.time * parts.weather * parts.aff * parts.layer * parts.rare * parts.attract * parts.lv;
@@ -1251,7 +1257,7 @@ function runRoll() {
       <td class="num">${f1(L)}</td>
       <td class="num">${sp.depth[0]}–${sp.depth[1]}</td>
       <td class="num">${sp.wc}</td>
-      <td class="num">${f2(weightOf(sp, L))}</td>
+      <td class="num">${fw(weightOf(sp, L))}</td>
       <td class="num" style="color:var(--gold)">${sp.str}</td>
       <td class="num" style="color:#ff8fa3">${sp.sta}</td>
       <td class="num" style="color:#ff6b6b">${sp.agg}</td>
@@ -1265,7 +1271,7 @@ function runRoll() {
   document.getElementById('spTable').innerHTML = `<table><thead><tr>
     <th class="l">魚</th><th class="num">spawn<br><span style="opacity:.6">基礎出現</span></th>
     <th class="num">全長 cm</th><th class="num">平均<br>全長</th><th class="num">水深 m</th>
-    <th class="num">wc<br><span style="opacity:.6">体重係数</span></th><th class="num">平均<br>重量kg</th>
+    <th class="num">wc<br><span style="opacity:.6">体重係数</span></th><th class="num">平均<br>重量</th>
     <th class="num">str<br><span style="opacity:.6">引き</span></th><th class="num">sta<br><span style="opacity:.6">体力</span></th>
     <th class="num">agg<br><span style="opacity:.6">突進</span></th><th class="l">ファイト<br>の型</th>
     <th class="num">value<br><span style="opacity:.6">基礎額</span></th><th class="num">perCm</th><th class="num">平均<br>売値G</th>
@@ -1281,7 +1287,7 @@ function runRoll() {
       ${cell(sp.weather.clear)}${cell(sp.weather.cloudy)}${cell(sp.weather.rain)}
       <td class="num">${sp.rarity >= 4
         ? (sp.rarity === 4 ? 'Lv3〜7' : 'Lv6〜11')
-          + (sp.tags.includes('legend') ? '' : '<br><span style="opacity:.55;font-size:10px">前も 0.03</span>')
+          + (sp.tags.includes('legend') ? '' : '<br><span style="opacity:.55;font-size:10px">前も 0.022</span>')
         : '—'}</td>
     </tr>`).join('');
   document.getElementById('spTable2').innerHTML = `<table><thead><tr>
@@ -1295,7 +1301,7 @@ function runRoll() {
   const rows3 = samples.map((id) => {
     const sp = SPECIES.find((s) => s.id === id);
     const cells = [sp.len[0], avgLen(sp), sp.len[0] + (sp.len[1] - sp.len[0]) * 0.8, sp.len[1]].map((L) =>
-      `<td class="num">${f1(L)}cm<br><span style="color:var(--fg-mute)">${f2(weightOf(sp, L))}kg</span><br>
+      `<td class="num">${f1(L)}cm<br><span style="color:var(--fg-mute)">${fw(weightOf(sp, L))}</span><br>
        <span style="color:var(--gold)">${valueOf(sp, L)}G</span><br><span style="color:var(--cyan)">+${xpOf(sp, L)}xp</span></td>`).join('');
     return `<tr><td class="l name">${sp.name}</td>
       <td class="l"><span class="pill" style="color:${rcolor(sp.rarity)};background:${rcolor(sp.rarity)}1a">${rlabel(sp.rarity)}</span></td>${cells}</tr>`;

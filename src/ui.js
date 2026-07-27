@@ -2,8 +2,8 @@
    HUD / モーダル / 図鑑・ショップ
    =========================================================== */
 import { SPECIES, RARITY, GEAR, GEAR_LABEL, ACHIEVEMENTS, valueOf } from './data.js';
-import { PROFILES, BODY, profileAt } from './fish.js';
-import { fmtInt, fmt1, fmt2, fmtClock, timeBandLabel, clamp01 } from './util.js';
+import { PROFILES, BODY, profileAt, CRUST_SHAPES } from './fish.js';
+import { fmtInt, fmt1, fmtWeight, fmtClock, timeBandLabel, clamp01 } from './util.js';
 import { xpForLevel } from './save.js';
 
 const $ = (id) => document.getElementById(id);
@@ -32,6 +32,8 @@ export function drawFishIcon(canvas, sp, opts = {}) {
     ctx.fillText(JUNK_EMOJI[sp.id] || '🗑️', W / 2, H * 0.54);
     return;
   }
+
+  if (CRUST_SHAPES.includes(sp.shape)) { drawCrustIcon(ctx, sp, W, H); return; }
 
   const prof = PROFILES[sp.shape] || PROFILES.slim;
   const B = BODY[sp.shape] || BODY.slim;
@@ -129,6 +131,122 @@ export function drawFishIcon(canvas, sp, opts = {}) {
   ctx.moveTo(nose - L * 0.02, cy + bodyH * 0.02);
   ctx.lineTo(nose - L * (sp.shape === 'gar' ? 0.14 : 0.08), cy + bodyH * 0.09);
   ctx.stroke();
+}
+
+/* ---------------- 甲殻類のシルエット（エビ・ザリガニは横から、カニは正面から） ---------------- */
+function drawCrustIcon(ctx, sp, W, H) {
+  const c = sp.colors;
+  const seg = (pts, w, col) => {
+    ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])));
+    ctx.stroke();
+  };
+  const ell = (x, y, rx, ry, rot, fill) => {
+    ctx.fillStyle = fill;
+    ctx.beginPath(); ctx.ellipse(x, y, rx, ry, rot, 0, Math.PI * 2); ctx.fill();
+  };
+
+  if (sp.shape === 'crab') {
+    /* 正面から見たカニ（横に広い甲羅・左右に脚・前にハサミ） */
+    const u = Math.min(W / 78, H / 44);            // 基準寸法
+    const cx = W * 0.5, cy = H * 0.54;
+    const cw = 20 * u, ch = 11 * u;
+    // 脚（甲羅の後ろに描く）
+    for (const sg of [1, -1]) {
+      for (let i = 0; i < 4; i++) {
+        const t = i / 3;
+        const bx = cx + sg * cw * (0.45 + t * 0.4), by = cy - ch * (0.3 - t * 0.5);
+        const kx = cx + sg * cw * (1.05 + t * 0.42), ky = cy + ch * (0.15 + t * 0.28);
+        seg([[bx, by], [kx, ky], [kx + sg * cw * 0.16, ky + ch * (0.95 - t * 0.25)]], 2.1 * u, c.fin);
+      }
+      // ハサミ（前に持ち上げる）
+      const ax = cx + sg * cw * 0.5, ay = cy + ch * 0.35;
+      const ex = cx + sg * cw * 1.0, ey = cy + ch * 1.05;
+      seg([[ax, ay], [ex, ey]], 3 * u, c.mid);
+      ell(ex + sg * cw * 0.16, ey + ch * 0.1, cw * 0.2, ch * 0.24, sg * 0.5, c.mid);
+      seg([[ex + sg * cw * 0.26, ey - ch * 0.02], [ex + sg * cw * 0.44, ey - ch * 0.22]], 2.2 * u, c.belly);
+    }
+    // 甲羅
+    ell(cx, cy, cw, ch, 0, c.mid);
+    ctx.save();
+    ctx.beginPath(); ctx.ellipse(cx, cy, cw, ch, 0, 0, Math.PI * 2); ctx.clip();
+    ell(cx, cy - ch * 0.75, cw * 0.95, ch * 0.8, 0, c.top);     // 甲の上半分を濃く
+    ctx.restore();
+    // 目
+    for (const sg of [1, -1]) ell(cx + sg * cw * 0.34, cy + ch * 0.1, 1.9 * u, 1.9 * u, 0, '#101014');
+    return;
+  }
+
+  /* エビ・ザリガニ（頭が右） */
+  const crayfish = sp.shape === 'crayfish';
+  const u = Math.min(W / 86, H / 40);
+  const cx = W * 0.47, cy = H * 0.5;
+  const bl = 30 * u;                                   // 頭から尾までの半分ほど
+  const bh = (crayfish ? 6.2 : 5.2) * u;               // 胴の太さ
+
+  // 触角（背景側）
+  for (const sg of [1, -1]) {
+    ctx.strokeStyle = c.top; ctx.lineWidth = 1.2 * u; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(cx + bl * 0.6, cy - bh * 0.35);
+    ctx.quadraticCurveTo(cx + bl * (crayfish ? 0.95 : 1.1), cy + sg * bh * (crayfish ? 1.0 : 1.5),
+      cx + bl * (crayfish ? 1.02 : 1.28), cy + sg * bh * (crayfish ? 1.9 : 2.6));
+    ctx.stroke();
+  }
+  // 歩脚
+  for (let i = 0; i < 4; i++) {
+    const x = cx + bl * (0.36 - i * 0.16);
+    seg([[x, cy + bh * 0.5], [x - bl * 0.03, cy + bh * 1.25], [x - bl * 0.1, cy + bh * 1.6]], 1.5 * u, c.fin);
+  }
+  // ハサミ脚
+  for (const sg of [1, -1]) {
+    const ax = cx + bl * 0.45, ay = cy + bh * 0.45;
+    const ex = ax + bl * (crayfish ? 0.3 : 0.52), ey = ay + sg * bh * (crayfish ? 0.35 : 0.5) + bh * 0.15;
+    seg([[ax, ay], [ex, ey]], (crayfish ? 3.2 : 1.9) * u, crayfish ? c.mid : c.fin);
+    ell(ex + bl * 0.08, ey + bh * 0.05, bl * (crayfish ? 0.13 : 0.09), bh * (crayfish ? 0.5 : 0.3), sg * 0.35, c.mid);
+    seg([[ex + bl * 0.16, ey], [ex + bl * (crayfish ? 0.3 : 0.22), ey - bh * 0.18]], 1.7 * u, c.belly);
+  }
+  // 尾扇
+  ctx.fillStyle = c.fin;
+  ctx.beginPath();
+  ctx.moveTo(cx - bl * 0.52, cy + bh * 0.25);
+  ctx.lineTo(cx - bl * 0.8, cy - bh * 0.75);
+  ctx.lineTo(cx - bl * 0.86, cy + bh * 0.55);
+  ctx.lineTo(cx - bl * 0.74, cy + bh * 1.3);
+  ctx.closePath();
+  ctx.fill();
+  // 胴（頭から尾へ一本の輪郭。背側を少し反らせる）
+  const nose = cx + bl * 0.66, tail = cx - bl * 0.55;
+  const th = (t) => bh * (0.5 + 0.55 * Math.sin(Math.PI * Math.min(1, 0.25 + t * 0.85)));  // 頭側が太い
+  ctx.beginPath();
+  ctx.moveTo(tail, cy + bh * 0.1);
+  for (let i = 0; i <= 20; i++) {
+    const t = i / 20;
+    ctx.lineTo(tail + (nose - tail) * t, cy - th(t) - bh * 0.1 * Math.sin(Math.PI * t));
+  }
+  for (let i = 20; i >= 0; i--) {
+    const t = i / 20;
+    ctx.lineTo(tail + (nose - tail) * t, cy + th(t) * 0.82 + bh * 0.1 * (1 - t));
+  }
+  ctx.closePath();
+  const grad = ctx.createLinearGradient(0, cy - bh * 1.2, 0, cy + bh * 1.1);
+  grad.addColorStop(0, c.top); grad.addColorStop(0.45, c.mid); grad.addColorStop(1, c.belly);
+  ctx.fillStyle = grad;
+  ctx.fill();
+  // 節（腹側の細い線）
+  ctx.strokeStyle = 'rgba(0,0,0,.22)'; ctx.lineWidth = 1 * u;
+  for (let i = 1; i <= 4; i++) {
+    const t = 0.1 + i * 0.1;
+    const x = tail + (nose - tail) * t;
+    ctx.beginPath();
+    ctx.moveTo(x, cy - th(t) * 0.85);
+    ctx.lineTo(x, cy + th(t) * 0.7);
+    ctx.stroke();
+  }
+  // 額角と目
+  seg([[nose - bl * 0.02, cy - bh * 0.35], [nose + bl * (crayfish ? 0.14 : 0.2), cy - bh * 0.95]], 1.7 * u, c.top);
+  ell(nose - bl * 0.12, cy - bh * 0.38, 2.1 * u, 2.1 * u, 0, '#101014');
 }
 
 /* ===========================================================
@@ -396,7 +514,7 @@ export class UI {
     rib.className = 'card-ribbon r' + sp.rarity;
     $('card-name').textContent = sp.name;
     $('card-len').textContent = `${fmt1(len)} cm`;
-    $('card-weight').textContent = `${fmt2(weight)} kg`;
+    $('card-weight').textContent = fmtWeight(weight);
     $('card-value').textContent = `${fmtInt(value)} G`;
     $('card-xp').textContent = `+${fmtInt(xp)}`;
     $('card-flavor').textContent = sp.flavor;
@@ -498,7 +616,7 @@ export class UI {
       if (rec) {
         info.innerHTML = `
           <div class="jn"><span>${sp.name}</span><span class="jr" style="color:${RARITY[sp.rarity].color}">${RARITY[sp.rarity].label}</span></div>
-          <div class="jm">${rec.count} 匹 / 最大 ${fmt1(rec.maxLen)} cm<br>${fmt2(rec.maxWeight)} kg・${fmtInt(valueOf(sp, rec.maxLen))} G</div>`;
+          <div class="jm">${rec.count} 匹 / 最大 ${fmt1(rec.maxLen)} cm<br>${fmtWeight(rec.maxWeight)}・${fmtInt(valueOf(sp, rec.maxLen))} G</div>`;
       } else if (sp.rarity === 0) {
         info.innerHTML = `
           <div class="jn"><span>???</span><span class="jr">${RARITY[0].label}</span></div>

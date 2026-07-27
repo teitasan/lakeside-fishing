@@ -181,6 +181,38 @@ export const SPECIES = [
     colors: { top: '#4a3d2a', mid: '#7b6743', belly: '#d8c79a', fin: '#5b4b32' },
     flavor: '泥の中からにゅるり。にょろにょろと手強い。',
   },
+  {
+    id: 'oikawa', name: 'オイカワ', rarity: 1, tags: ['mid'], shape: 'slim',
+    len: [8, 20], wc: 1.15, depth: [0.5, 4], spawn: 26, times: T.dayish, weather: W.clear,
+    str: 0.45, sta: 0.45, agg: 0.5, value: 16, perCm: 1.4,
+    fight: 'dash',
+    colors: { top: '#5c6f78', mid: '#b9c6c8', belly: '#f2f0e6', fin: '#c98b9a' },
+    flavor: '日中の浅場をきらきらと泳ぐ。オスは婚姻色が美しい。',
+  },
+  {
+    id: 'tanago', name: 'タナゴ', rarity: 1, tags: ['weed', 'mid'], shape: 'deep',
+    len: [5, 12], wc: 2.6, depth: [0.5, 3], spawn: 23, times: T.dayish, weather: W.any,
+    str: 0.3, sta: 0.35, agg: 0.3, value: 20, perCm: 2.4,
+    fight: 'dash',
+    colors: { top: '#3b4a63', mid: '#8fa6c4', belly: '#f0ead8', fin: '#d98a5a' },
+    flavor: '手のひらに収まる宝石。二枚貝に卵を産む。',
+  },
+  {
+    id: 'prawn', name: 'テナガエビ', rarity: 1, tags: ['bottom', 'weed'], shape: 'shrimp',
+    len: [4, 14], wc: 0.35, depth: [0.5, 4.5], spawn: 20, times: T.nightish, weather: W.any,
+    str: 0.3, sta: 0.4, agg: 0.15, value: 22, perCm: 2.8,
+    fight: 'dash',
+    colors: { top: '#5b6470', mid: '#a9b3bd', belly: '#e8eaea', fin: '#cfd6d4' },
+    flavor: '長い腕をゆらり。夜、石の間から出てくる。素揚げが最高。',
+  },
+  {
+    id: 'crayfish', name: 'ザリガニ', rarity: 1, tags: ['bottom', 'weed'], shape: 'crayfish',
+    len: [5, 15], wc: 3.5, depth: [0.4, 3], spawn: 22, times: T.any, weather: W.any,
+    str: 0.5, sta: 0.7, agg: 0.1, value: 14, perCm: 1.5,
+    fight: 'deadweight',
+    colors: { top: '#7a2c1e', mid: '#c05334', belly: '#e8b18c', fin: '#8e3a24' },
+    flavor: 'ハサミを振り上げて一歩も引かない。引くだけ引いて離さない。',
+  },
 
   /* ---------------- アンコモン ---------------- */
   {
@@ -223,6 +255,38 @@ export const SPECIES = [
     colors: { top: '#5a4a2c', mid: '#a3854a', belly: '#e6dcb4', fin: '#7c6234' },
     flavor: '悠然と泳ぐ湖の主候補。走り出すと止まらない。',
   },
+  {
+    id: 'wakasagi', name: 'ワカサギ', rarity: 2, tags: ['mid', 'deep'], shape: 'slim',
+    len: [7, 16], wc: 0.85, depth: [4, 14], spawn: 15, times: T.twilight, weather: W.cloudy,
+    str: 0.5, sta: 0.5, agg: 0.45, value: 70, perCm: 4.6,
+    fight: 'dash',
+    colors: { top: '#5b6c74', mid: '#c3ced2', belly: '#f6f4ec', fin: '#dfe3e0' },
+    flavor: '深場を群れで回る細身の小魚。天ぷらの王様。',
+  },
+  {
+    id: 'nigoi', name: 'ニゴイ', rarity: 2, tags: ['bottom', 'carp'], shape: 'slim',
+    len: [26, 64], wc: 1.15, depth: [1.5, 10], spawn: 14, times: T.any, weather: W.cloudy,
+    str: 1.2, sta: 1.15, agg: 0.6, value: 100, perCm: 3.8,
+    fight: 'tank',
+    colors: { top: '#57605c', mid: '#a7aea4', belly: '#eceade', fin: '#8b8f84' },
+    flavor: 'コイに似て口先が長い。底を突きながら餌を探す。',
+  },
+  {
+    id: 'hasu', name: 'ハス', rarity: 2, tags: ['predator', 'mid'], shape: 'slim',
+    len: [22, 52], wc: 1.1, depth: [1, 7], spawn: 13, times: T.dayish, weather: W.clear,
+    str: 1.1, sta: 0.95, agg: 1.35, value: 140, perCm: 5.2,
+    fight: 'dash',
+    colors: { top: '#41525f', mid: '#9fb0b4', belly: '#f3f1e4', fin: '#b8bfae' },
+    flavor: 'コイ科なのに小魚を追う。への字の口が特徴。',
+  },
+  {
+    id: 'mokuzugani', name: 'モクズガニ', rarity: 2, tags: ['bottom'], shape: 'crab',
+    len: [6, 14], wc: 14, depth: [1, 8], spawn: 12, times: T.nightish, weather: W.rain,
+    str: 0.9, sta: 1.3, agg: 0.1, value: 240, perCm: 9,
+    fight: 'deadweight',
+    colors: { top: '#3f4a3c', mid: '#75775e', belly: '#c9c2a4', fin: '#565a48' },
+    flavor: 'ハサミに毛の生えた川のカニ。味は絶品、根掛かりのように重い。',
+  },
 
   /* ---------------- レア ---------------- */
   {
@@ -257,6 +321,30 @@ export const SPECIES = [
     colors: { top: '#2b4a5e', mid: '#8fa8b6', belly: '#f5f1e6', fin: '#b06a72' },
     flavor: '深層を回遊する幻の鱒。銀色の魚体に淡い紅。',
   },
+  {
+    id: 'unagi', name: 'ウナギ', rarity: 3, tags: ['bottom', 'deep'], shape: 'eel',
+    len: [40, 100], wc: 0.6, depth: [2, 12], spawn: 7, times: T.nightish, weather: W.rain,
+    str: 1.5, sta: 1.75, agg: 0.5, value: 520, perCm: 9.5,
+    fight: 'shake',
+    colors: { top: '#2c2b28', mid: '#5a5646', belly: '#e0d8b8', fin: '#3a382e' },
+    flavor: '夜、底穴から出て餌を探す。掛けてからが本当の勝負。',
+  },
+  {
+    id: 'sakuramasu', name: 'サクラマス', rarity: 3, tags: ['trout', 'deep'], shape: 'slim',
+    len: [34, 72], wc: 1.4, depth: [5, 17], spawn: 6, times: T.twilight, weather: W.rain,
+    str: 1.6, sta: 1.45, agg: 1.35, value: 600, perCm: 9.5,
+    fight: 'jumper',
+    colors: { top: '#3a5566', mid: '#c2ccd2', belly: '#faf7ee', fin: '#d98f96' },
+    flavor: '海へ降りずに残った銀鱗。桜の頃に走り出す。',
+  },
+  {
+    id: 'aouo', name: 'アオウオ', rarity: 3, tags: ['carp', 'deep'], shape: 'wide',
+    len: [60, 140], wc: 1.85, depth: [4, 16], spawn: 5.5, times: T.any, weather: W.cloudy,
+    str: 2.0, sta: 2.0, agg: 0.6, value: 560, perCm: 7,
+    fight: 'tank',
+    colors: { top: '#3b4149', mid: '#6f7a7d', belly: '#d9dcc9', fin: '#4d565a' },
+    flavor: '貝を砕いて食う黒い巨体。ソウギョより重く、粘る。',
+  },
 
   /* ---------------- エピック ---------------- */
   {
@@ -274,6 +362,14 @@ export const SPECIES = [
     fight: 'dash',
     colors: { top: '#3c4433', mid: '#7c8560', belly: '#d6d3ab', fin: '#4a5238' },
     flavor: 'ワニのような顎。誰が湖に放したのか、誰も知らない。',
+  },
+  {
+    id: 'itou', name: 'イトウ', rarity: 4, tags: ['trout', 'predator', 'deep'], shape: 'slim',
+    len: [70, 150], wc: 1.1, depth: [6, 20], spawn: 2.2, times: T.twilight, weather: W.rain,
+    str: 2.45, sta: 2.5, agg: 1.5, value: 2200, perCm: 20,
+    fight: 'jumper',
+    colors: { top: '#41504e', mid: '#9aa8a2', belly: '#f2ecdc', fin: '#b6837a' },
+    flavor: '幻の巨大魚。深場の縁でゆっくりと大きな尾を振る。',
   },
 
   /* ---------------- レジェンド ---------------- */

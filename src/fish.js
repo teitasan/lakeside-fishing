@@ -270,6 +270,148 @@ export function createJunkGeometry(sp) {
   return geo;
 }
 
+/* ===========================================================
+   甲殻類（エビ・ザリガニ・カニ）メッシュ生成
+   魚と同じく +X が前・+Y が上。魚の体型プロファイルでは作れないので専用に組む
+   =========================================================== */
+export const CRUST_SHAPES = ['shrimp', 'crayfish', 'crab'];
+
+export function createCrustGeometry(sp) {
+  const lenM = (sp.len[1] * 0.85) / 100 * VIS_SCALE;
+  const shell = new THREE.Color(sp.colors.mid);
+  const dark = new THREE.Color(sp.colors.top);
+  const pale = new THREE.Color(sp.colors.belly);
+  const limb = new THREE.Color(sp.colors.fin);
+  const parts = [];
+  const V = (x, y, z) => new THREE.Vector3(x, y, z);
+
+  /** 棒（脚・触角・ハサミの腕）を from から dir 方向へ。先端座標を返すので節を繋げられる */
+  const rod = (from, dir, len, r0, r1, col) => {
+    const d = dir.clone().normalize();
+    const g = new THREE.CylinderGeometry(r0, r1, len, 5);
+    g.translate(0, len * 0.5, 0);                                  // 根元を原点に
+    g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(UP, d));
+    g.translate(from.x, from.y, from.z);
+    parts.push(paint(g, (x, y, z, c) => c.copy(col)));
+    return from.clone().addScaledVector(d, len);
+  };
+  /** ハサミ（掌 + 可動爪）を pos に、dir 向きで置く */
+  const claw = (pos, dir, size, side) => {
+    const d = dir.clone().normalize();
+    const palm = new THREE.SphereGeometry(size, 8, 6);
+    palm.scale(1.75, 0.55, 0.85);
+    palm.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(UP, d));
+    palm.translate(pos.x, pos.y, pos.z);
+    parts.push(paint(palm, (x, y, z, c) => c.copy(shell).lerp(dark, 0.22)));
+    const tipPos = pos.clone().addScaledVector(d, size * 1.5);
+    const nip = new THREE.ConeGeometry(size * 0.42, size * 1.9, 6);
+    nip.translate(0, size * 0.95, 0);
+    nip.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(UP, d));
+    nip.translate(tipPos.x, tipPos.y + size * 0.12 * side, tipPos.z);
+    parts.push(paint(nip, (x, y, z, c) => c.copy(pale)));
+  };
+
+  if (sp.shape === 'crab') {
+    /* --- カニ：横に広い平たい甲羅 + 8本脚 + ハサミ（甲幅を体長として扱う） --- */
+    const W = lenM;
+    const carapace = new THREE.SphereGeometry(W * 0.5, 16, 10);
+    carapace.scale(0.60, 0.30, 1.06);          // 前後に短く・平たく・横に広い
+    parts.push(paint(carapace, (x, y, z, c) => {
+      c.copy(y > 0 ? shell : pale).lerp(dark, clamp01(Math.abs(z) / (W * 0.5)) * 0.55);
+      if (y > W * 0.05 && Math.abs(z) < W * 0.1) c.lerp(dark, 0.3);       // 甲の中央線
+      if (x > W * 0.2) c.lerp(dark, 0.25);                                // 前縁
+    }));
+    // 目（前縁の短い眼柱）
+    for (const s of [1, -1]) {
+      const base = V(W * 0.24, W * 0.02, s * W * 0.12);
+      const tip = rod(base, V(0.55, 0.75, s * 0.25), W * 0.1, W * 0.028, W * 0.024, limb);
+      const eye = new THREE.SphereGeometry(W * 0.042, 6, 5);
+      eye.translate(tip.x, tip.y, tip.z);
+      parts.push(paint(eye, (x, y, z, c) => c.setRGB(0.04, 0.04, 0.05)));
+    }
+    // 歩脚：片側 4 本。甲羅の下から外へ伸ばし、関節で下へ折る
+    for (const s of [1, -1]) {
+      for (let i = 0; i < 4; i++) {
+        const fx = 0.4 - i * 0.3;                                         // 前後の付け根位置
+        const base = V(W * 0.26 * fx, -W * 0.03, s * W * 0.12);
+        const knee = rod(base, V(fx * 0.5, 0.3, s * 1.0), W * 0.42, W * 0.032, W * 0.026, limb);
+        rod(knee, V(fx * 0.3, -1.2, s * 0.35), W * 0.36, W * 0.026, W * 0.008, limb);
+      }
+      // ハサミ脚（前方外向き。モクズガニらしく大きめ）
+      const base = V(W * 0.22, -W * 0.03, s * W * 0.16);
+      const elbow = rod(base, V(0.9, 0.08, s * 0.45), W * 0.32, W * 0.05, W * 0.042, shell);
+      claw(elbow, V(0.95, 0.0, s * 0.3), W * 0.13, s);
+    }
+    const geo = mergeGeos(parts);
+    geo.userData.baseLength = lenM;
+    return geo;
+  }
+
+  /* --- エビ・ザリガニ：頭胸部 + 節のある腹 + 尾扇 + ハサミ --- */
+  const crayfish = sp.shape === 'crayfish';
+  const bodyR = lenM * (crayfish ? 0.13 : 0.1);
+  // 頭胸部
+  const head = new THREE.SphereGeometry(bodyR, 12, 9);
+  head.scale(1.9, 1.0, crayfish ? 1.15 : 0.95);
+  head.translate(lenM * 0.22, 0, 0);
+  parts.push(paint(head, (x, y, z, c) => {
+    c.copy(y > 0 ? shell : pale);
+    if (x > lenM * 0.36) c.lerp(dark, 0.4);              // 額（額角の付け根）
+  }));
+  // 額角
+  rod(V(lenM * 0.4, bodyR * 0.2, 0), V(1, 0.35, 0), lenM * (crayfish ? 0.14 : 0.2),
+    bodyR * 0.14, bodyR * 0.03, dark);
+  // 腹（節）：後ろへ細くなりながら少し下がる
+  const SEG = 6;
+  for (let i = 0; i < SEG; i++) {
+    const t = i / (SEG - 1);
+    const r = bodyR * lerp(0.95, 0.42, t);
+    const seg = new THREE.CylinderGeometry(r, r * 0.92, lenM * 0.08, 9);
+    seg.rotateZ(Math.PI / 2);
+    seg.scale(1, 1, 0.9);
+    seg.translate(lenM * (0.05 - t * 0.42), -t * t * bodyR * 0.55, 0);
+    parts.push(paint(seg, (x, y, z, c) => {
+      c.copy(y > 0 ? shell : pale).lerp(dark, 0.12 + (i % 2) * 0.18);
+    }));
+  }
+  // 尾扇（3枚）
+  const tf = lenM * 0.15;
+  for (const s of [1, -1, 0]) {
+    const fan = finGeo([[0, 0], [-tf, tf * (s === 0 ? 0.3 : 0.85)], [-tf * 1.2, 0], [-tf, -tf * 0.4]]);
+    if (s !== 0) fan.rotateX(s * 0.85);
+    fan.translate(-lenM * 0.4, -bodyR * 0.55, 0);
+    parts.push(paint(fan, (x, y, z, c) => c.copy(limb).lerp(pale, 0.3)));
+  }
+  for (const s of [1, -1]) {
+    // 触角（長い）＋小触角
+    rod(V(lenM * 0.38, bodyR * 0.15, s * bodyR * 0.35), V(1, 0.28, s * 0.5),
+      lenM * (crayfish ? 0.42 : 0.8), bodyR * 0.08, bodyR * 0.02, dark);
+    rod(V(lenM * 0.38, -bodyR * 0.1, s * bodyR * 0.3), V(1, -0.15, s * 0.75),
+      lenM * 0.22, bodyR * 0.06, bodyR * 0.02, dark);
+    // 目
+    const eye = new THREE.SphereGeometry(bodyR * 0.22, 6, 5);
+    eye.translate(lenM * 0.33, bodyR * 0.45, s * bodyR * 0.42);
+    parts.push(paint(eye, (x, y, z, c) => c.setRGB(0.04, 0.04, 0.05)));
+    // 歩脚 4 本（下へ・少し外へ）
+    for (let i = 0; i < 4; i++) {
+      const base = V(lenM * (0.3 - i * 0.09), -bodyR * 0.55, s * bodyR * 0.42);
+      const knee = rod(base, V(0.15, -0.5, s * 1.0), lenM * 0.1, bodyR * 0.1, bodyR * 0.07, limb);
+      rod(knee, V(0.1, -1.0, s * 0.35), lenM * 0.09, bodyR * 0.07, bodyR * 0.03, limb);
+    }
+    /* ハサミ脚：テナガエビは細長く前へ、ザリガニは太く短く */
+    const armFrom = V(lenM * 0.33, -bodyR * 0.35, s * bodyR * 0.5);
+    const armDir = V(1, crayfish ? -0.1 : -0.18, s * (crayfish ? 0.42 : 0.3));
+    const armL = lenM * (crayfish ? 0.26 : 0.44);
+    const elbow = rod(armFrom, armDir, armL, bodyR * (crayfish ? 0.3 : 0.15), bodyR * (crayfish ? 0.24 : 0.1),
+      crayfish ? shell : limb);
+    claw(elbow, V(1, 0.1, s * (crayfish ? 0.3 : 0.18)), bodyR * (crayfish ? 0.62 : 0.3), s);
+  }
+
+  const geo = mergeGeos(parts);
+  geo.userData.baseLength = lenM;
+  return geo;
+}
+
 /* ---------------- マテリアル（体をうねらせる） ---------------- */
 export function createFishMaterial(shiny = 0.35) {
   const mat = new THREE.MeshStandardMaterial({
@@ -343,7 +485,9 @@ export class Fish {
     this.length = length;
     let geo = this.geoCache.get(sp.id);
     if (!geo) {
-      geo = sp.rarity === 0 ? createJunkGeometry(sp) : createFishGeometry(sp);
+      geo = sp.rarity === 0 ? createJunkGeometry(sp)
+        : CRUST_SHAPES.includes(sp.shape) ? createCrustGeometry(sp)
+          : createFishGeometry(sp);
       this.geoCache.set(sp.id, geo);
     }
     this.mesh.geometry = geo;
@@ -518,9 +662,12 @@ export class Fish {
 
   _wiggle(dt, freq, amp) {
     const u = this.mesh.material.userData.u;
-    u.uTime.value += dt * freq;
-    u.uAmp.value = amp;
-    u.uFreq.value = this.species && this.species.shape === 'eel' ? 7 : 5.2;
+    const shape = this.species && this.species.shape;
+    // 甲殻類は体をうねらせない（脚で歩く／尾で跳ねる生き物なので小刻みに）
+    const crust = CRUST_SHAPES.includes(shape);
+    u.uTime.value += dt * freq * (crust ? 1.6 : 1);
+    u.uAmp.value = crust ? amp * 0.22 : amp;
+    u.uFreq.value = shape === 'eel' ? 7 : crust ? 2.2 : 5.2;
   }
 
   _orient(dt, fwd, roll) {
