@@ -427,9 +427,9 @@ depth &gt; d1 + <span class="n">3</span>             → <span class="n">0.18</s
     <div class="tw"><table>
       <thead><tr><th class="l">段階</th><th class="l">長さ・条件</th><th class="l">内容</th></tr></thead>
       <tbody>
-        <tr><td class="l name">① 着水</td><td class="l num">—</td><td class="l">半径 <code>2.6 + power×2.2</code> m（好キャストなら 1.4 m）の魚が驚いて逃げる</td></tr>
+        <tr><td class="l name">① 着水</td><td class="l num">—</td><td class="l">半径 <code>2.6 + power×2.2</code> m（狙い通りなら 1.4 m）の魚が驚いて逃げる</td></tr>
         <tr><td class="l name">② アタリ待ち</td><td class="l num">rand(2.2, 7.0) ÷ attract 秒<br>水深 &lt; 0.9 m ならさらに ×1.7</td>
-            <td class="l"><code>attract = bait.attract × rod.attract × 天候 × (好キャスト 1.18)</code></td></tr>
+            <td class="l"><code>attract = bait.attract × rod.attract × 天候 × (狙い通り 1.18)</code></td></tr>
         <tr><td class="l name">③ 抽選 → 接近</td><td class="l num">実測 3〜9 秒<br>（22 秒で諦めて再抽選）</td>
             <td class="l">18 m 以内に同種がいればその個体が寄る。いなければ 5.5〜9.5 m 先に生成して寄せる。遊泳速度 <code>(0.78 + 全長cm/100 × 1.7) × 1.45</code> m/s</td></tr>
         <tr><td class="l name">④ 前アタリ</td><td class="l num">rand(0.7, 1.9) 秒<br>レア度 4 以上は ×1.5</td><td class="l">ウキが小刻みに震える。ここで巻くと回収になってしまう</td></tr>
@@ -494,20 +494,43 @@ p    = <span class="n">2.1</span> − min(<span class="n">1.2</span>, bait.rare 
   <!-- ============================================================ -->
   <section id="s5">
     <h2><span class="num">5</span>キャストの物理</h2>
-    <pre><span class="cm">// 長押し中：1.05 /秒で 0↔1 を往復（ピンポン）</span>
-power = 往復値
-好キャスト = |power − <span class="n">0.78</span>| &lt; <span class="n">0.07</span>      <span class="cm">// メーターの白線 ±7%</span>
+    <p>
+      キャストは<b>「狙った距離に当てる」</b>操作です。照準（十字）が水面と交わる点が<b>狙い点</b>で、
+      メーターの<b>緑の帯</b>はその距離に必要なパワーの位置。帯の中で離すと狙い通りに落ちます。
+    </p>
+    <pre><span class="cm">// ① 狙い点：視線と水面(y=0)の交点。見下ろすほど近く、水平で遠く</span>
+狙い距離 = clamp(視線が y=0 に達する水平距離, 最短キャスト, <span class="n">50</span>) m
 
-<span class="cm">// 射出</span>
-仰角成分 = clamp(<span class="n">0.46</span> + pitch × <span class="n">0.55</span>, <span class="n">0.16</span>, <span class="n">0.95</span>)   <span class="cm">// 視点の上下で変わる</span>
-初速     = lerp(<span class="n">8.5</span>, <span class="n">28.5</span>, power) m/s
+<span class="cm">// ② 目印：その距離に落ちるパワーを弾道の逆算（二分探索12回）で求める</span>
+仰角成分 = clamp(<span class="n">0.46</span> + pitch × <span class="n">0.55</span>, <span class="n">0.16</span>, <span class="n">0.95</span>)
+初速     = lerp(<span class="n">4.5</span>, <span class="n">28.5</span>, power) m/s
 毎フレーム: v.y −= <span class="n">9.8</span>·dt ;  v ×= (<span class="n">1</span> − <span class="n">0.0055</span>·|v|·dt)    <span class="cm">// 重力 + 空気抵抗</span>
 
+<span class="cm">// ③ 判定：長押し中は 1.05 /秒で 0↔1 を往復（ピンポン）</span>
+狙い通り = |power − 目印| ≤ <span class="n">0.06</span>
+  → パワーを目印に補正して発射（＝小さな誤差は吸収され、狙い点にきっちり落ちる）
+外した   → そのパワーの距離に着水（手前に落ちる／飛ばし過ぎる）
+
 糸の最大長 = <span class="n">62</span> m（超えるとその場で着水／待機中に超えると強制回収）</pre>
-    <p class="src">src/game.js — _castVelocity(), _predictLanding(), MAX_LINE</p>
+    <p class="src">src/game.js — _updateAim(), _solveTargetPower(), _castVelocity(), _releaseCast()</p>
+
+    <div class="tw"><table>
+      <thead><tr><th class="num">視点(pitch)</th><th class="num">狙い距離</th><th class="num">必要パワー</th><th class="num">実際の着水</th><th class="l">用途</th></tr></thead>
+      <tbody>
+        <tr><td class="num">−1.0 〜 −0.45</td><td class="num">5.6 m</td><td class="num">0.00</td><td class="num">5.6 m</td><td class="l">足元。浅場の小物・岸際</td></tr>
+        <tr><td class="num">−0.30</td><td class="num">9.0 m</td><td class="num">0.11</td><td class="num">9.0 m</td><td class="l">近距離</td></tr>
+        <tr><td class="num">−0.20</td><td class="num">13.7 m</td><td class="num">0.24</td><td class="num">13.7 m</td><td class="l">中距離</td></tr>
+        <tr><td class="num">−0.12</td><td class="num">23.0 m</td><td class="num">0.44</td><td class="num">22.3 m</td><td class="l">ドロップオフ・淵</td></tr>
+        <tr><td class="num">−0.05</td><td class="num">50.0 m</td><td class="num">0.90</td><td class="num">50.0 m</td><td class="l">最大飛距離</td></tr>
+      </tbody>
+      <tfoot><tr><td colspan="5" class="l">桟橋の先端・カーボンロッドでの実測。狙いと着水の誤差は <b>0.0〜0.7 m</b>。
+        最短キャストは初速 4.5 m/s の弾道で決まり、立ち位置とロッドの高さでわずかに変わります。</td></tr></tfoot>
+    </table></div>
     <div class="grid c2">
-      <div class="card tight"><h4>飛距離の目安</h4><p>視点を水平にした全力キャストで <b>約 45 m</b>、パワー 50% で約 15 m。ためている間に表示される<b>着水予測リング</b>は、この式を 0.055 秒刻みで積分した実際の落下点です（表示水深も同地点の値）。</p></div>
-      <div class="card tight"><h4>好キャストの効果</h4><p>驚かす半径が 2.6+ → <b>1.4 m</b> に縮小、アタリまでの時間が <b>÷1.18</b>。</p></div>
+      <div class="card tight"><h4>2つのリング</h4><p><span style="color:#9ff0ff">水色の輪</span>＝狙い点、<span style="color:#fff0b0">黄色の輪</span>＝いまのパワーでの着水予測。
+        重なると<span style="color:#9dffb4">緑</span>になり、メーターも光ります。予測リングは実際の弾道を 0.055 秒刻みで積分した落下点です。</p></div>
+      <div class="card tight"><h4>狙い通りの効果</h4><p>驚かす半径が 2.6+power×2.2 → <b>1.4 m</b> に縮小、アタリまでの時間が <b>÷1.18</b>。
+        遠投でも足元でも同じ条件で成立するので、<b>浅場狙いが不利にならない</b>のが以前との違いです。</p></div>
     </div>
 
     <h4>糸が掛かる判定</h4>

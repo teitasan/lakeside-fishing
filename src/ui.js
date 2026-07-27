@@ -148,6 +148,8 @@ export class UI {
       clock: $('clock'), dayLabel: $('daylabel'), weatherIcon: $('weather-icon'),
       weatherName: $('weather-name'), depth: $('depth'), caught: $('caught-count'),
       prompt: $('prompt'), power: $('power-meter'), powerFill: $('power-fill'),
+      powerBand: $('power-band'), powerMark: $('power-mark'),
+      powerTrack: document.querySelector('.pm-track'), aim: $('aim'),
       fight: $('fight-panel'), fightName: $('fight-name'), fightSub: $('fight-sub'),
       tension: $('tension-fill'), dist: $('dist-fill'), stam: $('stam-fill'),
       danger: $('danger-flash'), biteAlert: $('bite-alert'), toasts: $('toasts'),
@@ -281,9 +283,17 @@ export class UI {
     this.el.prompt.classList.toggle('on', !!html);
   }
 
-  showPower(on, v = 0) {
+  /** @param target 狙った距離に必要なパワー / tol 許容差 */
+  showPower(on, v = 0, target = null, tol = 0.06) {
     this.el.power.classList.toggle('on', on);
-    if (on) this.el.powerFill.style.width = (clamp01(v) * 100).toFixed(1) + '%';
+    if (!on) return;
+    this.el.powerFill.style.width = (clamp01(v) * 100).toFixed(1) + '%';
+    if (target === null) return;
+    const lo = clamp01(target - tol), hi = clamp01(target + tol);
+    this.el.powerBand.style.left = (lo * 100).toFixed(1) + '%';
+    this.el.powerBand.style.width = ((hi - lo) * 100).toFixed(1) + '%';
+    this.el.powerMark.style.left = (clamp01(target) * 100).toFixed(1) + '%';
+    this.el.powerTrack.classList.toggle('on-target', Math.abs(v - target) <= tol);
   }
 
   biteAlert() {
@@ -353,6 +363,11 @@ export class UI {
     if (this._last.depth !== depStr) {
       this.el.depth.textContent = depStr;
       this._last.depth = depStr;
+    }
+    const aimStr = g.hudAim > 0 ? `${fmt1(g.hudAim)} m` : '—';
+    if (this._last.aim !== aimStr) {
+      this.el.aim.textContent = aimStr;
+      this._last.aim = aimStr;
     }
     if (this._last.caught !== s.totalCaught) {
       this.el.caught.textContent = `${s.totalCaught} 匹`;

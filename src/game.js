@@ -23,6 +23,11 @@ import {
 const GRAVITY = 9.8;
 const EXPOSURE = 0.78;
 const PLAYER_RADIUS = 0.34;
+/* キャストの狙い */
+const CAST_SPEED_MIN = 4.5;    // 最弱キャストの初速（足元 4〜5m を狙える）
+const CAST_SPEED_MAX = 28.5;
+const AIM_MAX = 50;            // 照準が届く最大距離
+const CAST_TOL = 0.06;         // 目印に合っていると見なすパワーの許容差
 const HOURS_PER_SEC = 24 / 720;   // 実時間12分で1日
 const MAX_LINE = 62;
 const EYE_H = 1.62;
@@ -51,6 +56,7 @@ const UP = new THREE.Vector3(0, 1, 0);
 const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
+const _v4 = new THREE.Vector3();
 
 export class Game {
   constructor(canvas) {
@@ -159,6 +165,17 @@ export class Game {
     this.marker.visible = false;
     this.marker.renderOrder = 6;
     this.scene.add(this.marker);
+
+    // 狙い点のリング（照準が水面と交わる位置）
+    const aimGeo = new THREE.RingGeometry(0.5, 0.66, 32);
+    aimGeo.rotateX(-Math.PI / 2);
+    this.aimMarker = new THREE.Mesh(aimGeo, new THREE.MeshBasicMaterial({
+      color: 0x9ff0ff, transparent: true, opacity: 0.5, depthWrite: false, fog: false,
+      side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+    }));
+    this.aimMarker.visible = false;
+    this.aimMarker.renderOrder = 6;
+    this.scene.add(this.aimMarker);
 
     this.ui = new UI(this);
     this.debug = new Debug(this);
@@ -550,7 +567,72 @@ export class Game {
     const elev = clamp(0.46 + this.pitch * 0.55, 0.16, 0.95);
     out.y = elev;
     out.normalize();
-    return out.multiplyScalar(lerp(8.5, 28.5, power));
+    return out.multiplyScalar(lerp(CAST_SPEED_MIN, CAST_SPEED_MAX, power));
+  }
+
+  /**
+   * あるパワーで水面（y=0）に落ちるまでの水平距離。
+   * 地形サンプルを使わない軽量版で、目印の逆算に使う。
+   */
+  _rangeForPower(power) {
+    this._castVelocity(power, _v4);
+    let vx = Math.hypot(_v4.x, _v4.z);
+    let vy = _v4.y;
+    let x = 0, y = this._tipY || 3;
+    const dt = 0.055;
+    for (let i = 0; i < 200 && y > 0; i++) {
+      vy -= GRAVITY * dt;
+      const k = 1 - 0.0055 * Math.hypot(vx, vy) * dt;
+      vx *= k; vy *= k;
+      x += vx * dt; y += vy * dt;
+    }
+    return x;
+  }
+
+  /**
+   * 狙い距離（プレイヤー基準）に必要なパワーを二分探索で求める。
+   * _rangeForPower はロッド先端からの距離なので、先端の前方オフセットを引く。
+   */
+  _solveTargetPower(aimDist) {
+    const want = aimDist - (this._tipFwd || 0);
+    let lo = 0, hi = 1;
+    for (let i = 0; i < 12; i++) {
+      const mid = (lo + hi) / 2;
+      if (this._rangeForPower(mid) < want) lo = mid; else hi = mid;
+    }
+    return (lo + hi) / 2;
+  }
+
+  /**
+   * 狙い点（照準が水面と交わる位置）・必要パワー・最短距離を更新。
+   * 見下ろすほど近く、水平に近いほど遠くなる。
+   */
+  _updateAim(force = false) {
+    if (!this.aimPoint) this.aimPoint = new THREE.Vector3();
+    // ロッド先端（スカラーで退避：_v4 はこの後使い回す）
+    this.angler.getRodTip(_v4);
+    const tipX = _v4.x, tipZ = _v4.z;
+    this._tipY = _v4.y;
+    // 狙い方向
+    const dir = this._aimDir(_v4);
+    const dirY = dir.y;
+    const h = Math.hypot(dir.x, dir.z) || 1e-4;
+    const fx = dir.x / h, fz = dir.z / h;
+    this._tipFwd = (tipX - this.pos.x) * fx + (tipZ - this.pos.z) * fz;
+    this.minCastDist = this._rangeForPower(0) + this._tipFwd;
+
+    const eyeY = this.visY + EYE_H;
+    let dist = AIM_MAX;
+    if (dirY < -0.02) dist = h * (-eyeY / dirY);   // 視線が y=0 に達する距離
+    dist = clamp(dist, this.minCastDist, AIM_MAX);
+    this.aimDist = dist;
+    this.aimPoint.set(this.pos.x + fx * dist, 0, this.pos.z + fz * dist);
+
+    if (force || Math.abs(dist - (this._solvedFor ?? -1)) > 0.3) {
+      this._solvedFor = dist;
+      this.targetPower = clamp(this._solveTargetPower(dist), 0, 1);
+    }
+    return dist;
   }
 
   /** 着水点を予測（描画マーカー用） */
@@ -572,10 +654,15 @@ export class Game {
   }
 
   _releaseCast() {
-    const power = this.charge;
+    this._updateAim(true);
+    // 目印（狙った距離に必要なパワー）に合っていれば「狙い通り」
+    const target = this.targetPower ?? 0.78;
+    const err = Math.abs(this.charge - target);
+    this.castPerfect = err <= CAST_TOL;
+    // 合っていれば小さな誤差を補正して、狙い点にきっちり落とす
+    const power = this.castPerfect ? target : this.charge;
     this.castPower = power;
-    // メーターの目印付近なら「良いキャスト」
-    this.castPerfect = Math.abs(power - 0.78) < 0.07;
+    this.charge = power;
     this.fs = 'flight';
     this.stateTime = 0;
     this.angler.playCast();
@@ -586,8 +673,14 @@ export class Game {
     this.angler.bobber.visible = true;
     this.angler.baitMat.color.setHex(BAIT_COLORS[this.bait.id] ?? 0xc2705a);
     this.marker.visible = false;
+    this.aimMarker.visible = false;
     this.ui.showPower(false);
-    if (this.castPerfect) this.ui.toast('✨ きれいなキャスト！', 'good');
+    if (this.castPerfect) {
+      this.ui.toast(`✨ 狙い通り！ <small style="opacity:.75">${fmt1(this.aimDist)}m</small>`, 'good');
+    } else {
+      const over = this.charge > (this.targetPower ?? 0.78);
+      this.ui.toast(over ? '飛ばし過ぎた…' : '手前に落ちた…', '');
+    }
   }
 
   /** ロッド先端 → 到達点 の糸が桟橋を貫通するか */
@@ -931,13 +1024,24 @@ export class Game {
     switch (this.fs) {
       /* ---------------- 待機 ---------------- */
       case 'idle': {
-        this.hudDepth = 0;
+        // 照準の狙い点を出しておく（水深の下見にも使える）
+        this._updateAim();
+        const ad = this.terrain.depthAt(this.aimPoint.x, this.aimPoint.z);
+        this.hudDepth = ad;
+        this.hudAim = this.aimDist;
+        this.aimMarker.visible = true;
+        this.aimMarker.position.set(
+          this.aimPoint.x,
+          (ad > 0 ? this.water.surfaceY(this.aimPoint.x, this.aimPoint.z) : this.terrain.heightAt(this.aimPoint.x, this.aimPoint.z)) + 0.05,
+          this.aimPoint.z
+        );
+        this.aimMarker.material.color.setHex(ad > 0.4 ? 0x9ff0ff : 0xff9a80);
         bob.visible = false;
         this.angler.hideLine();
         this.marker.visible = false;
         ui.showPower(false);
         ui.showFight(false);
-        ui.setPrompt('<b>クリック長押し</b>（またはSpace）で力をため、離してキャスト');
+        ui.setPrompt('<b>十字で狙い</b>、長押しして<b>目印で離す</b>（見下ろすと近く／水平で遠く）');
         break;
       }
 
@@ -947,9 +1051,26 @@ export class Game {
         const rate = 1.05;
         this.charge += this.chargeDir * rate * dt;
         if (this.charge >= 1) { this.charge = 1; this.chargeDir = -1; }
-        if (this.charge <= 0.02) { this.charge = 0.02; this.chargeDir = 1; }
-        ui.showPower(true, this.charge);
-        ui.setPrompt('離してキャスト！ <b>目印（白線）</b>付近が好キャスト');
+        if (this.charge <= 0.0) { this.charge = 0; this.chargeDir = 1; }
+
+        // 狙い点と、その距離に必要なパワー（目印）
+        this._updateAim();
+        const onTarget = Math.abs(this.charge - this.targetPower) <= CAST_TOL;
+        ui.showPower(true, this.charge, this.targetPower, CAST_TOL);
+        const aimDepth = this.terrain.depthAt(this.aimPoint.x, this.aimPoint.z);
+        this.hudAim = this.aimDist;
+        this.aimMarker.visible = true;
+        this.aimMarker.position.set(
+          this.aimPoint.x,
+          (aimDepth > 0 ? this.water.surfaceY(this.aimPoint.x, this.aimPoint.z) : this.terrain.heightAt(this.aimPoint.x, this.aimPoint.z)) + 0.05,
+          this.aimPoint.z
+        );
+        this.aimMarker.material.color.setHex(onTarget ? 0x9dffb4 : 0x9ff0ff);
+        this.aimMarker.scale.setScalar(onTarget ? 1.1 : 1);
+
+        ui.setPrompt(onTarget
+          ? '<b>今！</b> 離せば狙い通りに落ちる'
+          : `離してキャスト（狙い ${fmt1(this.aimDist)}m ／ 目印まで待つ）`);
         // 着水点予測（糸が何かに掛かる場合は赤くして知らせる）
         this._predictLanding(this.charge, _v2);
         const d = this.terrain.depthAt(_v2.x, _v2.z);
@@ -977,6 +1098,7 @@ export class Game {
       /* ---------------- 飛行 / 回収 ---------------- */
       case 'flight': {
         ui.setPrompt('');
+        this.aimMarker.visible = false;
         if (this.retrieving) {
           // ウキを手元へ
           _v2.subVectors(_v1, this.bobber);
@@ -1037,6 +1159,8 @@ export class Game {
       case 'nibble': {
         const surf = this.water.surfaceY(this.bobber.x, this.bobber.z);
         this.hudDepth = this.terrain.depthAt(this.bobber.x, this.bobber.z);
+        this.hudAim = 0;
+        this.aimMarker.visible = false;
         this.baitPos.set(this.bobber.x, this.baitY, this.bobber.z);
 
         // ウキの挙動
@@ -1121,6 +1245,7 @@ export class Game {
 
       /* ---------------- ファイト ---------------- */
       case 'fight': {
+        this.aimMarker.visible = false;
         this._updateFight(dt, _v1);
         break;
       }
@@ -1128,6 +1253,7 @@ export class Game {
       /* ---------------- 取り込み ---------------- */
       case 'landing': {
         const f = this.hookFish;
+        this.aimMarker.visible = false;
         ui.showFight(false);
         ui.setPrompt('');
         if (!f) { this.fs = 'idle'; break; }

@@ -39,6 +39,7 @@
     <div class="hud-top-right panel">
       <div class="clock-row"><span id="weather-icon">☀️</span><span id="clock">06:00</span><span id="daylabel">朝</span></div>
       <div class="info-row"><span class="lbl">天候</span><span id="weather-name">晴れ</span></div>
+      <div class="info-row"><span class="lbl">狙い</span><span id="aim">-- m</span></div>
       <div class="info-row"><span class="lbl">水深</span><span id="depth">-- m</span></div>
       <div class="info-row"><span class="lbl">釣果</span><span id="caught-count">0</span></div>
     </div>
@@ -49,7 +50,10 @@
 
     <div id="prompt-wrap">
       <div id="prompt"></div>
-      <div id="power-meter"><div class="pm-track"><i id="power-fill"></i><span class="pm-mark"></span></div><label>キャスト力</label></div>
+      <div id="power-meter">
+        <div class="pm-track"><i id="power-fill"></i><span class="pm-band" id="power-band"></span><span class="pm-mark" id="power-mark"></span></div>
+        <label>狙った距離に合わせて離す</label>
+      </div>
     </div>
 
     <div id="fight-panel">
@@ -96,8 +100,9 @@
         深場には <b>湖の主</b> が眠っているという。
       </div>
       <div class="title-keys">
-        <div><kbd>クリック</kbd> または <kbd>Space</kbd> を長押しで力をため、離してキャスト</div>
-        <div><kbd>WASD</kbd> で岸を歩き、マウスで狙いを定める</div>
+        <div><kbd>マウス</kbd>で狙う（<b>見下ろすと近く／水平で遠く</b>）。水面の輪が狙い点</div>
+        <div><kbd>クリック</kbd>長押し → メーターの<b>緑の帯</b>で離すと狙い通りに落ちる</div>
+        <div><kbd>WASD</kbd> で岸を歩いてポイントを探す</div>
         <div>ウキが沈んだら すぐに<kbd>クリック</kbd>で アワセ！</div>
         <div>ヒット後は <kbd>押し続けて巻く</kbd> / <kbd>離してテンションを抜く</kbd></div>
       </div>

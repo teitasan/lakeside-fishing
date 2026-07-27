@@ -149,7 +149,18 @@ body.aiming-off #reticle { opacity: 0 !important; }
 .pm-mark {
   position: absolute; left: 78%; top: -3px; bottom: -3px; width: 3px;
   background: #fff; box-shadow: 0 0 8px rgba(255, 255, 255, .9);
+  transition: left .08s linear;
 }
+/* 狙った距離の許容幅 */
+.pm-band {
+  position: absolute; top: 0; bottom: 0; left: 72%; width: 12%;
+  background: rgba(157, 255, 180, .30);
+  border-left: 1px solid rgba(157, 255, 180, .55);
+  border-right: 1px solid rgba(157, 255, 180, .55);
+  transition: left .08s linear, width .08s linear;
+}
+.pm-track.on-target .pm-band { background: rgba(157, 255, 180, .55); }
+.pm-track.on-target { border-color: rgba(157, 255, 180, .85); box-shadow: 0 0 14px rgba(157, 255, 180, .45); }
 
 /* ---------- ファイトパネル ---------- */
 #fight-panel {

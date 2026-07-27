@@ -15,7 +15,7 @@ export const WATER_REGION = 440;   // 水面メッシュ & 高さテクスチャ
 export const MAX_DEPTH = 26;       // 湖心の水深
 
 /* プレイヤーが狙える距離（キャストの実効範囲 m） */
-export const CAST_MIN = 7;
+export const CAST_MIN = 4.5;
 export const CAST_MAX = 46;
 
 /* 地形フィーチャの目標値 */
