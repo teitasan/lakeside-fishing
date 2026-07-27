@@ -438,6 +438,51 @@ depth &gt; d1 + <span class="n">3</span>             → <span class="n">0.18</s
       </tbody>
     </table></div>
 
+    <h3>見えている魚は釣れるのか</h3>
+    <p>
+      湖には常に <b>22 匹</b>（描画品質 軽量 14／高品質 30）が泳いでいて、水中カメラ（<kbd>V</kbd>）で見えるのはその実体です。
+      ただし<b>見えている個体を狙い撃つことはできません</b>。処理の順番が逆で、
+      <b>先に魚種が抽選され、あとからその種の個体が選ばれる</b>ためです。
+    </p>
+    <pre><span class="cm">// ③ 抽選 → 個体選び</span>
+1. rollSpecies(水深, エサ, 時刻, 天候, Lv) で<b>魚種を決める</b>
+2. その魚種の個体が ウキから <span class="n">18</span> m 以内・回遊中(wander) にいる？
+   ├ いる  → <b>いちばん近いその個体</b>が実際に泳いで寄ってくる
+   │          （＝水中カメラで見ていた魚が、そのまま掛かる）
+   └ いない → ウキの <span class="n">5.5</span>〜<span class="n">9.5</span> m 先・水深 <span class="n">0.8</span> m 以上に<b>新しく生成</b>して寄せる
+3. 寄ってきて <span class="n">0.5</span> + 全長cm×<span class="n">0.004</span> m まで近づいたら 前アタリ（④）へ</pre>
+    <p class="src">src/game.js — _chooseBiter() / src/fish.js — Fish.update() の 'approach'</p>
+    <div class="grid c2">
+      <div class="card tight"><h4>目安にはなる</h4><p>まわりを泳ぐ 22 匹も同じ <code>rollSpecies(水深)</code> で湧いているので、
+        <b>見えている魚種＝その場所・その時刻に釣れる魚</b>の目安になります。最初は自分の周り 6〜52 m に配置され、
+        78 m 以上離れる／水深 0.35 m 未満に乗り上げると 26〜58 m 先へ入れ替わります。</p></div>
+      <div class="card tight"><h4>ただし条件は違う</h4><p>泳いでいる魚の抽選には<b>エサ・エサの層・ロッド・レベル解禁が掛かりません</b>。
+        つまり Lv1 でも<b>レジェンドが泳いでいるのは見えます</b>が、アタリの抽選では
+        レア度 4 が Lv3〜7、レア度 5 が Lv6〜11 で徐々に解禁されるため、まだ食いつきません。</p></div>
+    </div>
+
+    <h3>魚が逃げる条件</h3>
+    <div class="tw"><table>
+      <thead><tr><th class="l">きっかけ</th><th class="l">範囲・時間</th><th class="l">挙動</th></tr></thead>
+      <tbody>
+        <tr><td class="l name">着水（キャスト）</td>
+            <td class="l">半径 <code>2.6 + power×2.2</code> m<br>狙い通りなら <b>1.4 m</b><br>1.2〜2.5 秒</td>
+            <td class="l">範囲内の魚が驚く。回遊中なら<b>着水点の反対へ 14 m</b> の目標を取り直し、遊泳速度が <b>1.5 倍</b>になる</td></tr>
+        <tr><td class="l name">仕掛けの回収</td><td class="l">2.2 秒</td>
+            <td class="l">寄ってきていた個体が逃走。次のアタリは投げ直しから</td></tr>
+        <tr><td class="l name">アワセ失敗</td><td class="l">3 秒</td>
+            <td class="l">その個体が<b>22 m 先・1 m 下</b>へ逃走。待機は続き、次の抽選まで 3〜6 秒</td></tr>
+        <tr><td class="l name">ライン切れ・逃走</td><td class="l">—</td><td class="l">掛かっていた個体が逃走して回遊に戻る</td></tr>
+      </tbody>
+    </table></div>
+    <p class="src">src/fish.js — FishSchool.startle() / src/game.js — _onLandWater(), _retrieve(), _missBite()</p>
+    <div class="note">
+      驚いた魚は状態が回遊(wander)のままなので、<b>抽選対象から外れるわけではありません</b>。
+      ただし 1.5 倍速で 14 m 逃げるため、<b>18 m の圏外に出ると「近くの個体」として選ばれなくなり</b>、
+      その分は新規生成（＝見えない所から来る魚）に置き換わります。
+      足元や見えている魚を狙うときに<b>狙い通りのキャスト（驚かす半径 1.4 m）</b>が効くのはここです。
+    </div>
+
     <h4>ゴミが釣れる確率</h4>
     <pre>P(ゴミ) = <span class="n">0.085</span> × bait.junk × (水深 &lt; <span class="n">1.4</span> m ? <span class="n">1.8</span> : <span class="n">1</span>) × (総釣果 &lt; 3 匹 ? <span class="n">0.3</span> : <span class="n">1</span>)</pre>
     <p>ミミズ（junk 1.0）で深場なら 8.5%、浅場だと 15.3%。秘伝の撒き餌（junk 0.25）なら 2.1% まで下がります。ゴミは泳いで来ないのでその場で即・前アタリになります。</p>
