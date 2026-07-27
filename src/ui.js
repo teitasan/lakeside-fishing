@@ -212,6 +212,9 @@ export class UI {
       g.saveState();
     });
 
+    $('opt-debug').checked = !!s.debug;
+    $('opt-debug').addEventListener('change', (e) => g.debug.setEnabled(e.target.checked));
+
     /* --- 湖（シード） --- */
     $('opt-randomlake').checked = !!s.randomLake;
     $('opt-randomlake').addEventListener('change', (e) => {

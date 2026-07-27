@@ -9,6 +9,7 @@ import { Water } from './water.js';
 import { FishSchool } from './fish.js';
 import { Angler } from './angler.js';
 import { UI } from './ui.js';
+import { Debug } from './debug.js';
 import { AudioEngine } from './audio.js';
 import * as Save from './save.js';
 import {
@@ -148,6 +149,7 @@ export class Game {
     this.scene.add(this.marker);
 
     this.ui = new UI(this);
+    this.debug = new Debug(this);
     this._bindInput();
 
     // 初期位置（桟橋の先端）
@@ -158,6 +160,7 @@ export class Game {
     this.angler.setYaw(this.yaw);
 
     this.school.populate(this.pos, (d) => this.rollSpecies(d));
+    if (this.state.settings.debug) this.debug.setEnabled(true);
     this._updateCamera(0.016, true);
     this.renderer.compile(this.scene, this.camera);
     await onProgress('準備完了');
@@ -212,6 +215,13 @@ export class Game {
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Space') e.preventDefault();
       if (e.repeat) return;
+
+      // デバッグ表示はどの状態でも切り替えられる
+      if (e.code === 'F3' || (e.code === 'Backquote' && !this.ui.isBlocking())) {
+        e.preventDefault();
+        this.debug.toggle();
+        return;
+      }
 
       // モーダル中の処理
       if (this.ui.openModal === 'catch') {
@@ -651,6 +661,7 @@ export class Game {
 
     this.ui.updateHUD(this);
     this.renderer.render(this.scene, this.camera);
+    this.debug.update(dt);
   }
 
   /* ---------------- 視点 ---------------- */

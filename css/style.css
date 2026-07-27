@@ -397,6 +397,50 @@ kbd {
 .lake-note { font-size: 10px; opacity: .45; margin-top: 7px; line-height: 1.6; }
 #btn-reset { margin-top: 10px; font-size: 11px; padding: 7px 14px; }
 
+/* ===========================================================
+   デバッグ表示
+   =========================================================== */
+#dbg {
+  position: absolute; inset: 0; display: none;
+  pointer-events: none; z-index: 15;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px; line-height: 1.4;
+  padding: 122px 14px 34px;
+  justify-content: space-between; align-items: flex-start; gap: 10px;
+}
+body.debug-on #dbg { display: flex; }
+.dbg-col { display: flex; flex-direction: column; gap: 6px; width: 262px; max-height: 100%; overflow: hidden; }
+.dbg-col.right { align-items: stretch; }
+.dbg-box {
+  background: rgba(4, 8, 13, .82); border: 1px solid rgba(126, 224, 255, .22);
+  border-radius: 8px; padding: 6px 8px; color: #b9cbdd;
+  backdrop-filter: blur(4px);
+}
+.dbg-box > b { display: block; color: #7ee0ff; letter-spacing: .12em; font-size: 9.5px; margin-bottom: 3px; }
+.dbg-box hr { border: none; border-top: 1px solid rgba(255, 255, 255, .1); margin: 5px 0; }
+.dbg-kv { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; }
+.dbg-kv > span { opacity: .55; }
+.dbg-kv > b { color: #eaf3ff; font-weight: 500; }
+.dbg-kv .hl { color: #ffd479; }
+.dbg-kv .bad { color: #ff6b6b; }
+.dbg-snd { margin-top: 5px; display: flex; flex-direction: column; gap: 2px; }
+.dbg-s { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.dbg-s i { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; }
+.dbg-s .n { flex: 1; overflow: hidden; text-overflow: ellipsis; color: #dce8f5; }
+.dbg-s .c { opacity: .5; min-width: 40px; text-align: right; }
+.dbg-s .t { opacity: .75; min-width: 34px; text-align: right; }
+.dbg-s .bar { width: 34px; height: 3px; background: rgba(255, 255, 255, .12); border-radius: 2px; overflow: hidden; }
+.dbg-s .bar b { display: block; height: 100%; }
+.dbg-tag { display: inline-block; font-size: 9px; padding: 0 4px; border: 1px solid; border-radius: 4px; margin: 1px 0; }
+.dbg-lgwrap { display: flex; flex-wrap: wrap; gap: 2px 9px; }
+.dbg-lg { display: inline-flex; align-items: center; gap: 4px; font-size: 9px; opacity: .8; white-space: nowrap; }
+.dbg-lg i { width: 8px; height: 3px; border-radius: 2px; flex: 0 0 auto; }
+@media (max-width: 1100px) {
+  #dbg { padding-top: 120px; font-size: 9.5px; }
+  .dbg-col { width: 214px; }
+  .dbg-col.right { display: none; }
+}
+
 /* ---------- ローディング ---------- */
 #loading {
   position: absolute; inset: 0; display: flex; flex-direction: column; gap: 16px;

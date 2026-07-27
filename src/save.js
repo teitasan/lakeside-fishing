@@ -26,7 +26,7 @@ export function defaultState() {
     owned: { rod: ['bamboo'], line: ['nylon'], bait: ['worm'] },
     records: {}, // id -> {count, maxLen, maxWeight}
     achievements: [],
-    settings: { volume: 0.7, sens: 1.0, quality: 'mid', shadow: true, randomLake: false },
+    settings: { volume: 0.7, sens: 1.0, quality: 'mid', shadow: true, randomLake: false, debug: false },
   };
 }
 
