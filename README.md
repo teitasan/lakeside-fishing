@@ -1,6 +1,6 @@
 # 湖畔のフィッシング — Lakeside Fishing
 
-### ▶ **[ブラウザで遊ぶ（GitHub Pages）](https://teitasan.github.io/lakeside-fishing/)**
+### ▶ **[ブラウザで遊ぶ（GitHub Pages）](https://teitasan.github.io/lakeside-fishing/)**　|　📐 **[パラメータ解説](https://teitasan.github.io/lakeside-fishing/manual.html)**
 
 Three.js だけで作った、ブラウザで完結する 3D 釣りゲームです。
 外部アセット・外部通信は一切なし（three.js もリポジトリ内に同梱）。
@@ -59,6 +59,15 @@ WebGL2 対応ブラウザ（Chrome / Edge / Firefox / Safari の最新版）推�
    - **残り距離**が振り切れる → 走り切られて逃走
    - テンションを掛け続けると**魚の体力**が減り、寄せやすくなります。
 5. **釣果**：全長・重さ・買値・経験値が出て、お金と図鑑に反映されます。レベルが上がると上位の道具が解禁。
+
+## パラメータ解説ページ
+
+内部の計算式と全パラメータを解説した [manual.html](https://teitasan.github.io/lakeside-fishing/manual.html) を同梱しています。
+
+- 「魚の体力」「糸の強さ」など 4 つのメーターの正体と、ファイトの完全な更新式
+- **ファイト・シミュレータ**：魚種 × ロッド × ライン × 操作の丁寧さ を指定して、取込率／ライン切れ率／所要時間を 200 回試行で計算（テンション推移グラフ付き）
+- **アタリ抽選シミュレータ**：水深・時刻・天候・エサ・レベルを指定して、どの魚が何％で食いつくかを重みの内訳付きで表示
+- 魚 22 種・装備 17 種の全パラメータ表（ゲーム本体の `src/data.js` を読み込んで生成するため常に実装と一致）
 
 ## 攻略のヒント
 

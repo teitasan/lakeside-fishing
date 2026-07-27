@@ -1,0 +1,1114 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>パラメータ解説 — 湖畔のフィッシング</title>
+<style>
+:root {
+  --gold: #f5cf6b;
+  --gold-dim: #b99442;
+  --bg: #0a0f16;
+  --bg2: #0e1520;
+  --card: #131c28;
+  --card2: #182432;
+  --line: rgba(255, 255, 255, .09);
+  --fg: #e7eef8;
+  --fg-dim: #9fb0c4;
+  --fg-mute: #6f8298;
+  --good: #6de08a;
+  --warn: #f5c451;
+  --bad: #ff6b6b;
+  --cyan: #7ee0ff;
+  --violet: #c4a4ff;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; scroll-padding-top: 74px; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic", "Noto Sans JP", Meiryo, system-ui, sans-serif;
+  line-height: 1.85;
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--gold); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code, .mono { font-family: var(--mono); font-size: .88em; }
+
+/* ---------- ヘッダー ---------- */
+header.top {
+  position: sticky; top: 0; z-index: 50;
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 12px 22px;
+  background: rgba(8, 12, 18, .93);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--line);
+}
+header.top h1 { font-size: 17px; font-weight: 700; letter-spacing: .04em; }
+header.top h1 small { font-weight: 400; opacity: .5; font-size: 12px; margin-left: 8px; letter-spacing: .1em; }
+header.top .sp { flex: 1; }
+.btn-link {
+  display: inline-block; font-size: 12.5px; padding: 6px 14px; border-radius: 9px;
+  border: 1px solid rgba(245, 207, 107, .45); color: var(--gold);
+  background: rgba(245, 207, 107, .09);
+}
+.btn-link:hover { background: rgba(245, 207, 107, .2); text-decoration: none; }
+.btn-link.ghost { border-color: var(--line); color: var(--fg-dim); background: transparent; }
+
+/* ---------- レイアウト ---------- */
+.wrap { display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: 34px; max-width: 1320px; margin: 0 auto; padding: 26px 22px 90px; }
+nav.toc { position: sticky; top: 86px; align-self: start; max-height: calc(100vh - 110px); overflow-y: auto; font-size: 12.5px; }
+nav.toc div.g { margin-bottom: 14px; }
+nav.toc a { display: block; padding: 3px 10px; border-left: 2px solid var(--line); color: var(--fg-dim); }
+nav.toc a:hover { color: var(--gold); border-color: var(--gold-dim); text-decoration: none; }
+nav.toc a.h2 { font-weight: 700; color: var(--fg); border-color: rgba(245, 207, 107, .35); margin-top: 6px; }
+main { min-width: 0; }
+
+/* ---------- 見出し ---------- */
+section { margin-bottom: 54px; scroll-margin-top: 80px; }
+h2 {
+  font-size: 22px; letter-spacing: .03em; margin: 0 0 6px;
+  padding-bottom: 9px; border-bottom: 1px solid var(--line);
+  display: flex; align-items: baseline; gap: 11px;
+}
+h2 .num { font-family: var(--mono); font-size: 13px; color: var(--gold-dim); }
+h3 { font-size: 16.5px; margin: 30px 0 8px; color: var(--gold); letter-spacing: .02em; }
+h4 { font-size: 14px; margin: 18px 0 4px; color: var(--cyan); }
+p { margin: 8px 0; color: var(--fg-dim); }
+p strong, li strong { color: var(--fg); font-weight: 700; }
+ul, ol { margin: 8px 0 8px 22px; color: var(--fg-dim); }
+li { margin: 3px 0; }
+.lead { font-size: 15.5px; color: var(--fg); }
+
+/* ---------- カード ---------- */
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 13px; padding: 16px 18px; margin: 14px 0; }
+.card.tight { padding: 12px 14px; }
+.grid { display: grid; gap: 13px; }
+.grid.c2 { grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); }
+.grid.c3 { grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); }
+.grid.c4 { grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); }
+.meter-card { border-left: 3px solid var(--c, var(--gold)); }
+.meter-card h4 { color: var(--c, var(--gold)); margin-top: 0; font-size: 15px; }
+.meter-card .sub { font-size: 11px; color: var(--fg-mute); font-family: var(--mono); }
+
+pre {
+  background: #070b11; border: 1px solid var(--line); border-radius: 10px;
+  padding: 13px 15px; overflow-x: auto; margin: 10px 0;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.75; color: #cfe0f2;
+}
+
+pre .cm { color: #5a7391; }
+pre .k { color: #ff9ec4; }
+pre .n { color: #ffd479; }
+pre .s { color: #9ce8b0; }
+.src { font-size: 11px; color: var(--fg-mute); font-family: var(--mono); margin-top: -4px; }
+
+.note { border-left: 3px solid var(--cyan); background: rgba(126, 224, 255, .06); padding: 11px 14px; border-radius: 0 9px 9px 0; margin: 13px 0; font-size: 13.5px; }
+.note.warn { border-color: var(--warn); background: rgba(245, 196, 81, .07); }
+.note.q { border-color: var(--gold); background: rgba(245, 207, 107, .07); }
+.note b { color: var(--fg); }
+.note .qh { display: block; font-weight: 700; color: var(--gold); margin-bottom: 3px; font-size: 14.5px; }
+
+kbd { font-family: var(--mono); font-size: 11.5px; background: rgba(255, 255, 255, .1); border: 1px solid rgba(255, 255, 255, .18); border-radius: 5px; padding: 1px 6px; }
+.tag { display: inline-block; font-size: 10.5px; font-family: var(--mono); padding: 1px 7px; border-radius: 5px; background: rgba(255, 255, 255, .08); border: 1px solid var(--line); color: var(--fg-dim); margin: 0 2px 2px 0; }
+.pill { display: inline-block; font-size: 11px; padding: 1px 9px; border-radius: 99px; font-weight: 700; }
+
+/* ---------- テーブル ---------- */
+.tw { overflow-x: auto; margin: 13px 0; border: 1px solid var(--line); border-radius: 11px; background: var(--card); }
+.tw.tall { max-height: min(74vh, 680px); overflow: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+th, td { padding: 7px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid rgba(255, 255, 255, .05); }
+th { position: sticky; top: 0; background: #101a26; color: var(--fg-dim); font-weight: 600; font-size: 11px; letter-spacing: .04em; z-index: 2; text-align: right; box-shadow: 0 1px 0 var(--line); }
+th.l, td.l { text-align: left; }
+tbody tr:hover td { background: rgba(255, 255, 255, .028); }
+td.name { font-weight: 700; color: var(--fg); }
+td.num, th.num { font-family: var(--mono); }
+tfoot td { color: var(--fg-mute); font-size: 11px; }
+table .sep td { background: #0b1219; color: var(--gold-dim); font-size: 11px; letter-spacing: .12em; text-align: left; font-weight: 700; }
+
+/* ---------- ツール ---------- */
+.tool { background: linear-gradient(180deg, #16212f, #111a25); border: 1px solid rgba(245, 207, 107, .22); border-radius: 14px; padding: 17px 19px; margin: 16px 0; }
+.tool h4 { margin-top: 0; color: var(--gold); font-size: 14.5px; display: flex; align-items: center; gap: 8px; }
+.controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(178px, 1fr)); gap: 11px 15px; margin: 12px 0 4px; }
+.ctl label { display: block; font-size: 11px; color: var(--fg-mute); letter-spacing: .05em; margin-bottom: 3px; }
+.ctl select, .ctl input[type=number] {
+  width: 100%; background: #0a1017; color: var(--fg); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 9px; font-family: inherit; font-size: 13px;
+}
+.ctl input[type=range] { width: 100%; accent-color: var(--gold); }
+.ctl .val { font-family: var(--mono); font-size: 12px; color: var(--gold); float: right; }
+.out { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 10px; margin-top: 14px; }
+.stat { background: #0b1219; border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; }
+.stat .k { font-size: 10.5px; color: var(--fg-mute); letter-spacing: .06em; }
+.stat .v { font-size: 19px; font-weight: 700; font-family: var(--mono); line-height: 1.35; }
+.verdict { font-size: 13px; margin-top: 12px; padding: 9px 13px; border-radius: 9px; background: rgba(255, 255, 255, .04); border-left: 3px solid var(--fg-mute); }
+canvas { display: block; width: 100%; height: auto; margin-top: 13px; border-radius: 10px; background: #070b11; border: 1px solid var(--line); }
+.legend { display: flex; gap: 15px; flex-wrap: wrap; font-size: 11.5px; color: var(--fg-mute); margin-top: 7px; }
+.legend i { display: inline-block; width: 11px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+
+.bar { height: 9px; border-radius: 99px; background: rgba(255, 255, 255, .07); overflow: hidden; min-width: 54px; }
+.bar i { display: block; height: 100%; border-radius: 99px; }
+
+#jsWarn { background: rgba(255, 107, 107, .12); border: 1px solid rgba(255, 107, 107, .4); color: #ffd6d6; padding: 13px 16px; border-radius: 11px; margin-bottom: 22px; font-size: 13.5px; }
+
+footer { border-top: 1px solid var(--line); padding: 22px; text-align: center; color: var(--fg-mute); font-size: 12px; }
+
+@media (max-width: 900px) {
+  .wrap { grid-template-columns: 1fr; gap: 0; padding: 18px 15px 70px; }
+  nav.toc { position: static; max-height: none; margin-bottom: 26px; border-bottom: 1px solid var(--line); padding-bottom: 14px; columns: 2; }
+  header.top h1 { font-size: 15px; }
+  header.top h1 small { display: none; }
+}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <h1>湖畔のフィッシング <small>PARAMETER REFERENCE</small></h1>
+  <span class="sp"></span>
+  <a class="btn-link" href="./index.html">▶ ゲームに戻る</a>
+  <a class="btn-link ghost" href="https://github.com/teitasan/lakeside-fishing" target="_blank" rel="noopener">GitHub</a>
+</header>
+
+<div class="wrap">
+<nav class="toc" id="toc"></nav>
+
+<main>
+  <div id="jsWarn">
+    このページはゲームのソース（<code>src/data.js</code> など）を直接読み込んで表を生成します。
+    数値が表示されない場合は <code>file://</code> で開いています。<code>./serve.sh</code> などの
+    ローカルサーバー経由か、<a href="https://teitasan.github.io/lakeside-fishing/manual.html">公開版</a>で開いてください。
+  </div>
+
+  <p class="lead">
+    このページは <b>湖畔のフィッシング</b> の内部パラメータと計算式を、実装（<code>src/</code>）そのままに解説したものです。
+    魚と装備の表は <b>ゲーム本体のデータファイルを読み込んで生成</b>しているので、常に実際の値と一致します。
+    計算式は <code>src/game.js</code> の該当箇所をそのまま引用しています。
+  </p>
+
+  <!-- ============================================================ -->
+  <section id="s0">
+    <h2><span class="num">0</span>単位と記号</h2>
+    <div class="grid c3">
+      <div class="card tight"><h4>長さ</h4><p>ワールド 1 単位 = <b>1 m</b>。魚の全長は cm。水深 m。</p></div>
+      <div class="card tight"><h4>時間</h4><p>式の <code>dt</code> は実時間の秒。ゲーム内時刻は実 30 秒で 1 時間（1 日 = 実 12 分）。</p></div>
+      <div class="card tight"><h4>0〜1 の量</h4><p>テンション比・残り距離・体力は 0〜1 の内部値。HUD のバーはそのまま％表示。</p></div>
+    </div>
+    <p>以下、<code>sp</code> は魚種データ、<code>rod</code>/<code>line</code>/<code>bait</code> は装備データ、<code>F</code> はファイト中の状態を指します。</p>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="s1">
+    <h2><span class="num">1</span>ファイト — 4つのメーターの正体</h2>
+    <p>
+      ヒット後の駆け引きは、次の 4 つの状態量だけで決まります。毎フレーム、この 4 つが更新され、
+      3 つの終了条件のどれかに触れた瞬間に決着します。
+    </p>
+
+    <div class="grid c4">
+      <div class="card meter-card" style="--c:#f5c451">
+        <h4>ラインテンション</h4>
+        <div class="sub">F.tension / line.cap</div>
+        <p>糸に掛かっている張力。<b>巻くと増え、離すと減る</b>。<code>line.cap</code>（糸の強さ）に達した瞬間に<b>ラインブレイク</b>。</p>
+      </div>
+      <div class="card meter-card" style="--c:#7ee0ff">
+        <h4>残り距離</h4>
+        <div class="sub">F.dist（1 = 着水点）</div>
+        <p>魚までの距離。ヒット時 <b>0.88</b> から始まり、巻けば減り、放せば魚に引かれて増える。<b>1.0 で逃走／0.03 で取り込み</b>。</p>
+      </div>
+      <div class="card meter-card" style="--c:#ff8fa3">
+        <h4>魚の体力</h4>
+        <div class="sub">F.stamina（1 → 0）</div>
+        <p>魚のスタミナ。<b>テンションを掛けている間だけ減る</b>。減ると引く力が弱まり、突進しなくなり、水面に浮いてくる。</p>
+      </div>
+      <div class="card meter-card" style="--c:#ff6b6b">
+        <h4>突進（ラン）</h4>
+        <div class="sub">F.running / runTimer</div>
+        <p>周期的に発生する暴れ。発生中は<b>引く力が 2 倍</b>。「走った！」の表示中に巻くと一気にテンションが上がる。</p>
+      </div>
+    </div>
+
+    <h3>毎フレームの更新式（実装そのまま）</h3>
+    <pre><span class="cm">// 引きの強さ。突進中は2倍、体力が尽きると半分になる</span>
+pull = F.pull0 * (F.running ? <span class="n">2.0</span> : <span class="n">1.0</span>) * (<span class="n">0.5</span> + <span class="n">0.5</span> * F.stamina)
+
+<span class="k">if</span> (巻いている) {
+  resist  = clamp(<span class="n">1.70</span> - pull * <span class="n">0.75</span>, <span class="n">0.35</span>, <span class="n">1.60</span>)   <span class="cm">// 強い魚ほど巻けない</span>
+  F.dist    -= rod.reel * <span class="n">0.28</span> * resist * dt
+  F.tension += (<span class="n">0.08</span> + pull * <span class="n">0.55</span>) * dt / rod.power
+} <span class="k">else</span> {
+  F.dist    += pull * <span class="n">0.032</span> * dt                    <span class="cm">// 糸を出す=魚が遠ざかる</span>
+  F.tension -= (<span class="n">1.30</span> + pull * <span class="n">0.30</span>) * dt
+  <span class="k">if</span> (F.running) F.tension += pull * <span class="n">0.30</span> * dt   <span class="cm">// 走られると放しても張る</span>
+}
+F.tension = clamp(F.tension, <span class="n">0</span>, line.cap * <span class="n">1.2</span>)
+
+<span class="cm">// 体力：テンション比が高いほど速く削れる</span>
+tRatio = clamp01(F.tension / line.cap)
+F.stamina -= (<span class="n">0.022</span> + tRatio * <span class="n">0.17</span> + (巻いている ? <span class="n">0.02</span> : <span class="n">0</span>)) * dt / max(<span class="n">0.4</span>, sp.sta)
+
+<span class="cm">// 決着</span>
+<span class="k">if</span> (F.tension &gt;= line.cap) → ラインブレイク
+<span class="k">if</span> (F.dist &gt;= <span class="n">1.0</span>)          → 逃走
+<span class="k">if</span> (F.dist &lt;= <span class="n">0.03</span>)         → 取り込み</pre>
+    <p class="src">src/game.js — _updateFight()</p>
+
+    <h4>ヒット時の初期値</h4>
+    <pre>sizeF   = <span class="n">0.55</span> + (この個体の全長 / sp.len[1]) * <span class="n">0.75</span>   <span class="cm">// 0.55〜1.30</span>
+F.pull0 = sp.str * sizeF                              <span class="cm">// この個体の基礎引き</span>
+F.dist    = <span class="n">0.88</span>   F.tension = <span class="n">0</span>   F.stamina = <span class="n">1</span>
+F.runTimer = rand(<span class="n">1.4</span>, <span class="n">3.2</span>)                           <span class="cm">// 最初の突進までの秒数</span></pre>
+    <p class="src">src/game.js — _setHook()</p>
+
+    <h4>突進（ラン）の周期</h4>
+    <pre><span class="cm">// 体力が 0.16 以下になると突進しなくなる</span>
+継続時間 = rand(<span class="n">0.7</span>, <span class="n">1.9</span>) * (<span class="n">0.7</span> + sp.agg * <span class="n">0.5</span>)
+次まで   = rand(<span class="n">1.8</span>, <span class="n">4.2</span>) / (<span class="n">0.6</span> + sp.agg * <span class="n">0.8</span>)</pre>
+    <p class="src">src/game.js — _updateFight()</p>
+
+    <h3>質問への回答</h3>
+
+    <div class="note q">
+      <span class="qh">Q. 「魚の体力」とは？ 減ると何が起きる？</span>
+      魚のスタミナ <code>F.stamina</code>（1 → 0）です。<b>テンションを掛けている間だけ</b>削れ、
+      減ると次の 3 つが同時に起きます。
+      <ul style="margin-bottom:0">
+        <li><b>引く力が落ちる</b>：<code>pull</code> の係数 <code>(0.5 + 0.5×stamina)</code> が 1.0 → 0.5 に。つまり<b>最大で半減</b>。
+          引きが弱まると <code>resist</code> が上がるので巻き取り速度も上がり、加速度的に楽になります。</li>
+        <li><b>突進しなくなる</b>：<code>stamina ≤ 0.16</code> で新しいランが発生しません。</li>
+        <li><b>浮いてくる</b>：見た目の泳層が <code>lerp(0.35, 2.4, stamina)</code> m と浅くなり、水面で暴れる演出になります。</li>
+      </ul>
+      減る速さは <code>÷ max(0.4, sp.sta)</code>。つまり <b>sp.sta（体力値）が大きい魚は「粘る」</b>＝弱らせるのに時間が掛かります。
+      テンション比 0.7 を維持した場合の目安は <code>(0.022 + 0.7×0.17 + 0.02) / sta</code> ≒ <code>0.16 / sta</code> /秒 →
+      <b>sta 1.0 の魚なら約 6 秒、sta 3.2 の湖の主なら約 20 秒</b>でスタミナ切れ。
+      逆に<b>テンションを掛けずに待っても魚は疲れません</b>（0.022/sta しか減らない）。
+    </div>
+
+    <div class="note q">
+      <span class="qh">Q. 「糸の強さ（line.cap）」とは？</span>
+      <b>テンションの上限＝切れる値</b>そのものです。HUD のテンションバーは <code>tension / cap</code> を表示しているので、
+      cap が大きい糸は「同じ表示％に達するまでの余裕が大きい」＝<b>巻ける時間が長くなる</b>ことを意味します。
+      <ul style="margin-bottom:0">
+        <li>ナイロン 1.00 → ミスリル 2.80 で、<b>切れるまでに耐えられる張力が 2.8 倍</b>。</li>
+        <li>張力の増加は <code>(0.08 + pull×0.55) / rod.power</code> /秒。0 から cap に達するまでの秒数は
+          <code>cap × rod.power / (0.08 + pull×0.55)</code> です。</li>
+        <li>体力削りは <code>tension / cap</code> の比で効くため、<b>強い糸ほど「安全な範囲で強く引ける」</b>＝魚を早く疲れさせられます。</li>
+      </ul>
+    </div>
+
+    <div class="note q">
+      <span class="qh">Q. ロッドの「竿の力（power）」「巻取（reel）」の違い？</span>
+      <b>power はテンションの増加を割り算で抑える</b>値（＝竿が引きを吸収する）で、<code>tension += … / rod.power</code>。
+      <b>reel は巻き取り速度の倍率</b>で、<code>dist -= rod.reel × 0.28 × resist × dt</code>。
+      power は「切れにくさ」、reel は「早さ」に効きます。ラインブレイクを減らしたいなら <b>line.cap と rod.power</b>、
+      ファイトを短くしたいなら <b>rod.reel</b> です。<code>attract</code> はファイトには無関係（アタリの速さと抽選）。
+    </div>
+
+    <div class="note warn">
+      <b>逃走（残り距離 1.0）は「巻けない」ことで起きます。</b>
+      放している間、距離は <code>pull × 0.032</code> /秒で増えます。強い魚の突進中（pull が 2 倍）は
+      <b>放すだけで 0.2/秒以上</b>取られることもあり、巻き取り（<code>rod.reel×0.28×resist</code>）が
+      それを下回る装備だと<b>どう操作しても逃げられます</b>。これが装備の壁です。
+    </div>
+
+    <h3>ファイト・シミュレータ</h3>
+    <p>
+      実装と同じ式で 1 フレーム 1/60 秒ずつ回し、<b>「テンション比が閾値を超えたら離す」</b>という操作を
+      指定した反応遅れで行った場合の結果を、200 回試行して集計します。
+    </p>
+    <div class="tool">
+      <h4>🎣 単体シミュレーション</h4>
+      <div class="controls" id="simCtl"></div>
+      <div class="out" id="simOut"></div>
+      <div class="verdict" id="simVerdict"></div>
+      <canvas id="simChart" width="1100" height="270"></canvas>
+      <div class="legend">
+        <span><i style="background:#f5c451"></i>テンション比</span>
+        <span><i style="background:#7ee0ff"></i>残り距離</span>
+        <span><i style="background:#ff8fa3"></i>魚の体力</span>
+        <span><i style="background:#ff6b6b"></i>突進中</span>
+        <span style="opacity:.6">— 破線 = 離す閾値</span>
+      </div>
+    </div>
+
+    <h3>装備 × 魚 の対応表</h3>
+    <p>同じ条件（離す閾値・反応遅れ）で全魚種を 120 回ずつ試行した結果です。<b>取込率</b>が実質的な「その装備で獲れるか」の指標になります。</p>
+    <div class="tool">
+      <h4>📊 一括シミュレーション</h4>
+      <div class="controls" id="tblCtl"></div>
+      <div class="tw tall" id="tblOut"></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="s2">
+    <h2><span class="num">2</span>アタリ — どの魚が食いつくか</h2>
+    <p>
+      着水すると <code>biteTimer</code> 秒後に「食う魚」を 1 匹抽選します。抽選は<b>重み付き</b>で、
+      重みは次の 7 つの積です（<code>src/game.js — rollSpecies()</code>）。
+    </p>
+
+    <pre>w = sp.spawn                                            <span class="cm">// ① 基礎出現量</span>
+  × 水深適合                                            <span class="cm">// ②</span>
+  × sp.times[時間帯]                                    <span class="cm">// ③ 朝/昼/夕/夜</span>
+  × sp.weather[天候]                                    <span class="cm">// ④ 晴/曇/雨</span>
+  × エサ相性                                            <span class="cm">// ⑤ タグの平均</span>
+  × (<span class="n">0.14</span> + <span class="n">1.4</span> × exp(−(エサ層 − 生息層中央)² / (2σ²)))     <span class="cm">// ⑥ 層の一致</span>
+  × (レア度≧3 なら bait.rare) × rod.attract             <span class="cm">// ⑦ レア補正</span>
+  × レベル解禁（エピック/レジェンドのみ）
+
+<span class="cm">// ② 水深適合：sp.depth = [d0, d1]</span>
+depth &lt; d0 × <span class="n">0.55</span>            → <span class="n">0</span>（絶対に出ない）
+d0 ≦ depth ≦ d1 + <span class="n">3</span>         → <span class="n">1.00</span>
+depth &gt; d1 + <span class="n">3</span>             → <span class="n">0.18</span>
+それ以外（浅すぎ）           → <span class="n">0.09</span>
+
+<span class="cm">// ⑥ σ = max(2.5, (d1 − d0) × 0.75)、エサ層 = min(bait.depth, max(0.35, 水深 − 0.35))</span>
+
+<span class="cm">// ⑦ レベル解禁</span>
+レア度4（エピック）  × clamp01((Lv − <span class="n">2</span>) / <span class="n">5</span>)    <span class="cm">// Lv3 から出始め Lv7 で全開</span>
+レア度5（レジェンド）× clamp01((Lv − <span class="n">5</span>) / <span class="n">6</span>)    <span class="cm">// Lv6 から出始め Lv11 で全開</span></pre>
+
+    <div class="note">
+      <b>エサ相性（⑤）</b>は、魚の <code>tags</code> のうちエサの <code>aff</code> に載っているものの<b>平均</b>です。
+      例：ブラックバスの tags は <code>predator, weed</code>。スプーンの aff は predator 1.5 / weed 0.8 →
+      相性は (1.5 + 0.8) / 2 = <b>1.15</b>。1 つも一致しなければ 1.0（無補正）。
+    </div>
+
+    <h3>いま何が釣れる？ 出現確率シミュレータ</h3>
+    <p>条件を選ぶと、上の式そのままで<b>「次のアタリがどの魚か」の確率</b>を計算します。</p>
+    <div class="tool">
+      <h4>🐟 アタリ抽選の確率</h4>
+      <div class="controls" id="rollCtl"></div>
+      <div id="rollInfo" style="font-size:12.5px;color:var(--fg-mute);margin-top:10px"></div>
+      <div class="tw tall" id="rollOut"></div>
+    </div>
+
+    <h3>アタリまでの流れとタイミング</h3>
+    <div class="tw"><table>
+      <thead><tr><th class="l">段階</th><th class="l">長さ・条件</th><th class="l">内容</th></tr></thead>
+      <tbody>
+        <tr><td class="l name">① 着水</td><td class="l num">—</td><td class="l">半径 <code>2.6 + power×2.2</code> m（好キャストなら 1.4 m）の魚が驚いて逃げる</td></tr>
+        <tr><td class="l name">② アタリ待ち</td><td class="l num">rand(2.2, 7.0) ÷ attract 秒<br>水深 &lt; 0.9 m ならさらに ×1.7</td>
+            <td class="l"><code>attract = bait.attract × rod.attract × 天候 × (好キャスト 1.18)</code></td></tr>
+        <tr><td class="l name">③ 抽選 → 接近</td><td class="l num">実測 3〜9 秒<br>（22 秒で諦めて再抽選）</td>
+            <td class="l">18 m 以内に同種がいればその個体が寄る。いなければ 5.5〜9.5 m 先に生成して寄せる。遊泳速度 <code>(0.78 + 全長cm/100 × 1.7) × 1.45</code> m/s</td></tr>
+        <tr><td class="l name">④ 前アタリ</td><td class="l num">rand(0.7, 1.9) 秒<br>レア度 4 以上は ×1.5</td><td class="l">ウキが小刻みに震える。ここで巻くと回収になってしまう</td></tr>
+        <tr><td class="l name">⑤ 本アタリ</td><td class="l num"><code>lerp(1.55, 0.85, レア度/5)</code> 秒<br>トラウト系はさらに ×0.8</td>
+            <td class="l"><b>アワセ猶予</b>。ウキが 0.42 m 沈み <code>!</code> が出る。<b>コモン 1.55 秒／レジェンド 0.85 秒／ヤマメ・イワナ等 0.68〜1.24 秒</b></td></tr>
+      </tbody>
+    </table></div>
+
+    <h4>ゴミが釣れる確率</h4>
+    <pre>P(ゴミ) = <span class="n">0.085</span> × bait.junk × (水深 &lt; <span class="n">1.4</span> m ? <span class="n">1.8</span> : <span class="n">1</span>) × (総釣果 &lt; 3 匹 ? <span class="n">0.3</span> : <span class="n">1</span>)</pre>
+    <p>ミミズ（junk 1.0）で深場なら 8.5%、浅場だと 15.3%。秘伝の撒き餌（junk 0.25）なら 2.1% まで下がります。ゴミは泳いで来ないのでその場で即・前アタリになります。</p>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="s3">
+    <h2><span class="num">3</span>魚データ（全 22 種）</h2>
+    <p>
+      <code>src/data.js</code> の <code>SPECIES</code> をそのまま表にしています。
+      <b>str</b>＝引きの強さ、<b>sta</b>＝体力（粘り）、<b>agg</b>＝突進頻度。
+    </p>
+    <div class="tw tall" id="spTable"></div>
+
+    <h3>時間帯・天候の倍率</h3>
+    <p>③④ に掛かる倍率です。時間帯は <code>朝 4:30–7:30 / 昼 7:30–16:30 / 夕 16:30–19:30 / 夜 それ以外</code>。</p>
+    <div class="tw tall" id="spTable2"></div>
+
+    <h3>全長・重さ・売値・経験値の式</h3>
+    <pre><span class="cm">// 全長の抽選：小さい個体が出やすい（べき分布）</span>
+p    = <span class="n">2.1</span> − min(<span class="n">1.2</span>, bait.rare × <span class="n">0.25</span>)
+全長 = len[0] + (len[1] − len[0]) × random()^p       <span class="cm">// 期待値は範囲の 1/(p+1) ≒ 32%</span>
+
+重さ(kg)   = sp.wc × 全長³ / <span class="n">100000</span>
+売値(G)    = round(sp.value + sp.perCm × 全長 × (<span class="n">0.75</span> + <span class="n">0.5</span> × 範囲内の位置))
+経験値     = round(レア度XP + 全長 × <span class="n">0.45</span> × (<span class="n">1</span> + レア度 × <span class="n">0.22</span>))
+             <span class="cm">// レア度XP = ゴミ2 / コモン8 / アンコモン18 / レア40 / エピック95 / レジェンド260</span></pre>
+    <p class="src">src/data.js — rollLength(), weightOf(), valueOf(), xpOf()</p>
+    <div class="note">
+      秘伝の撒き餌（rare 2.2）は p が 2.1 → 1.55 になり、期待サイズが範囲の 32% → <b>39%</b> に上がります。
+      レア度 3 以上の出現重みも 2.2 倍。
+    </div>
+    <h4>サイズ別の実例</h4>
+    <div class="tw" id="calcTable"></div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="s4">
+    <h2><span class="num">4</span>装備データ</h2>
+    <h3>ロッド</h3>
+    <p><b>reel</b>＝巻き取り速度倍率（<code>dist -= reel×0.28×resist×dt</code>）、<b>power</b>＝テンション増加の割り算（大きいほど切れにくい）、<b>attract</b>＝アタリの速さと抽選重み。</p>
+    <div class="tw" id="rodTable"></div>
+
+    <h3>ライン</h3>
+    <p><b>cap</b>＝テンションの上限（この値に達すると切れる）。</p>
+    <div class="tw" id="lineTable"></div>
+
+    <h3>エサ・ルアー</h3>
+    <p><b>depth</b>＝狙う層（m。実際は <code>min(depth, 水深−0.35)</code>）、<b>attract</b>＝アタリの速さ、<b>rare</b>＝レア度 3 以上の重み＆サイズ補正、<b>junk</b>＝ゴミ率の倍率、<b>aff</b>＝タグ別の食いつき。</p>
+    <div class="tw" id="baitTable"></div>
+    <div class="tw" id="affTable"></div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="s5">
+    <h2><span class="num">5</span>キャストの物理</h2>
+    <pre><span class="cm">// 長押し中：1.05 /秒で 0↔1 を往復（ピンポン）</span>
+power = 往復値
+好キャスト = |power − <span class="n">0.78</span>| &lt; <span class="n">0.07</span>      <span class="cm">// メーターの白線 ±7%</span>
+
+<span class="cm">// 射出</span>
+仰角成分 = clamp(<span class="n">0.46</span> + pitch × <span class="n">0.55</span>, <span class="n">0.16</span>, <span class="n">0.95</span>)   <span class="cm">// 視点の上下で変わる</span>
+初速     = lerp(<span class="n">8.5</span>, <span class="n">28.5</span>, power) m/s
+毎フレーム: v.y −= <span class="n">9.8</span>·dt ;  v ×= (<span class="n">1</span> − <span class="n">0.0055</span>·|v|·dt)    <span class="cm">// 重力 + 空気抵抗</span>
+
+糸の最大長 = <span class="n">62</span> m（超えるとその場で着水／待機中に超えると強制回収）</pre>
+    <p class="src">src/game.js — _castVelocity(), _predictLanding(), MAX_LINE</p>
+    <div class="grid c2">
+      <div class="card tight"><h4>飛距離の目安</h4><p>視点を水平にした全力キャストで <b>約 45 m</b>、パワー 50% で約 15 m。ためている間に表示される<b>着水予測リング</b>は、この式を 0.045 秒刻みで積分した実際の落下点です（表示水深も同地点の値）。</p></div>
+      <div class="card tight"><h4>好キャストの効果</h4><p>驚かす半径が 2.6+ → <b>1.4 m</b> に縮小、アタリまでの時間が <b>÷1.18</b>。</p></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="s6">
+    <h2><span class="num">6</span>環境（時間・天候・地形）</h2>
+    <h3>時間</h3>
+    <p>実時間 1 秒でゲーム内 <code>24/720 = 0.0333</code> 時間（＝ 2 分）進みます。<b>1 日 = 実 12 分</b>、夜は実 4 分ほど。メニューの「ひと休み」で 1 時間ジャンプできます。</p>
+    <div class="tw"><table>
+      <thead><tr><th class="l">時間帯タグ</th><th class="l">ゲーム内時刻</th><th class="l">主な魚</th></tr></thead>
+      <tbody>
+        <tr><td class="l name">dawn（朝）</td><td class="l num">4:30 – 7:30</td><td class="l">ヤマメ・イワナ・白龍魚（×2.4）</td></tr>
+        <tr><td class="l name">day（昼）</td><td class="l num">7:30 – 16:30</td><td class="l">モロコ・ブルーギル・ライギョ・ソウギョ</td></tr>
+        <tr><td class="l name">dusk（夕）</td><td class="l num">16:30 – 19:30</td><td class="l">ニジマス・ブラックバス・ビワマス（×1.8）</td></tr>
+        <tr><td class="l name">night（夜）</td><td class="l num">19:30 – 4:30</td><td class="l">ナマズ・チョウザメ・ガー・湖の主（×1.7）</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>天候</h3>
+    <p>2.5〜6.5 ゲーム内時間ごとに抽選（現在の天候は重み ×0.35 で出にくい）。<b>bite</b> はアタリまでの時間に掛かる倍率です。</p>
+    <div class="tw"><table>
+      <thead><tr><th class="l">天候</th><th class="num">抽選重み</th><th class="num">bite（アタリ速さ）</th><th class="num">雲量</th><th class="num">雨</th><th class="l">見た目の変化</th></tr></thead>
+      <tbody>
+        <tr><td class="l name">☀️ 晴れ</td><td class="num">44</td><td class="num">1.00</td><td class="num">0.14</td><td class="num">0</td><td class="l">影が強い・水面のきらめき</td></tr>
+        <tr><td class="l name">☁️ くもり</td><td class="num">34</td><td class="num">1.12</td><td class="num">0.72</td><td class="num">0</td><td class="l">日光 −45%・環境光 +35%</td></tr>
+        <tr><td class="l name">🌧️ 雨</td><td class="num">22</td><td class="num">1.30</td><td class="num">0.95</td><td class="num">0.85</td><td class="l">波 ×2.15・視界 210 m・雨粒と白波</td></tr>
+      </tbody>
+      <tfoot><tr><td colspan="6" class="l">波の大きさ <code>1 + 雨×1.15 + 雲量×0.18</code>。雨は魚の <code>weather</code> 倍率にも効く（ウグイ・ドジョウ・ナマズ・イワナ・湖の主 = 1.8）。</td></tr></tfoot>
+    </table></div>
+
+    <h3>地形と水深</h3>
+    <div class="grid c2">
+      <div class="card tight"><h4>湖の断面</h4><p>岸から約 8 m は 0〜3 m の浅場。そこから急に落ち込み（ドロップオフ）、20 m 先で約 8 m、35 m 先で約 12 m。湖心の最深部は <b>26 m</b>。</p></div>
+      <div class="card tight"><h4>深い淵（ホール）</h4><p>桟橋の左手前、中心から約 96 m の位置に半径 30 m・最大 <b>+13 m</b> 深い窪み。ここだけ <b>23〜34 m</b> に達し、レジェンド（水深 14〜30 m）が成立します。</p></div>
+      <div class="card tight"><h4>藻場（シャローフラット）</h4><p>桟橋の右手、半径 30 m を <b>+3.2 m</b> 底上げした 0.5〜2 m の浅場。葦が密生し、ライギョ・ブルーギル（weed タグ）向き。</p></div>
+      <div class="card tight"><h4>歩ける範囲</h4><p>地形高さ <b>−0.55 m</b> までは入れる（水深 0.55 m まで）。急斜面（勾配 1.5 超）は登れません。桟橋の上は高さ 1.35 m 固定。</p></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="s7">
+    <h2><span class="num">7</span>成長・お金・実績</h2>
+    <h3>レベル曲線</h3>
+    <pre>次のレベルまでの累積経験値 = round(<span class="n">55</span> × Lv^<span class="n">1.42</span>)</pre>
+    <p class="src">src/save.js — xpForLevel()</p>
+    <div class="tw" id="lvTable"></div>
+
+    <h3>実績</h3>
+    <div class="tw" id="achTable"></div>
+
+    <h3>セーブされる内容</h3>
+    <p>
+      <code>localStorage["lakeside-fishing-save-v1"]</code> に、所持金・経験値・レベル・総釣果・総収入・最大全長・
+      レジェンド数・夜釣り数・ライン切れ数・逃走数・ゲーム内時刻・装備・所持品・魚種別記録（匹数／最大全長／最大重量）・
+      実績・設定を保存します。釣果確定時に即書き込み、購入や設定変更は 0.4 秒のデバウンス書き込みです。
+    </p>
+  </section>
+
+  <!-- ============================================================ -->
+  <section id="s8">
+    <h2><span class="num">8</span>ソース対応表</h2>
+    <div class="tw"><table>
+      <thead><tr><th class="l">ファイル</th><th class="l">主な内容</th></tr></thead>
+      <tbody>
+        <tr><td class="l name">src/data.js</td><td class="l">魚種・ロッド・ライン・エサ・実績・レア度、重さ／売値／経験値／全長抽選の式</td></tr>
+        <tr><td class="l name">src/game.js</td><td class="l">状態機械、<code>rollSpecies</code>（抽選）、<code>_onLandWater</code>（アタリ時間）、<code>_startBite</code>（アワセ猶予）、<code>_setHook</code>／<code>_updateFight</code>（ファイト）、キャスト物理、レベル・実績処理</td></tr>
+        <tr><td class="l name">src/save.js</td><td class="l">セーブ／ロード、<code>xpForLevel</code></td></tr>
+        <tr><td class="l name">src/fish.js</td><td class="l">魚メッシュ生成、遊泳AI（回遊・接近・前アタリ・逃走・跳ね）、魚群の入れ替え</td></tr>
+        <tr><td class="l name">src/terrain.js</td><td class="l">湖底の高さ関数（ドロップオフ・淵・藻場）、桟橋、岸辺の装飾</td></tr>
+        <tr><td class="l name">src/water.js</td><td class="l">波の式（CPU/GPU 共通）、水面シェーダ、波紋・しぶき</td></tr>
+        <tr><td class="l name">src/sky.js</td><td class="l">時間帯ごとの空と光、天候の遷移と倍率、雨</td></tr>
+        <tr><td class="l name">src/ui.js</td><td class="l">HUD・図鑑・ショップ・釣果カード、魚のシルエット描画</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+</main>
+</div>
+
+<footer>
+  湖畔のフィッシング — パラメータ解説 / このページの表と計算は <code>src/data.js</code> を直接読み込んで生成しています
+</footer>
+
+<script type="module">
+import { SPECIES, RARITY, RODS, LINES, BAITS, ACHIEVEMENTS, weightOf, valueOf, xpOf } from './src/data.js';
+import { xpForLevel } from './src/save.js';
+import { timeBand } from './src/util.js';
+
+document.getElementById('jsWarn')?.remove();
+
+/* ---------- 共通 ---------- */
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const clamp01 = (v) => clamp(v, 0, 1);
+const rand = (a, b) => a + Math.random() * (b - a);
+const lerp = (a, b, t) => a + (b - a) * t;
+const f1 = (n) => (Math.round(n * 10) / 10).toFixed(1);
+const f2 = (n) => (Math.round(n * 100) / 100).toFixed(2);
+const pct = (n) => (n * 100).toFixed(0) + '%';
+
+const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
+
+/* sky.js の WEATHERS（three.js を読み込まないためここに転記） */
+const WEATHERS = {
+  clear: { name: '☀️ 晴れ', bite: 1.00 },
+  cloudy: { name: '☁️ くもり', bite: 1.12 },
+  rain: { name: '🌧️ 雨', bite: 1.30 },
+};
+
+const FISH = SPECIES.filter((s) => s.rarity > 0);
+const JUNK = SPECIES.filter((s) => s.rarity === 0);
+const rcolor = (r) => RARITY[r].color;
+const rlabel = (r) => RARITY[r].label;
+const avgLen = (sp, p = 2.1) => sp.len[0] + (sp.len[1] - sp.len[0]) * (1 / (p + 1));
+
+/* ============================================================
+   目次を自動生成
+   ============================================================ */
+(function buildToc() {
+  const toc = document.getElementById('toc');
+  document.querySelectorAll('main section').forEach((sec) => {
+    const g = el('div', 'g');
+    const h2 = sec.querySelector('h2');
+    const a = el('a', 'h2', h2.textContent.replace(/^\s*\d+\s*/, ''));
+    a.href = '#' + sec.id;
+    g.appendChild(a);
+    sec.querySelectorAll('h3').forEach((h3, i) => {
+      if (!h3.id) h3.id = sec.id + '-h' + i;
+      const b = el('a', '', h3.textContent);
+      b.href = '#' + h3.id;
+      g.appendChild(b);
+    });
+    toc.appendChild(g);
+  });
+})();
+
+/* ============================================================
+   1. ファイト・シミュレータ
+   ============================================================ */
+function simulate(sp, len, rod, line, policy, delay, dt = 1 / 60, record = null) {
+  const cap = line.cap;
+  const sizeF = 0.55 + (len / sp.len[1]) * 0.75;
+  const pull0 = sp.str * sizeF;
+  let dist = 0.88, tension = 0, stamina = 1, t = 0;
+  let running = false, runTimer = rand(1.4, 3.2), runDur = 0;
+  let reeling = true, wish = true, lastSwitch = -99;
+
+  while (t < 300) {
+    t += dt;
+    runTimer -= dt;
+    if (running) {
+      runDur -= dt;
+      if (runDur <= 0) { running = false; runTimer = rand(1.8, 4.2) / (0.6 + sp.agg * 0.8); }
+    } else if (runTimer <= 0 && stamina > 0.16) {
+      running = true;
+      runDur = rand(0.7, 1.9) * (0.7 + sp.agg * 0.5);
+    }
+    const pull = pull0 * (running ? 2.0 : 1.0) * (0.5 + 0.5 * stamina);
+
+    // プレイヤーの操作（反応遅れ付き）
+    const want = tension / cap < policy;
+    if (want !== wish) { wish = want; lastSwitch = t; }
+    if (t - lastSwitch >= delay) reeling = wish;
+
+    if (reeling) {
+      const resist = clamp(1.70 - pull * 0.75, 0.35, 1.60);
+      dist -= rod.reel * 0.28 * resist * dt;
+      tension += ((0.08 + pull * 0.55) * dt) / rod.power;
+    } else {
+      dist += pull * 0.032 * dt;
+      tension -= (1.30 + pull * 0.30) * dt;
+      if (running) tension += pull * 0.30 * dt;
+    }
+    tension = clamp(tension, 0, cap * 1.2);
+    const tRatio = clamp01(tension / cap);
+    stamina = clamp01(stamina - ((0.022 + tRatio * 0.17 + (reeling ? 0.02 : 0)) * dt) / Math.max(0.4, sp.sta));
+
+    if (record && record.length < 4000) record.push({ t, tr: tRatio, d: clamp01(dist), s: stamina, run: running });
+
+    if (tension >= cap) return { r: 'snap', t };
+    if (dist >= 1.0) return { r: 'escape', t };
+    if (dist <= 0.03) return { r: 'land', t };
+  }
+  return { r: 'timeout', t };
+}
+
+function evaluate(sp, len, rod, line, policy, delay, n) {
+  let land = 0, snap = 0, escape = 0;
+  const times = [];
+  for (let i = 0; i < n; i++) {
+    const r = simulate(sp, len, rod, line, policy, delay);
+    if (r.r === 'land') { land++; times.push(r.t); }
+    else if (r.r === 'snap') snap++;
+    else escape++;
+  }
+  times.sort((a, b) => a - b);
+  return {
+    land: land / n, snap: snap / n, escape: escape / n,
+    median: times.length ? times[times.length >> 1] : null,
+  };
+}
+
+/* --- 単体シミュレータ UI --- */
+const simState = { sp: 'koi', size: 'avg', rod: 'bamboo', line: 'nylon', policy: 0.7, delay: 0.2 };
+
+function ctlSelect(label, id, options, value, onChange) {
+  const d = el('div', 'ctl');
+  d.appendChild(el('label', '', label));
+  const s = document.createElement('select');
+  options.forEach(([v, t]) => {
+    const o = document.createElement('option');
+    o.value = v; o.textContent = t;
+    if (v === value) o.selected = true;
+    s.appendChild(o);
+  });
+  s.onchange = () => onChange(s.value);
+  d.appendChild(s);
+  return d;
+}
+function ctlRange(label, id, min, max, step, value, fmt, onChange) {
+  const d = el('div', 'ctl');
+  const lab = el('label', '', label + '<span class="val" id="' + id + 'v">' + fmt(value) + '</span>');
+  d.appendChild(lab);
+  const s = document.createElement('input');
+  s.type = 'range'; s.min = min; s.max = max; s.step = step; s.value = value;
+  s.oninput = () => {
+    document.getElementById(id + 'v').textContent = fmt(+s.value);
+    onChange(+s.value);
+  };
+  d.appendChild(s);
+  return d;
+}
+
+function renderSimCtl() {
+  const c = document.getElementById('simCtl');
+  c.innerHTML = '';
+  c.appendChild(ctlSelect('魚種', 'sp', FISH.map((s) => [s.id, `${s.name}（${rlabel(s.rarity)}）`]), simState.sp, (v) => { simState.sp = v; runSim(); }));
+  c.appendChild(ctlSelect('個体サイズ', 'size', [['avg', '平均サイズ（範囲の32%）'], ['big', '大型（80%）'], ['max', '最大サイズ']], simState.size, (v) => { simState.size = v; runSim(); }));
+  c.appendChild(ctlSelect('ロッド', 'rod', RODS.map((r) => [r.id, r.name]), simState.rod, (v) => { simState.rod = v; runSim(); }));
+  c.appendChild(ctlSelect('ライン', 'line', LINES.map((l) => [l.id, `${l.name}（cap ${l.cap}）`]), simState.line, (v) => { simState.line = v; runSim(); }));
+  c.appendChild(ctlRange('巻くのをやめるテンション比', 'pol', 0.3, 0.99, 0.01, simState.policy, (v) => pct(v), (v) => { simState.policy = v; runSim(); }));
+  c.appendChild(ctlRange('反応遅れ（秒）', 'del', 0, 0.6, 0.05, simState.delay, (v) => v.toFixed(2) + 's', (v) => { simState.delay = v; runSim(); }));
+}
+
+function lenFor(sp) {
+  if (simState.size === 'max') return sp.len[1];
+  if (simState.size === 'big') return sp.len[0] + (sp.len[1] - sp.len[0]) * 0.8;
+  return avgLen(sp);
+}
+
+function runSim() {
+  const sp = FISH.find((s) => s.id === simState.sp);
+  const rod = RODS.find((r) => r.id === simState.rod);
+  const line = LINES.find((l) => l.id === simState.line);
+  const len = lenFor(sp);
+  const e = evaluate(sp, len, rod, line, simState.policy, simState.delay, 200);
+  const sizeF = 0.55 + (len / sp.len[1]) * 0.75;
+  const pull0 = sp.str * sizeF;
+  const gain = (0.08 + pull0 * 0.55) / rod.power;
+  const gainRun = (0.08 + pull0 * 2 * 0.55) / rod.power;
+  const snapT = line.cap / gain;
+  const resist = clamp(1.70 - pull0 * 0.75, 0.35, 1.60);
+  const reelRate = rod.reel * 0.28 * resist;
+  const lossRate = pull0 * 2 * 0.032;
+
+  const out = document.getElementById('simOut');
+  const clr = (v, g, b) => (v >= g ? 'var(--good)' : v >= b ? 'var(--warn)' : 'var(--bad)');
+  out.innerHTML = `
+    <div class="stat"><div class="k">取り込み成功率</div><div class="v" style="color:${clr(e.land, 0.9, 0.4)}">${pct(e.land)}</div></div>
+    <div class="stat"><div class="k">ライン切れ</div><div class="v" style="color:${e.snap > 0.2 ? 'var(--bad)' : 'var(--fg-dim)'}">${pct(e.snap)}</div></div>
+    <div class="stat"><div class="k">逃走（距離）</div><div class="v" style="color:${e.escape > 0.2 ? 'var(--bad)' : 'var(--fg-dim)'}">${pct(e.escape)}</div></div>
+    <div class="stat"><div class="k">所要時間（中央値）</div><div class="v">${e.median ? e.median.toFixed(1) + 's' : '—'}</div></div>
+    <div class="stat"><div class="k">全長 / 基礎引き pull0</div><div class="v" style="font-size:15px">${f1(len)}cm<br>${f2(pull0)}</div></div>
+    <div class="stat"><div class="k">張力↑（通常/突進）</div><div class="v" style="font-size:15px">${f2(gain)}<br>${f2(gainRun)} /s</div></div>
+    <div class="stat"><div class="k">全力で巻き続けて<br>切れるまで</div><div class="v" style="font-size:15px">${snapT.toFixed(1)}s</div></div>
+    <div class="stat"><div class="k">巻取 vs 突進で出る糸</div><div class="v" style="font-size:15px;color:${reelRate > lossRate ? 'var(--good)' : 'var(--bad)'}">${f2(reelRate)}<br>${f2(lossRate)} /s</div></div>`;
+
+  let v = '', vc = 'var(--fg-mute)';
+  if (e.land >= 0.95) { v = '✅ この装備なら安定して獲れます。'; vc = 'var(--good)'; }
+  else if (e.land >= 0.5) { v = '⚠️ 獲れるが失敗もある。テンション管理次第。'; vc = 'var(--warn)'; }
+  else if (e.snap > e.escape) { v = '❌ ラインが持たない。<b>より強いライン（cap）</b>か <b>power の高いロッド</b>が必要。'; vc = 'var(--bad)'; }
+  else { v = '❌ 巻き負けて逃げられる。<b>reel の高いロッド</b>が必要（放している間に取られる糸が巻き取り量を上回っています）。'; vc = 'var(--bad)'; }
+  const vd = document.getElementById('simVerdict');
+  vd.style.borderLeftColor = vc;
+  vd.innerHTML = v + `　<span style="color:var(--fg-mute);font-size:12px">（${sp.name} ${f1(len)}cm / ${rod.name} / ${line.name} / 閾値 ${pct(simState.policy)} / 遅れ ${simState.delay.toFixed(2)}s・200回試行）</span>`;
+
+  // 代表的な1回を記録して描画
+  const rec = [];
+  simulate(sp, len, rod, line, simState.policy, simState.delay, 1 / 60, rec);
+  drawChart(rec);
+}
+
+function drawChart(rec) {
+  const cv = document.getElementById('simChart');
+  const ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height, pad = 34;
+  ctx.clearRect(0, 0, W, H);
+  if (!rec.length) return;
+  const T = Math.max(2, rec[rec.length - 1].t);
+  const X = (t) => pad + (t / T) * (W - pad * 1.4);
+  const Y = (v) => H - pad - v * (H - pad * 1.7);
+
+  // グリッド
+  ctx.strokeStyle = 'rgba(255,255,255,.07)'; ctx.lineWidth = 1;
+  ctx.fillStyle = '#6f8298'; ctx.font = '11px ui-monospace, monospace';
+  for (let i = 0; i <= 4; i++) {
+    const y = Y(i / 4);
+    ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(W - pad * .4, y); ctx.stroke();
+    ctx.fillText((i * 25) + '%', 4, y + 4);
+  }
+  for (let s = 0; s <= T; s += Math.max(1, Math.round(T / 10))) {
+    ctx.beginPath(); ctx.moveTo(X(s), H - pad); ctx.lineTo(X(s), pad * .6); ctx.stroke();
+    ctx.fillText(s + 's', X(s) - 6, H - pad + 15);
+  }
+  // 突進帯
+  ctx.fillStyle = 'rgba(255,107,107,.13)';
+  let runStart = null;
+  rec.forEach((p, i) => {
+    if (p.run && runStart === null) runStart = p.t;
+    if ((!p.run || i === rec.length - 1) && runStart !== null) {
+      ctx.fillRect(X(runStart), pad * .6, Math.max(1, X(p.t) - X(runStart)), H - pad - pad * .6);
+      runStart = null;
+    }
+  });
+  // 閾値
+  ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.setLineDash([5, 4]);
+  ctx.beginPath(); ctx.moveTo(pad, Y(simState.policy)); ctx.lineTo(W - pad * .4, Y(simState.policy)); ctx.stroke();
+  ctx.setLineDash([]);
+  // 各系列
+  const series = [['tr', '#f5c451', 2.4], ['d', '#7ee0ff', 1.8], ['s', '#ff8fa3', 1.8]];
+  for (const [key, col, lw] of series) {
+    ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.beginPath();
+    rec.forEach((p, i) => { const x = X(p.t), y = Y(p[key]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke();
+  }
+  // 結果ラベル
+  const last = rec[rec.length - 1];
+  ctx.fillStyle = '#e7eef8'; ctx.font = 'bold 12px system-ui';
+  const label = last.d <= 0.04 ? '取り込み ✓' : last.tr >= 0.99 ? 'ライン切れ ✗' : last.d >= 0.99 ? '逃走 ✗' : '';
+  if (label) {
+    const w = ctx.measureText(label).width;
+    ctx.fillText(label, Math.min(X(last.t) + 6, W - pad * .4 - w), pad * .5 + 4);
+  }
+}
+
+/* --- 一括シミュレータ --- */
+const tblState = { rod: 'bamboo', line: 'nylon', policy: 0.7, delay: 0.2, size: 'avg' };
+function renderTblCtl() {
+  const c = document.getElementById('tblCtl');
+  c.innerHTML = '';
+  c.appendChild(ctlSelect('ロッド', 'trod', RODS.map((r) => [r.id, r.name]), tblState.rod, (v) => { tblState.rod = v; runTbl(); }));
+  c.appendChild(ctlSelect('ライン', 'tline', LINES.map((l) => [l.id, `${l.name}（cap ${l.cap}）`]), tblState.line, (v) => { tblState.line = v; runTbl(); }));
+  c.appendChild(ctlSelect('個体サイズ', 'tsize', [['avg', '平均サイズ（32%）'], ['big', '大型（80%）'], ['max', '最大サイズ']], tblState.size, (v) => { tblState.size = v; runTbl(); }));
+  c.appendChild(ctlRange('やめるテンション比', 'tpol', 0.3, 0.99, 0.01, tblState.policy, (v) => pct(v), (v) => { tblState.policy = v; runTbl(); }));
+  c.appendChild(ctlRange('反応遅れ（秒）', 'tdel', 0, 0.6, 0.05, tblState.delay, (v) => v.toFixed(2) + 's', (v) => { tblState.delay = v; runTbl(); }));
+}
+function runTbl() {
+  const rod = RODS.find((r) => r.id === tblState.rod);
+  const line = LINES.find((l) => l.id === tblState.line);
+  const rows = FISH.map((sp) => {
+    const len = tblState.size === 'max' ? sp.len[1]
+      : tblState.size === 'big' ? sp.len[0] + (sp.len[1] - sp.len[0]) * 0.8 : avgLen(sp);
+    const e = evaluate(sp, len, rod, line, tblState.policy, tblState.delay, 120);
+    const sizeF = 0.55 + (len / sp.len[1]) * 0.75;
+    return { sp, len, e, pull0: sp.str * sizeF };
+  });
+  const bar = (v, col) => `<div class="bar"><i style="width:${(v * 100).toFixed(0)}%;background:${col}"></i></div>`;
+  document.getElementById('tblOut').innerHTML = `
+  <table><thead><tr>
+    <th class="l">魚</th><th class="l">レア度</th><th class="num">全長</th><th class="num">str</th><th class="num">sta</th>
+    <th class="num">pull0</th><th class="num">取込率</th><th style="width:90px"></th>
+    <th class="num">切れ</th><th class="num">逃走</th><th class="num">時間</th><th class="l">判定</th>
+  </tr></thead><tbody>
+  ${rows.map(({ sp, len, e, pull0 }) => {
+    const ok = e.land >= 0.95 ? ['◎', 'var(--good)'] : e.land >= 0.5 ? ['△', 'var(--warn)']
+      : e.snap > e.escape ? ['× 糸切れ', 'var(--bad)'] : ['× 巻き負け', 'var(--bad)'];
+    return `<tr>
+      <td class="l name">${sp.name}</td>
+      <td class="l"><span class="pill" style="color:${rcolor(sp.rarity)};background:${rcolor(sp.rarity)}1a">${rlabel(sp.rarity)}</span></td>
+      <td class="num">${f1(len)}</td><td class="num">${sp.str}</td><td class="num">${sp.sta}</td>
+      <td class="num" style="color:var(--gold)">${f2(pull0)}</td>
+      <td class="num">${pct(e.land)}</td><td>${bar(e.land, ok[1])}</td>
+      <td class="num" style="opacity:${e.snap ? 1 : .3}">${pct(e.snap)}</td>
+      <td class="num" style="opacity:${e.escape ? 1 : .3}">${pct(e.escape)}</td>
+      <td class="num">${e.median ? e.median.toFixed(1) + 's' : '—'}</td>
+      <td class="l" style="color:${ok[1]};font-weight:700">${ok[0]}</td>
+    </tr>`;
+  }).join('')}
+  </tbody>
+  <tfoot><tr><td colspan="12" class="l">${rod.name}（reel ${rod.reel} / power ${rod.power}）+ ${line.name}（cap ${line.cap}）／
+  テンション比 ${pct(tblState.policy)} で離す・反応遅れ ${tblState.delay.toFixed(2)}s・各 120 回試行</td></tr></tfoot></table>`;
+}
+
+/* ============================================================
+   2. アタリ抽選シミュレータ
+   ============================================================ */
+function baitAffinity(sp, bait) {
+  let sum = 0, n = 0;
+  for (const t of sp.tags) if (bait.aff[t] !== undefined) { sum += bait.aff[t]; n++; }
+  return n ? sum / n : 1;
+}
+function biteWeights({ depth, hour, weather, baitId, rodId, level }) {
+  const band = timeBand(hour);
+  const bait = BAITS.find((b) => b.id === baitId);
+  const rod = RODS.find((r) => r.id === rodId);
+  const baitDepth = Math.min(bait.depth, Math.max(0.35, depth - 0.35));
+  const rows = FISH.map((sp) => {
+    let w = sp.spawn;
+    const parts = {};
+    const [d0, d1] = sp.depth;
+    if (depth < d0 * 0.55) return { sp, w: 0, parts, why: '水深不足' };
+    const fit = depth >= d0 && depth <= d1 + 3 ? 1 : depth > d1 ? 0.18 : 0.09;
+    parts.fit = fit;
+    parts.time = sp.times[band] ?? 1;
+    parts.weather = sp.weather[weather] ?? 1;
+    parts.aff = baitAffinity(sp, bait);
+    const mid = (d0 + d1) / 2;
+    const spread = Math.max(2.5, (d1 - d0) * 0.75);
+    parts.layer = 0.14 + 1.4 * Math.exp(-((baitDepth - mid) ** 2) / (2 * spread * spread));
+    parts.rare = sp.rarity >= 3 ? bait.rare : 1;
+    parts.attract = rod.attract;
+    parts.lv = sp.rarity === 4 ? clamp01((level - 2) / 5) : sp.rarity === 5 ? clamp01((level - 5) / 6) : 1;
+    w = sp.spawn * fit * parts.time * parts.weather * parts.aff * parts.layer * parts.rare * parts.attract * parts.lv;
+    return { sp, w, parts, baitDepth };
+  });
+  return { rows, bait, rod, baitDepth, band };
+}
+
+const rollState = { depth: 18, hour: 6, weather: 'clear', bait: 'worm', rod: 'bamboo', level: 1, caught: 10 };
+function renderRollCtl() {
+  const c = document.getElementById('rollCtl');
+  c.innerHTML = '';
+  c.appendChild(ctlRange('水深（m）', 'rd', 0.5, 34, 0.5, rollState.depth, (v) => f1(v) + 'm', (v) => { rollState.depth = v; runRoll(); }));
+  c.appendChild(ctlRange('時刻', 'rh', 0, 23.5, 0.5, rollState.hour, (v) => String(Math.floor(v)).padStart(2, '0') + ':' + (v % 1 ? '30' : '00'), (v) => { rollState.hour = v; runRoll(); }));
+  c.appendChild(ctlSelect('天候', 'rw', Object.entries(WEATHERS).map(([k, w]) => [k, w.name]), rollState.weather, (v) => { rollState.weather = v; runRoll(); }));
+  c.appendChild(ctlSelect('エサ', 'rb', BAITS.map((b) => [b.id, `${b.icon} ${b.name}（層 ${b.depth >= 20 ? '底' : b.depth + 'm'}）`]), rollState.bait, (v) => { rollState.bait = v; runRoll(); }));
+  c.appendChild(ctlSelect('ロッド', 'rr', RODS.map((r) => [r.id, r.name]), rollState.rod, (v) => { rollState.rod = v; runRoll(); }));
+  c.appendChild(ctlRange('プレイヤーレベル', 'rl', 1, 20, 1, rollState.level, (v) => 'Lv' + v, (v) => { rollState.level = v; runRoll(); }));
+}
+function runRoll() {
+  const { rows, bait, rod, baitDepth, band } = biteWeights({
+    depth: rollState.depth, hour: rollState.hour, weather: rollState.weather,
+    baitId: rollState.bait, rodId: rollState.rod, level: rollState.level,
+  });
+  const total = rows.reduce((a, r) => a + r.w, 0);
+  const junkP = 0.085 * bait.junk * (rollState.depth < 1.4 ? 1.8 : 1) * (rollState.caught < 3 ? 0.3 : 1);
+  const bandName = { dawn: '朝', day: '昼', dusk: '夕', night: '夜' }[band];
+  const attract = bait.attract * rod.attract * WEATHERS[rollState.weather].bite;
+  const waitLo = 2.2 / attract * (rollState.depth < 0.9 ? 1.7 : 1);
+  const waitHi = 7.0 / attract * (rollState.depth < 0.9 ? 1.7 : 1);
+
+  document.getElementById('rollInfo').innerHTML =
+    `時間帯タグ <b style="color:var(--gold)">${band}（${bandName}）</b>　/
+     エサが届く層 <b style="color:var(--gold)">${f1(baitDepth)} m</b>（水深 ${f1(rollState.depth)} m）　/
+     アタリまで <b style="color:var(--gold)">${f1(waitLo)}〜${f1(waitHi)} 秒</b>（+接近 3〜9 秒）　/
+     ゴミ率 <b style="color:var(--gold)">${(junkP * 100).toFixed(1)}%</b>`;
+
+  const sorted = rows.slice().sort((a, b) => b.w - a.w);
+  const maxP = sorted[0] ? sorted[0].w / (total || 1) : 1;
+  document.getElementById('rollOut').innerHTML = total <= 0
+    ? '<table><tbody><tr><td class="l" style="color:var(--bad)">この条件で成立する魚がいません（アタリは 2〜4 秒後に再抽選されます）</td></tr></tbody></table>'
+    : `<table><thead><tr>
+        <th class="l">魚</th><th class="l">レア度</th><th class="num">確率</th><th style="width:150px"></th>
+        <th class="num">生息層</th><th class="num">①spawn</th><th class="num">②水深</th><th class="num">③時間</th>
+        <th class="num">④天候</th><th class="num">⑤エサ</th><th class="num">⑥層一致</th><th class="num">⑦レア</th><th class="num">Lv</th>
+      </tr></thead><tbody>
+      ${sorted.map(({ sp, w, parts }) => {
+        const p = w / total;
+        const dim = p < 0.005 ? 'opacity:.45;' : '';
+        return `<tr style="${dim}">
+          <td class="l name">${sp.name}</td>
+          <td class="l"><span class="pill" style="color:${rcolor(sp.rarity)};background:${rcolor(sp.rarity)}1a">${rlabel(sp.rarity)}</span></td>
+          <td class="num" style="color:${p > 0.15 ? 'var(--gold)' : 'inherit'}">${p < 0.001 && p > 0 ? '&lt;0.1' : (p * 100).toFixed(1)}%</td>
+          <td><div class="bar"><i style="width:${(p / maxP * 100).toFixed(1)}%;background:${rcolor(sp.rarity)}"></i></div></td>
+          <td class="num">${sp.depth[0]}–${sp.depth[1]}m</td>
+          <td class="num">${sp.spawn}</td>
+          <td class="num" style="color:${parts.fit === 1 ? 'var(--good)' : 'var(--bad)'}">${parts.fit != null ? f2(parts.fit) : '0'}</td>
+          <td class="num" style="color:${parts.time >= 1.2 ? 'var(--good)' : parts.time < 0.6 ? 'var(--bad)' : 'inherit'}">${f2(parts.time ?? 0)}</td>
+          <td class="num" style="color:${parts.weather >= 1.2 ? 'var(--good)' : parts.weather < 0.8 ? 'var(--bad)' : 'inherit'}">${f2(parts.weather ?? 0)}</td>
+          <td class="num" style="color:${parts.aff >= 1.3 ? 'var(--good)' : parts.aff < 0.8 ? 'var(--bad)' : 'inherit'}">${f2(parts.aff ?? 0)}</td>
+          <td class="num" style="color:${parts.layer >= 1.0 ? 'var(--good)' : parts.layer < 0.4 ? 'var(--bad)' : 'inherit'}">${f2(parts.layer ?? 0)}</td>
+          <td class="num">${f2(parts.rare ?? 1)}</td>
+          <td class="num" style="color:${parts.lv === 0 ? 'var(--bad)' : parts.lv < 1 ? 'var(--warn)' : 'inherit'}">${f2(parts.lv ?? 1)}</td>
+        </tr>`;
+      }).join('')}
+      </tbody><tfoot><tr><td colspan="13" class="l">
+      確率は「アタリが発生したとき、その魚である確率」。実際はさらに ${(junkP * 100).toFixed(1)}% の確率でゴミになります。
+      重み合計 ${f2(total)}。① 〜 ⑦ の積が重みです。
+      </td></tr></tfoot></table>`;
+}
+
+/* ============================================================
+   3. 魚データ表
+   ============================================================ */
+(function spTables() {
+  const order = [...SPECIES].sort((a, b) => (a.rarity === 0 ? 9 : a.rarity) - (b.rarity === 0 ? 9 : b.rarity) || a.len[1] - b.len[1]);
+  let cur = -1;
+  const rows = order.map((sp) => {
+    let sep = '';
+    if (sp.rarity !== cur) {
+      cur = sp.rarity;
+      sep = `<tr class="sep"><td colspan="14">${rlabel(sp.rarity)}${sp.rarity === 0 ? '（ゴミ・出現重み 0：専用抽選）' : ''}</td></tr>`;
+    }
+    const L = avgLen(sp);
+    return sep + `<tr>
+      <td class="l name">${sp.name}</td>
+      <td class="num">${sp.spawn}</td>
+      <td class="num">${sp.len[0]}–${sp.len[1]}</td>
+      <td class="num">${f1(L)}</td>
+      <td class="num">${sp.depth[0]}–${sp.depth[1]}</td>
+      <td class="num">${sp.wc}</td>
+      <td class="num">${f2(weightOf(sp, L))}</td>
+      <td class="num" style="color:var(--gold)">${sp.str}</td>
+      <td class="num" style="color:#ff8fa3">${sp.sta}</td>
+      <td class="num" style="color:#ff6b6b">${sp.agg}</td>
+      <td class="num">${sp.value}</td>
+      <td class="num">${sp.perCm}</td>
+      <td class="num">${valueOf(sp, L)}</td>
+      <td class="l">${sp.tags.map((t) => `<span class="tag">${t}</span>`).join('')}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('spTable').innerHTML = `<table><thead><tr>
+    <th class="l">魚</th><th class="num">spawn<br><span style="opacity:.6">基礎出現</span></th>
+    <th class="num">全長 cm</th><th class="num">平均<br>全長</th><th class="num">水深 m</th>
+    <th class="num">wc<br><span style="opacity:.6">体重係数</span></th><th class="num">平均<br>重量kg</th>
+    <th class="num">str<br><span style="opacity:.6">引き</span></th><th class="num">sta<br><span style="opacity:.6">体力</span></th>
+    <th class="num">agg<br><span style="opacity:.6">突進</span></th>
+    <th class="num">value<br><span style="opacity:.6">基礎額</span></th><th class="num">perCm</th><th class="num">平均<br>売値G</th>
+    <th class="l">タグ</th></tr></thead><tbody>${rows}</tbody>
+    <tfoot><tr><td colspan="14" class="l">平均全長 = 範囲の 32%（<code>random()^2.1</code> の期待値）。平均重量・売値はその全長での計算値。</td></tr></tfoot></table>`;
+
+  // 時間帯・天候
+  const cell = (v) => `<td class="num" style="color:${v >= 1.3 ? 'var(--good)' : v <= 0.5 ? 'var(--bad)' : v < 1 ? 'var(--warn)' : 'inherit'}">${f2(v)}</td>`;
+  const rows2 = SPECIES.filter((s) => s.rarity > 0).map((sp) => `<tr>
+      <td class="l name">${sp.name}</td>
+      <td class="l"><span class="pill" style="color:${rcolor(sp.rarity)};background:${rcolor(sp.rarity)}1a">${rlabel(sp.rarity)}</span></td>
+      ${cell(sp.times.dawn)}${cell(sp.times.day)}${cell(sp.times.dusk)}${cell(sp.times.night)}
+      ${cell(sp.weather.clear)}${cell(sp.weather.cloudy)}${cell(sp.weather.rain)}
+      <td class="num">${sp.rarity >= 4 ? (sp.rarity === 4 ? 'Lv3〜7' : 'Lv6〜11') : '—'}</td>
+    </tr>`).join('');
+  document.getElementById('spTable2').innerHTML = `<table><thead><tr>
+    <th class="l">魚</th><th class="l">レア度</th>
+    <th class="num">朝<br>4:30-7:30</th><th class="num">昼<br>7:30-16:30</th><th class="num">夕<br>16:30-19:30</th><th class="num">夜<br>19:30-4:30</th>
+    <th class="num">☀️晴</th><th class="num">☁️曇</th><th class="num">🌧️雨</th><th class="num">Lv解禁</th>
+    </tr></thead><tbody>${rows2}</tbody></table>`;
+
+  // 計算例
+  const samples = ['moroko', 'funa', 'rainbow', 'koi', 'iwana', 'sturgeon', 'nushi', 'dragonfish'];
+  const rows3 = samples.map((id) => {
+    const sp = SPECIES.find((s) => s.id === id);
+    const cells = [sp.len[0], avgLen(sp), sp.len[0] + (sp.len[1] - sp.len[0]) * 0.8, sp.len[1]].map((L) =>
+      `<td class="num">${f1(L)}cm<br><span style="color:var(--fg-mute)">${f2(weightOf(sp, L))}kg</span><br>
+       <span style="color:var(--gold)">${valueOf(sp, L)}G</span><br><span style="color:var(--cyan)">+${xpOf(sp, L)}xp</span></td>`).join('');
+    return `<tr><td class="l name">${sp.name}</td>
+      <td class="l"><span class="pill" style="color:${rcolor(sp.rarity)};background:${rcolor(sp.rarity)}1a">${rlabel(sp.rarity)}</span></td>${cells}</tr>`;
+  }).join('');
+  document.getElementById('calcTable').innerHTML = `<table><thead><tr>
+    <th class="l">魚</th><th class="l">レア度</th><th class="num">最小</th><th class="num">平均（32%）</th><th class="num">大型（80%）</th><th class="num">最大</th>
+    </tr></thead><tbody>${rows3}</tbody>
+    <tfoot><tr><td colspan="6" class="l">各セル：全長 / 重さ / 売値 / 経験値</td></tr></tfoot></table>`;
+})();
+
+/* ============================================================
+   4. 装備表
+   ============================================================ */
+(function gearTables() {
+  document.getElementById('rodTable').innerHTML = `<table><thead><tr>
+    <th class="l">ロッド</th><th class="num">価格 G</th><th class="num">解禁 Lv</th>
+    <th class="num">reel<br><span style="opacity:.6">巻取</span></th><th class="num">power<br><span style="opacity:.6">竿の力</span></th>
+    <th class="num">attract<br><span style="opacity:.6">集魚</span></th><th class="num">巻取速度<br>/秒(最大)</th><th class="l">説明</th>
+    </tr></thead><tbody>${RODS.map((r) => `<tr>
+      <td class="l name">${r.icon} ${r.name}</td><td class="num">${r.price.toLocaleString()}</td><td class="num">${r.level}</td>
+      <td class="num" style="color:var(--cyan)">${r.reel}</td><td class="num" style="color:var(--good)">${r.power}</td>
+      <td class="num">${r.attract}</td><td class="num">${f2(r.reel * 0.28 * 1.6)}</td>
+      <td class="l" style="white-space:normal;color:var(--fg-dim)">${r.desc}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><td colspan="8" class="l">巻取速度は resist が最大（1.60・ごく弱い魚）のときの <code>dist</code> 減少量。実際は魚の引きに応じて 0.35〜1.60 倍。</td></tr></tfoot></table>`;
+
+  document.getElementById('lineTable').innerHTML = `<table><thead><tr>
+    <th class="l">ライン</th><th class="num">価格 G</th><th class="num">解禁 Lv</th><th class="num">cap<br><span style="opacity:.6">強度</span></th>
+    <th class="num">pull0=1.0 の魚を<br>巻き続けて切れるまで</th><th class="l">説明</th>
+    </tr></thead><tbody>${LINES.map((l) => `<tr>
+      <td class="l name">${l.icon} ${l.name}</td><td class="num">${l.price.toLocaleString()}</td><td class="num">${l.level}</td>
+      <td class="num" style="color:var(--warn)">${l.cap}</td>
+      <td class="num">${f1(l.cap / ((0.08 + 1.0 * 0.55) / 1.0))} 秒</td>
+      <td class="l" style="white-space:normal;color:var(--fg-dim)">${l.desc}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><td colspan="6" class="l">「切れるまで」は竹の釣り竿（power 1.0）で pull0 = 1.0 の魚を巻き続けた場合。power が高いほど伸びます。</td></tr></tfoot></table>`;
+
+  document.getElementById('baitTable').innerHTML = `<table><thead><tr>
+    <th class="l">エサ・ルアー</th><th class="num">価格 G</th><th class="num">解禁 Lv</th><th class="num">狙う層 m</th>
+    <th class="num">attract<br><span style="opacity:.6">アタリ速さ</span></th><th class="num">rare<br><span style="opacity:.6">レア補正</span></th>
+    <th class="num">junk<br><span style="opacity:.6">ゴミ率</span></th><th class="num">ゴミ率<br>(深場)</th><th class="l">説明</th>
+    </tr></thead><tbody>${BAITS.map((b) => `<tr>
+      <td class="l name">${b.icon} ${b.name}</td><td class="num">${b.price.toLocaleString()}</td><td class="num">${b.level}</td>
+      <td class="num">${b.depth >= 20 ? '底まで' : b.depth}</td>
+      <td class="num" style="color:var(--cyan)">${b.attract}</td><td class="num" style="color:var(--violet)">${b.rare}</td>
+      <td class="num">${b.junk}</td><td class="num">${(0.085 * b.junk * 100).toFixed(1)}%</td>
+      <td class="l" style="white-space:normal;color:var(--fg-dim)">${b.desc}</td></tr>`).join('')}</tbody></table>`;
+
+  const tags = ['bottom', 'mid', 'predator', 'trout', 'carp', 'weed', 'deep', 'legend'];
+  document.getElementById('affTable').innerHTML = `<table><thead><tr>
+    <th class="l">エサ相性（aff）</th>${tags.map((t) => `<th class="num">${t}</th>`).join('')}
+    </tr></thead><tbody>${BAITS.map((b) => `<tr><td class="l name">${b.icon} ${b.name}</td>
+      ${tags.map((t) => {
+        const v = b.aff[t];
+        return `<td class="num" style="color:${v === undefined ? 'var(--fg-mute)' : v >= 1.5 ? 'var(--good)' : v <= 0.5 ? 'var(--bad)' : 'inherit'}">${v === undefined ? '—' : f2(v)}</td>`;
+      }).join('')}</tr>`).join('')}</tbody>
+      <tfoot><tr><td colspan="${tags.length + 1}" class="l">魚の tags のうち、この表に値があるものの<b>平均</b>が重み ⑤ になります（該当なしは 1.0）。</td></tr></tfoot></table>`;
+})();
+
+/* ============================================================
+   7. レベル表・実績
+   ============================================================ */
+(function progression() {
+  let rows = '';
+  for (let lv = 1; lv <= 16; lv++) {
+    const need = xpForLevel(lv);
+    const prev = lv > 1 ? xpForLevel(lv - 1) : 0;
+    const unlocked = [...RODS.filter((r) => r.level === lv).map((r) => r.icon + ' ' + r.name),
+      ...LINES.filter((l) => l.level === lv).map((l) => l.icon + ' ' + l.name),
+      ...BAITS.filter((b) => b.level === lv).map((b) => b.icon + ' ' + b.name)];
+    rows += `<tr><td class="l name">Lv ${lv} → ${lv + 1}</td>
+      <td class="num">${need.toLocaleString()}</td><td class="num">${(need - prev).toLocaleString()}</td>
+      <td class="l" style="white-space:normal;color:var(--fg-dim)">${unlocked.join('　/　') || '—'}</td>
+      <td class="l" style="color:var(--fg-mute)">${lv === 3 ? 'エピック出現開始' : lv === 6 ? 'レジェンド出現開始' : lv === 7 ? 'エピック全開' : lv === 11 ? 'レジェンド全開' : ''}</td></tr>`;
+  }
+  document.getElementById('lvTable').innerHTML = `<table><thead><tr>
+    <th class="l">レベル</th><th class="num">累積XP</th><th class="num">必要XP</th><th class="l">解禁される道具</th><th class="l">抽選の変化</th>
+    </tr></thead><tbody>${rows}</tbody>
+    <tfoot><tr><td colspan="5" class="l">経験値の目安：モロコ 12xp / ニジマス 40xp / コイ 60xp / チョウザメ 200xp / 湖の主 500xp 前後。</td></tr></tfoot></table>`;
+
+  document.getElementById('achTable').innerHTML = `<table><thead><tr>
+    <th class="l">実績</th><th class="l">条件</th></tr></thead><tbody>
+    ${ACHIEVEMENTS.map((a) => `<tr><td class="l name">🏅 ${a.name}</td><td class="l" style="color:var(--fg-dim)">${a.desc}</td></tr>`).join('')}
+    </tbody></table>`;
+})();
+
+/* ---------- 起動 ---------- */
+renderSimCtl(); runSim();
+renderTblCtl(); runTbl();
+renderRollCtl(); runRoll();
+</script>
+</body>
+</html>

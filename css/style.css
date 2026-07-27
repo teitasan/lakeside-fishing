@@ -264,7 +264,9 @@ kbd {
   background: rgba(255, 255, 255, .12); border: 1px solid rgba(255, 255, 255, .22);
   font-family: inherit; color: #fff;
 }
-.title-foot { margin-top: 20px; font-size: 10.5px; opacity: .38; letter-spacing: .1em; }
+.title-foot { margin-top: 20px; font-size: 10.5px; opacity: .5; letter-spacing: .1em; }
+.title-foot a { color: var(--gold); text-decoration: none; margin-left: 10px; border-bottom: 1px solid rgba(245, 207, 107, .4); }
+.title-foot a:hover { color: #fff; border-color: #fff; }
 .hidden { display: none !important; }
 
 /* ---------- 釣果カード ---------- */
