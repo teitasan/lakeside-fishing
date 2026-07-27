@@ -2,14 +2,37 @@
    地形・湖底・岸辺の装飾・桟橋
    =========================================================== */
 import * as THREE from 'three';
-import { makeRng, clamp01, lerp, smoothstep, TAU } from './util.js';
+import { makeRng, clamp, clamp01, lerp, smoothstep, TAU } from './util.js';
 import { WORLD_SIZE, WATER_REGION, MAX_DEPTH, resolveLake } from './lakefield.js';
 
 export { WORLD_SIZE, WATER_REGION, MAX_DEPTH };
 
+const DOCK_HALF_W = 1.62;   // 床の半幅（見た目 3.4m のうち内側）
+const OBS_CELL = 8;         // 障害物グリッドのセルサイズ(m)
+
 const tmpColor = new THREE.Color();
 const tmpSand = new THREE.Color();
 const UP = new THREE.Vector3(0, 1, 0);
+const _dl = { al: 0, si: 0 };
+const _dl2 = { al: 0, si: 0 };
+
+/** 線分 vs AABB（スラブ法） */
+function segBoxHit(p0, p1, min, max) {
+  let t0 = 0, t1 = 1;
+  for (let i = 0; i < 3; i++) {
+    const d = p1[i] - p0[i];
+    if (Math.abs(d) < 1e-9) {
+      if (p0[i] < min[i] || p0[i] > max[i]) return false;
+      continue;
+    }
+    let ta = (min[i] - p0[i]) / d, tb = (max[i] - p0[i]) / d;
+    if (ta > tb) { const t = ta; ta = tb; tb = t; }
+    if (ta > t0) t0 = ta;
+    if (tb < t1) t1 = tb;
+    if (t0 > t1) return false;
+  }
+  return true;
+}
 
 export class Terrain {
   /**
@@ -27,6 +50,9 @@ export class Terrain {
     this.hole = this.lake.hole;
     this.flat = this.lake.flat;
     this.dockAngle = this.lake.dock.angle;
+
+    this.obstacles = [];        // [x, z, r, x, z, r, ...]
+    this._obsGrid = new Map();
 
     this._buildHeightTexture();
     this._buildTerrainMesh();
@@ -150,6 +176,9 @@ export class Terrain {
   /* ---------------- 桟橋（位置は lakefield が決定・検証済み） ---------------- */
   _findDock() {
     const d = this.lake.dock;
+    const len = Math.hypot(d.end.x - d.start.x, d.end.z - d.start.z);
+    this._dockU = { x: (d.end.x - d.start.x) / len, z: (d.end.z - d.start.z) / len };
+    this._dockLen = len;
     this.shoreR0 = d.r0;
     this.dockDir = new THREE.Vector3(d.dir.x, 0, d.dir.z);   // 岸→湖心
     this.dockStart = new THREE.Vector3(d.start.x, 0, d.start.z);
@@ -267,6 +296,7 @@ export class Terrain {
     this.lampLight = new THREE.PointLight(0xffb060, 0, 26, 2);
     this.lampLight.position.copy(bulb.position);
     g.add(this.lampLight);
+    this.addObstacle(lampBase.x, lampBase.z, 0.26);
 
     // 小舟（雰囲気）
     const boat = new THREE.Group();
@@ -289,20 +319,85 @@ export class Terrain {
     boat.castShadow = true;
     this.boat = boat;
     g.add(boat);
+    // 小舟にも当たり判定（船体に沿って2点）
+    for (const t of [-0.9, 0.9]) {
+      this.addObstacle(boat.position.x + dir.x * t, boat.position.z + dir.z * t, 0.85);
+    }
 
     this.dock = g;
     this.scene.add(g);
   }
 
   /** 桟橋の上か（歩行判定用） */
+  /** 桟橋ローカル座標（along: 岸→沖 / side: 右） */
+  _dockLocal(x, z, out = { al: 0, si: 0 }) {
+    const a = this.dockStart;
+    out.al = (x - a.x) * this._dockU.x + (z - a.z) * this._dockU.z;
+    out.si = -(x - a.x) * this._dockU.z + (z - a.z) * this._dockU.x;
+    return out;
+  }
+
+  /**
+   * 桟橋の床の上か（矩形判定）。以前はカプセル判定だったため、
+   * 先端の外側に半円状の「見えない床」ができていた。
+   */
   onDock(x, z) {
-    const a = this.dockStart, b = this.dockEnd;
-    const abx = b.x - a.x, abz = b.z - a.z;
-    const l2 = abx * abx + abz * abz;
-    const t = clamp01(((x - a.x) * abx + (z - a.z) * abz) / l2);
-    const cx = a.x + abx * t, cz = a.z + abz * t;
-    const d = Math.hypot(x - cx, z - cz);
-    return d < 1.7 ? this.dockY : null;
+    const p = this._dockLocal(x, z, _dl);
+    if (p.al < 0 || p.al > this._dockLen) return null;
+    if (Math.abs(p.si) > DOCK_HALF_W) return null;
+    return this.dockY;
+  }
+
+  /** 桟橋の中心線までの距離（装飾の配置除外用） */
+  distToDock(x, z) {
+    const p = this._dockLocal(x, z, _dl);
+    const al = clamp(p.al, 0, this._dockLen);
+    const dAl = p.al - al;
+    return Math.hypot(dAl, p.si);
+  }
+
+  /**
+   * 線分が桟橋（床＋先端の手すり）を貫通するか。
+   * 糸が桟橋を突き抜けて釣りができてしまうのを防ぐ。
+   */
+  dockBlocksSegment(x0, y0, z0, x1, y1, z1) {
+    const a = this._dockLocal(x0, z0, _dl);
+    const p0 = [a.al, y0, a.si];
+    const b = this._dockLocal(x1, z1, _dl2);
+    const p1 = [b.al, y1, b.si];
+    const L = this._dockLen, W = DOCK_HALF_W, Y = this.dockY;
+    // 床（桁も含む厚み）
+    if (segBoxHit(p0, p1, [0, Y - 0.42, -W], [L, Y + 0.18, W])) return true;
+    // 先端の手すり
+    if (segBoxHit(p0, p1, [L - 2.3, Y - 0.42, -W], [L, Y + 1.05, W])) return true;
+    return false;
+  }
+
+  /* ---------------- 障害物（岩・木） ---------------- */
+  addObstacle(x, z, r) {
+    this.obstacles.push(x, z, r);
+    const key = ((Math.floor(x / OBS_CELL) & 1023) << 10) | (Math.floor(z / OBS_CELL) & 1023);
+    let arr = this._obsGrid.get(key);
+    if (!arr) { arr = []; this._obsGrid.set(key, arr); }
+    arr.push(this.obstacles.length - 3);
+  }
+
+  /** (x,z) が半径 rad の円として障害物にぶつかるか */
+  blockedAt(x, z, rad = 0.32) {
+    const cx = Math.floor(x / OBS_CELL), cz = Math.floor(z / OBS_CELL);
+    const o = this.obstacles;
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const arr = this._obsGrid.get((((cx + dx) & 1023) << 10) | ((cz + dz) & 1023));
+        if (!arr) continue;
+        for (let k = 0; k < arr.length; k++) {
+          const i = arr[k];
+          const ddx = x - o[i], ddz = z - o[i + 1], rr = o[i + 2] + rad;
+          if (ddx * ddx + ddz * ddz < rr * rr) return true;
+        }
+      }
+    }
+    return false;
   }
 
   /* ---------------- 岸辺の装飾 ---------------- */
@@ -342,15 +437,18 @@ export class Terrain {
       const h = this.heightAt(x, z);
       if (h < 1.6 || h > 66) continue;
       if (this.slopeAt(x, z) > 0.62) continue;
-      if (this.onDock(x, z) !== null) continue;
+      if (this.distToDock(x, z) < 3.6) continue;
       if (Math.hypot(x - this.spawnPos.x, z - this.spawnPos.z) < 6) continue;
 
       const scale = 2.6 + rng() * 4.4 * (1 - clamp01(h / 80));
+      const tsx = scale * (0.7 + rng() * 0.35), tsz = scale * (0.7 + rng() * 0.35);
       qt.setFromAxisAngle(UP, rng() * TAU);
       p.set(x, h - 0.2, z);
-      s.set(scale * (0.7 + rng() * 0.35), scale, scale * (0.7 + rng() * 0.35));
+      s.set(tsx, scale, tsz);
       m.compose(p, qt, s);
       trunks.setMatrixAt(ti, m);
+      // 幹の当たり判定（根元の半径 0.34 × スケール）
+      this.addObstacle(x, z, Math.max(tsx, tsz) * 0.34 * 0.62);
 
       // 葉（2段の円錐）
       const cold = clamp01((h - 30) / 40);
@@ -392,13 +490,16 @@ export class Terrain {
       const x = Math.cos(ang) * dist, z = Math.sin(ang) * dist;
       const h = this.heightAt(x, z);
       if (h < -2.5 || h > 14) continue;
-      if (this.onDock(x, z) !== null) continue;
+      if (this.distToDock(x, z) < 3.4) continue;
       const sc = 0.5 + Math.pow(rng(), 2) * 3.4;
+      const rsx = sc * (0.7 + rng() * 0.6), rsy = sc * (0.5 + rng() * 0.5), rsz = sc * (0.7 + rng() * 0.6);
       qt.setFromEuler(new THREE.Euler(rng() * TAU, rng() * TAU, rng() * TAU));
       p.set(x, h + sc * 0.15, z);
-      s.set(sc * (0.7 + rng() * 0.6), sc * (0.5 + rng() * 0.5), sc * (0.7 + rng() * 0.6));
+      s.set(rsx, rsy, rsz);
       m.compose(p, qt, s);
       rocks.setMatrixAt(ri++, m);
+      // 岩の当たり判定（水中の小石は無視）
+      if (h > -0.9 && sc > 0.65) this.addObstacle(x, z, Math.max(rsx, rsz) * 0.72);
     }
     rocks.count = ri;
     rocks.instanceMatrix.needsUpdate = true;
@@ -420,7 +521,7 @@ export class Terrain {
       const x = Math.cos(ang) * dist, z = Math.sin(ang) * dist;
       const h = this.heightAt(x, z);
       if (h > 0.35 || h < -1.5) continue;
-      if (this.onDock(x, z) !== null) continue;
+      if (this.distToDock(x, z) < 2.4) continue;   // 板を突き抜けないように
       const sc = 1.1 + rng() * 1.9;
       qt.setFromAxisAngle(new THREE.Vector3(rng() * 0.2 - 0.1, 1, rng() * 0.2 - 0.1).normalize(), rng() * TAU);
       p.set(x, h, z);

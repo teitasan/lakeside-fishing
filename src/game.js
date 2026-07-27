@@ -21,6 +21,7 @@ import {
 
 const GRAVITY = 9.8;
 const EXPOSURE = 0.78;
+const PLAYER_RADIUS = 0.34;
 const HOURS_PER_SEC = 24 / 720;   // 実時間12分で1日
 const MAX_LINE = 62;
 const EYE_H = 1.62;
@@ -542,6 +543,17 @@ export class Game {
     if (this.castPerfect) this.ui.toast('✨ きれいなキャスト！', 'good');
   }
 
+  /** ロッド先端 → 到達点 の糸が桟橋を貫通するか */
+  _lineHitsDock(tip, end) {
+    return this.terrain.dockBlocksSegment(tip.x, tip.y, tip.z, end.x, end.y, end.z);
+  }
+
+  _snagOnDock(msg) {
+    this.ui.toast(msg, 'bad');
+    this.audio.deny();
+    this._retrieve();
+  }
+
   /* ---------------- 回収 ---------------- */
   _retrieve() {
     if (this.hookFish) {
@@ -699,6 +711,7 @@ export class Game {
 
   _tryMove(nx, nz) {
     if (Math.hypot(nx, nz) > 460) return false;
+    if (this.terrain.blockedAt(nx, nz, PLAYER_RADIUS)) return false;   // 岩・木・灯篭・小舟
     const dock = this.terrain.onDock(nx, nz);
     if (dock !== null) { this.pos.x = nx; this.pos.z = nz; return true; }
     const h = this.terrain.heightAt(nx, nz);
@@ -849,14 +862,16 @@ export class Game {
         if (this.charge <= 0.02) { this.charge = 0.02; this.chargeDir = 1; }
         ui.showPower(true, this.charge);
         ui.setPrompt('離してキャスト！ <b>目印（白線）</b>付近が好キャスト');
-        // 着水点予測
+        // 着水点予測（桟橋を挟む場合は赤くして知らせる）
         this._predictLanding(this.charge, _v2);
         const d = this.terrain.depthAt(_v2.x, _v2.z);
+        const overDock = this._lineHitsDock(_v1, _v2);
         this.hudDepth = d;
         this.marker.visible = true;
         this.marker.position.set(_v2.x, (d > 0 ? this.water.surfaceY(_v2.x, _v2.z) : this.terrain.heightAt(_v2.x, _v2.z)) + 0.06, _v2.z);
         this.marker.scale.setScalar(1 + (1 - this.charge) * 0.5);
-        this.marker.material.color.setHex(d > 0.4 ? 0xfff0b0 : 0xff8a6a);
+        this.marker.material.color.setHex(overDock ? 0xff5a4a : d > 0.4 ? 0xfff0b0 : 0xff8a6a);
+        if (overDock) ui.setPrompt('⚠ <b>桟橋が邪魔</b>：このままだと糸が掛かります');
         bob.visible = false;
         this.angler.hideLine();
         break;
@@ -887,10 +902,18 @@ export class Game {
           this.audio.reelTick(1.5);
         } else {
           // 放物線
+          _v3.copy(this.bobber);                       // 直前位置（桟橋との判定用）
           this.bobberVel.y -= GRAVITY * dt;
           const spd = this.bobberVel.length();
           this.bobberVel.multiplyScalar(1 - 0.0055 * spd * dt);
           this.bobber.addScaledVector(this.bobberVel, dt);
+
+          // 桟橋に当たったら落ちる
+          if (this.terrain.dockBlocksSegment(_v3.x, _v3.y, _v3.z, this.bobber.x, this.bobber.y, this.bobber.z)) {
+            this.bobber.copy(_v3);
+            this._snagOnDock('桟橋に当たった…回収します');
+            break;
+          }
 
           const ground = this.terrain.heightAt(this.bobber.x, this.bobber.z);
           const surf = ground < 0 ? this.water.surfaceY(this.bobber.x, this.bobber.z) : ground;
@@ -950,6 +973,11 @@ export class Game {
         if (_v1.distanceTo(this.bobber) > MAX_LINE) {
           this.ui.toast('糸が伸びきった…回収します', 'bad');
           this._retrieve();
+          break;
+        }
+        // 歩いて桟橋を挟んでしまったら糸が掛かる
+        if (this.moveAmt > 0.02 && this._lineHitsDock(_v1, this.bobber)) {
+          this._snagOnDock('桟橋に糸が掛かった…回収します');
           break;
         }
 
@@ -1047,6 +1075,11 @@ export class Game {
   /* ---------------- 着水 ---------------- */
   _onLandWater() {
     const x = this.bobber.x, z = this.bobber.z;
+    // 桟橋を挟んで着水した場合は糸が桟橋に掛かっている
+    if (this._lineHitsDock(this.angler.getRodTip(_v1), this.bobber)) {
+      this._snagOnDock('桟橋越しには投げられない…回収します');
+      return;
+    }
     this.fs = 'wait';
     this.stateTime = 0;
     this.castDist = Math.hypot(x - this.pos.x, z - this.pos.z);
