@@ -274,6 +274,14 @@ F.runTimer = rand(<span class="n">1.4</span>, <span class="n">3.2</span>)       
 次まで   = rand(<span class="n">1.8</span>, <span class="n">4.2</span>) / (<span class="n">0.6</span> + sp.agg * <span class="n">0.8</span>)</pre>
     <p class="src">src/game.js — _updateFight()</p>
 
+    <div class="note">
+      <b>ファイト中は魚種とレア度を伏せています。</b>パネルの見出しは代わりに
+      <code>pull0</code>（= 種の str × サイズ係数）から求めた<b>手応え</b>を表示します：
+      軽い引き（&lt;0.55）／まずまずの引き（&lt;1.0）／強い引き！（&lt;1.6）／かなり重い…！（&lt;2.4）／とてつもない重さ…！。
+      サイズも含まれるので<b>大きなコモンも「重い」</b>になり、レア度は推測できません。
+      ヒット時のメッセージ・突進の警告・エラ洗いの発生も、レア度ではなく <code>pull0</code> を基準にしています。
+    </div>
+
     <h3>質問への回答</h3>
 
     <div class="note q">

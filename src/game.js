@@ -13,7 +13,7 @@ import { Debug } from './debug.js';
 import { AudioEngine } from './audio.js';
 import * as Save from './save.js';
 import {
-  REAL_FISH, JUNK, RARITY, GEAR, ACHIEVEMENTS,
+  REAL_FISH, JUNK, GEAR, ACHIEVEMENTS,
   weightOf, valueOf, xpOf, rollLength,
 } from './data.js';
 import {
@@ -29,6 +29,18 @@ const EYE_H = 1.62;
 
 /** 湖を作り直して再読み込みした直後は、タイトルを飛ばして再開する */
 export const AUTOSTART_KEY = 'lakeside-fishing-autostart';
+
+/**
+ * 引きの強さの表示（魚種・レア度は伏せ、手応えだけを伝える）
+ * pull0 = 種の str × サイズ係数 なので、大きなコモンも「重い」になる
+ */
+function pullLabel(pull0) {
+  if (pull0 < 0.55) return '軽い引き';
+  if (pull0 < 1.0) return 'まずまずの引き';
+  if (pull0 < 1.6) return '強い引き！';
+  if (pull0 < 2.4) return 'かなり重い…！';
+  return 'とてつもない重さ…！';
+}
 
 const BAIT_COLORS = {
   worm: 0xb9614c, dough: 0xe4d6b4, minnow: 0xa9bcc8, spoon: 0xd7d2b4,
@@ -620,7 +632,12 @@ export class Game {
     this.stateTime = 0;
     this.water.addSplash(this.bobber.x, this.water.surfaceY(this.bobber.x, this.bobber.z), this.bobber.z, 14, 1.0);
     this.water.addRipple(this.bobber.x, this.bobber.z, 1.1, 1.4);
-    this.ui.toast(`ヒット！ <b>${sp.rarity >= 3 ? '重い…！' : '掛かった！'}</b>`, sp.rarity >= 3 ? 'gold' : 'good');
+    // レア度ではなく「手応え」で知らせる（種は取り込むまで伏せる）
+    const heavy = this.fight.pull0;
+    this.ui.toast(
+      `ヒット！ <b>${heavy >= 2.0 ? '重い…！' : heavy >= 1.2 ? 'ぐんと重い！' : '掛かった！'}</b>`,
+      heavy >= 2.0 ? 'gold' : 'good'
+    );
   }
 
   /* =========================================================
@@ -1261,7 +1278,7 @@ export class Game {
       F.running = true;
       F.runDur = rand(0.7, 1.9) * (0.7 + sp.agg * 0.5);
       this.audio.drag();
-      if (sp.rarity >= 3 && Math.random() < 0.4) this.ui.toast('走った！ <b>糸を送れ</b>', 'bad');
+      if (F.pull0 >= 1.2 && Math.random() < 0.4) this.ui.toast('走った！ <b>糸を送れ</b>', 'bad');
     }
 
     const reeling = this.actionHeld;
@@ -1321,8 +1338,8 @@ export class Game {
         this.water.addRipple(wx, wz, 0.55, 1.0);
       }
     }
-    // 大物のエラ洗い
-    if (F.running && sp.rarity >= 2 && F.jumps < 3 && Math.random() < dt * 0.35 && t > 0.2 && t < 0.75) {
+    // エラ洗い（レア度ではなく引きの強さで発生）
+    if (F.running && F.pull0 >= 0.9 && F.jumps < 3 && Math.random() < dt * 0.35 && t > 0.2 && t < 0.75) {
       F.jumps++;
       this.water.addSplash(wx, surf, wz, 26, 1.4);
       this.water.addRipple(wx, wz, 1.5, 1.8);
@@ -1341,11 +1358,11 @@ export class Game {
     this.angler.updateRig(this.bobber, f.pos, this.camera, false);
 
     /* --- UI --- */
+    // 魚種とレア度は取り込むまで伏せる（引きの強さだけを見せる）
     this.hudDepth = depth;
-    const known = !!this.state.records[sp.id];
     this.ui.showFight(true, {
-      name: known ? sp.name : '？？？',
-      sub: `${RARITY[sp.rarity].label}　${F.running ? '⚠ 走っている' : reeling ? '巻いている' : '待機'}`,
+      name: pullLabel(F.pull0),
+      sub: F.running ? '⚠ 走っている' : reeling ? '巻いている' : '待機',
       tension: tRatio,
       dist: t,
       stam: F.stamina,
