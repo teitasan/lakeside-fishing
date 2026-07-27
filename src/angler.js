@@ -70,6 +70,7 @@ export class Angler {
     this.walkPhase = 0;
     this.bend = 0;
     this.armX = -0.35;
+    this.armZ = 0;
     this.castAnim = -1; // >=0 でキャストモーション中
     this.bodyLean = 0;
 
@@ -325,8 +326,9 @@ export class Angler {
       rodT = lerp(0.80, -1.45, p.charge);
       leanT = -0.12 * p.charge;
     } else if (st === 'wait' || st === 'flight') {
-      armT = -0.50;
-      rodT = 1.05;     // 合計 +0.55（穂先を高く前に）
+      // アタリ待ちは竿を寝かせる（合計 +1.0 = 垂直から 57°、水平から 33°）
+      armT = -0.42;
+      rodT = 1.42;
     } else if (st === 'fight') {
       // テンションが上がるほど竿を立てる
       armT = -0.72 - p.tension * 0.30;
@@ -352,6 +354,8 @@ export class Angler {
         leanT = lerp(-0.12, 0.1, e);
         this.rodRoot.rotation.x = damp(this.rodRoot.rotation.x, rodT, 26, dt);
         this.armR.rotation.x = this.armX;
+        this.armZ = damp(this.armZ, 0, 14, dt);      // 振り抜きは正面で
+        this.armR.rotation.z = this.armZ;
         this.armL.rotation.x = lerp(-0.3, -0.9, e);
         this.torso.rotation.x = leanT;
         this._applyBend(dt, p.tension, true);
@@ -362,7 +366,11 @@ export class Angler {
 
     this.armX = damp(this.armX, armT, 9, dt);
     this.armR.rotation.x = this.armX;
-    this.armR.rotation.z = st === 'fight' ? Math.sin(p.time * 6) * 0.05 * p.tension : 0;
+    // アタリ待ちは竿を少し外（右）へ倒す：真後ろからでもロッドの向きが分かる
+    const armZ = st === 'fight' ? Math.sin(p.time * 6) * 0.05 * p.tension
+      : (st === 'wait' || st === 'flight') ? 0.24 : 0;
+    this.armZ = damp(this.armZ, armZ, 7, dt);
+    this.armR.rotation.z = this.armZ;
     this.armL.rotation.x = damp(this.armL.rotation.x, st === 'idle' ? -0.3 + swing * 0.6 : -0.75, 8, dt);
     this.rodRoot.rotation.x = damp(this.rodRoot.rotation.x, rodT, 9, dt);
     this.bodyLean = damp(this.bodyLean, leanT, 8, dt);
