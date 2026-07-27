@@ -88,7 +88,8 @@ export class Debug {
       row('#ffb84d', '障害物') + row('#7ee0ff', '水際 h=0') +
       row('#ffe08a', '歩ける限界 −0.55') + row('#c86bff', '淵') +
       row('#6de08a', '藻場') + row('#ffffff', 'プレイヤー r0.34') +
-      row('#ff4dd2', 'エサ') + '</div>';
+      row('#ff4dd2', 'エサ') + '</div>'
+      + '<div style="font-size:9px;opacity:.5;margin-top:3px">障害物は 48m 以内・等高線は 140m 以内のみ表示</div>';
     function row(c, t) {
       return `<span class="dbg-lg"><i style="background:${c}"></i>${t}</span>`;
     }
@@ -145,28 +146,24 @@ export class Debug {
     addBox(L / 2, Y - 0.12, L, 0.60);          // 床（桁を含む）
     addBox(L - 1.15, Y + 0.315, 2.3, 1.47);    // 先端の手すり
 
-    /* --- 障害物の円 --- */
-    const obs = t.obstacles;
-    const SEG = 14;
-    const pts = [];
-    for (let i = 0; i < obs.length; i += 3) {
-      const ox = obs[i], oz = obs[i + 1], or = obs[i + 2];
-      const oy = Math.max(t.heightAt(ox, oz), 0) + 0.08;
-      for (let k = 0; k < SEG; k++) {
-        const a0 = (k / SEG) * TAU, a1 = ((k + 1) / SEG) * TAU;
-        pts.push(ox + Math.cos(a0) * or, oy, oz + Math.sin(a0) * or);
-        pts.push(ox + Math.cos(a1) * or, oy, oz + Math.sin(a1) * or);
-      }
-    }
+    /* --- 障害物の円（近くのものだけ毎回作り直す） ---
+       obstacles は 1件 4要素 [x, z, r, top] で並んでいる */
+    this.obstacleCount = t.obstacles.length / 4;
+    this._obsSeg = 14;
+    this._obsMax = 140;
+    const obsBuf = new Float32Array(this._obsMax * this._obsSeg * 2 * 3);
     const obsGeo = new THREE.BufferGeometry();
-    obsGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pts), 3));
-    root.add(new THREE.LineSegments(obsGeo, lineMat(0xffb84d, 0.75)));
-    this.obstacleCount = obs.length / 3;
+    obsGeo.setAttribute('position', new THREE.BufferAttribute(obsBuf, 3));
+    obsGeo.setDrawRange(0, 0);
+    this.obsLines = new THREE.LineSegments(obsGeo, lineMat(0xffb84d, 0.8));
+    this.obsLines.frustumCulled = false;
+    root.add(this.obsLines);
+    this._obsNear = 0;
 
-    /* --- 水際と歩ける限界の等高線 --- */
-    const contour = (targetH, color) => {
-      const N = 300, arr = [];
-      let prev = null;
+    /* --- 水際と歩ける限界の等高線（近い区間だけ描く） --- */
+    const makeContour = (targetH, color) => {
+      const N = 320;
+      const pts = new Float32Array((N + 1) * 3);
       for (let i = 0; i <= N; i++) {
         const ang = (i / N) * TAU;
         const cx = Math.cos(ang), cz = Math.sin(ang);
@@ -176,16 +173,20 @@ export class Debug {
           if (t.heightAt(cx * mid, cz * mid) < targetH) lo = mid; else hi = mid;
         }
         const r = (lo + hi) / 2;
-        const cur = [cx * r, targetH + 0.06, cz * r];
-        if (prev) arr.push(...prev, ...cur);
-        prev = cur;
+        pts[i * 3] = cx * r;
+        pts[i * 3 + 1] = targetH + 0.08;
+        pts[i * 3 + 2] = cz * r;
       }
+      const buf = new Float32Array(N * 2 * 3);
       const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(arr), 3));
-      root.add(new THREE.LineSegments(geo, lineMat(color, 0.6)));
+      geo.setAttribute('position', new THREE.BufferAttribute(buf, 3));
+      geo.setDrawRange(0, 0);
+      const mesh = new THREE.LineSegments(geo, lineMat(color, 0.55));
+      mesh.frustumCulled = false;
+      root.add(mesh);
+      return { pts, buf, mesh, n: N };
     };
-    contour(0, 0x7ee0ff);        // 水際
-    contour(-0.55, 0xffe08a);    // 歩ける限界（これより深いと入れない）
+    this._contours = [makeContour(0, 0x7ee0ff), makeContour(-0.55, 0xffe08a)];
 
     /* --- 地形フィーチャ --- */
     const featRing = (f, color) => {
@@ -235,6 +236,57 @@ export class Debug {
 
     root.traverse((o) => { o.renderOrder = 900; });
     this.built = true;
+    this._rebuildNear();
+  }
+
+  /**
+   * 近くの当たり判定だけを描き直す。
+   * 全部（岩・木 800個近く）を常に描くと画面が線で埋まって読めないため。
+   */
+  _rebuildNear() {
+    const g = this.game;
+    const t = g.terrain;
+    const px = g.pos.x, pz = g.pos.z;
+
+    /* 障害物：半径 48m 以内 */
+    const o = t.obstacles;
+    const SEG = this._obsSeg;
+    const arr = this.obsLines.geometry.attributes.position.array;
+    const R2 = 48 * 48;
+    let n = 0;
+    for (let i = 0; i < o.length && n < this._obsMax; i += 4) {
+      const dx = o[i] - px, dz = o[i + 1] - pz;
+      if (dx * dx + dz * dz > R2) continue;
+      const ox = o[i], oz = o[i + 1], or = o[i + 2];
+      const oy = Math.max(t.heightAt(ox, oz), 0) + 0.1;
+      let w = n * SEG * 6;
+      for (let k = 0; k < SEG; k++) {
+        const a0 = (k / SEG) * TAU, a1 = ((k + 1) / SEG) * TAU;
+        arr[w++] = ox + Math.cos(a0) * or; arr[w++] = oy; arr[w++] = oz + Math.sin(a0) * or;
+        arr[w++] = ox + Math.cos(a1) * or; arr[w++] = oy; arr[w++] = oz + Math.sin(a1) * or;
+      }
+      n++;
+    }
+    this._obsNear = n;
+    this.obsLines.geometry.setDrawRange(0, n * SEG * 2);
+    this.obsLines.geometry.attributes.position.needsUpdate = true;
+
+    /* 等高線：半径 140m 以内の区間だけ */
+    const CR2 = 140 * 140;
+    for (const c of this._contours) {
+      const p = c.pts, b = c.buf;
+      let m = 0;
+      for (let i = 0; i < c.n; i++) {
+        const x0 = p[i * 3], z0 = p[i * 3 + 2];
+        const x1 = p[(i + 1) * 3], z1 = p[(i + 1) * 3 + 2];
+        const mx = (x0 + x1) * 0.5 - px, mz = (z0 + z1) * 0.5 - pz;
+        if (mx * mx + mz * mz > CR2) continue;
+        b[m++] = x0; b[m++] = p[i * 3 + 1]; b[m++] = z0;
+        b[m++] = x1; b[m++] = p[(i + 1) * 3 + 1]; b[m++] = z1;
+      }
+      c.mesh.geometry.setDrawRange(0, m / 3);
+      c.mesh.geometry.attributes.position.needsUpdate = true;
+    }
   }
 
   /* ---------------- トグル ---------------- */
@@ -306,6 +358,13 @@ export class Debug {
       col.needsUpdate = true;
     }
 
+    /* --- 近くの当たり判定は 2.5Hz で作り直す --- */
+    this._nearAcc = (this._nearAcc || 0) + dt;
+    if (this._nearAcc > 0.4) {
+      this._nearAcc = 0;
+      this._rebuildNear();
+    }
+
     /* --- パネルは 10Hz --- */
     this._acc += dt;
     if (this._acc < 0.1) return;
@@ -353,7 +412,7 @@ ${kv('seed', g.state.seed)}${kv('tries', g.lakeTries || 1)}
 ${kv('shore r0', fmt1(S.shoreR0 || 0))}${kv('dock len', fmt1(t._dockLen))}
 ${kv('dock tip', fmt1(S.dockTipDepth || 0) + ' m')}${kv('clearance', fmt2(S.dockClearance || 0))}
 ${kv('hole', `${fmt1(S.holeDepth || 0)}m @${(S.holeFromDock || 0).toFixed(0)}m`)}${kv('flat', fmt1(S.flatDepth || 0) + ' m')}
-${kv('castable', `${fmt1(S.minDepth || 0)}〜${fmt1(S.maxDepth || 0)} m`)}${kv('obstacles', this.obstacleCount || 0)}
+${kv('castable', `${fmt1(S.minDepth || 0)}〜${fmt1(S.maxDepth || 0)} m`)}${kv('obstacles', `${this._obsNear || 0} / ${this.obstacleCount || 0} 表示`)}
 <hr>${kv('clock', fmtClock(g.state.clock))}${kv('weather', env.weather.key)}
 ${kv('cloud', fmt2(env.cloudiness))}${kv('rain', fmt2(env.rainIntensity))}
 ${kv('night', fmt2(env.nightAmount))}${kv('sun.y', fmt2(env.sunDir.y))}
