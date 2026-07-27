@@ -71,8 +71,10 @@ export class Angler {
     this.bend = 0;
     this.armX = -0.35;
     this.armZ = 0;
+    this.armY = 0;
     this.castAnim = -1; // >=0 でキャストモーション中
     this.bodyLean = 0;
+    this.fpv = false;
 
     this._build();
     this.line = new LineRibbon(scene, 26);
@@ -112,7 +114,7 @@ export class Angler {
     this.torso = new THREE.Group();
     this.torso.position.y = 0.86;
     g.add(this.torso);
-    const chest = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.64, 0.27), coat);
+    const chest = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.64, 0.27), coat.clone());
     chest.position.y = 0.32;
     chest.castShadow = true;
     this.torso.add(chest);
@@ -122,13 +124,13 @@ export class Angler {
     this.torso.add(vest);
 
     // 首・頭
-    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.075, 0.1, 8), skin);
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.075, 0.1, 8), skin.clone());
     neck.position.y = 0.68;
     this.torso.add(neck);
     this.head = new THREE.Group();
     this.head.position.y = 0.78;
     this.torso.add(this.head);
-    const skull = new THREE.Mesh(new THREE.SphereGeometry(0.125, 14, 12), skin);
+    const skull = new THREE.Mesh(new THREE.SphereGeometry(0.125, 14, 12), skin.clone());
     skull.scale.set(1, 1.12, 1.05);
     skull.castShadow = true;
     this.head.add(skull);
@@ -142,7 +144,12 @@ export class Angler {
     crown.castShadow = true;
     this.head.add(crown);
 
-    // 腕
+    /* 一人称で視界を覆ってしまうパーツ（頭・首・胴）。
+       visible=false にすると影も消えてしまうので、カラー出力だけ止めて影は残す。
+       そのためにマテリアルは他のパーツと共有しないよう clone 済み */
+    this._fpvHide = [skull, brim, crown, neck, chest, vest];
+
+    // 腕（+X 側がプレイヤーの左、-X 側が右。ロッドは右手で持つ）
     const mkArm = (s) => {
       const arm = new THREE.Group();
       arm.position.set(s * 0.25, 0.55, 0);
@@ -157,12 +164,14 @@ export class Angler {
       this.torso.add(arm);
       return arm;
     };
-    this.armR = mkArm(1);
-    this.armL = mkArm(-1);
+    this.armR = mkArm(-1);
+    this.armL = mkArm(1);
+    // Y を最後に掛ける（寝かせた竿を横へ振れるように。rotation.y=0 なら XYZ と同じ）
+    this.armR.rotation.order = 'YXZ';
 
     /* ---- ロッド ---- */
     this.rodRoot = new THREE.Object3D();
-    this.rodRoot.position.set(0.02, -0.58, 0.05);
+    this.rodRoot.position.set(-0.02, -0.58, 0.05);
     this.armR.add(this.rodRoot);
 
     const rodMat = new THREE.MeshStandardMaterial({ color: 0x4a3320, roughness: 0.6, metalness: 0.1 });
@@ -294,6 +303,15 @@ export class Angler {
   /* ---------------- 更新 ---------------- */
   setYaw(y) { this.yaw = y; }
 
+  /** 一人称：頭・首・胴を画面から消す（腕とロッドは残す）。影はそのまま落ちる */
+  setFirstPerson(on) {
+    this.fpv = on;
+    for (const m of this._fpvHide) {
+      m.material.colorWrite = !on;
+      m.material.depthWrite = !on;   // 深度に穴を空けないように
+    }
+  }
+
   playCast() { this.castAnim = 0; }
 
   /**
@@ -339,6 +357,17 @@ export class Angler {
       rodT = 1.10;
     }
 
+    /* 一人称は視界に穂先を残したいので、待ちとファイトをさらに寝かせる
+       （構え・キャストは三人称と同じ＝飛距離の計算が視点で変わらないように） */
+    if (this.fpv) {
+      if (st === 'wait' || st === 'flight') {
+        armT = -0.30; rodT = 1.50;                            // 合計 1.20（水平から 21°）
+      } else if (st === 'fight') {
+        armT = -0.55 - p.tension * 0.22;
+        rodT = 1.45 - p.tension * 0.16;                       // 合計 0.90 → 0.52（立てていく）
+      }
+    }
+
     // キャストのスイング
     if (this.castAnim >= 0) {
       this.castAnim += dt;
@@ -356,6 +385,8 @@ export class Angler {
         this.armR.rotation.x = this.armX;
         this.armZ = damp(this.armZ, 0, 14, dt);      // 振り抜きは正面で
         this.armR.rotation.z = this.armZ;
+        this.armY = damp(this.armY, 0, 14, dt);
+        this.armR.rotation.y = this.armY;
         this.armL.rotation.x = lerp(-0.3, -0.9, e);
         this.torso.rotation.x = leanT;
         this._applyBend(dt, p.tension, true);
@@ -366,11 +397,22 @@ export class Angler {
 
     this.armX = damp(this.armX, armT, 9, dt);
     this.armR.rotation.x = this.armX;
-    // アタリ待ちは竿を少し外（右）へ倒す：真後ろからでもロッドの向きが分かる
-    const armZ = st === 'fight' ? Math.sin(p.time * 6) * 0.05 * p.tension
-      : (st === 'wait' || st === 'flight') ? 0.24 : 0;
+    /* 横向きの角度
+       Z（傾ける）: 三人称のアタリ待ちで竿を少し外（右）へ倒す＝真後ろからでも向きが分かる
+       Y（振る）  : 一人称で竿を右へ振る＝寝かせた竿が画面中央（レティクル・ウキ）を塞がない
+                   （寝かせた竿は Z で傾けても向きがほとんど変わらないため Y を使う） */
+    let armZ = 0;
+    let armY = 0;
+    if (st === 'wait' || st === 'flight') {
+      if (this.fpv) armY = -0.30; else armZ = 0.24;
+    } else if (st === 'fight') {
+      armZ = Math.sin(p.time * 6) * 0.05 * p.tension;
+      if (this.fpv) armY = -0.24;
+    }
     this.armZ = damp(this.armZ, armZ, 7, dt);
     this.armR.rotation.z = this.armZ;
+    this.armY = damp(this.armY, armY, 7, dt);
+    this.armR.rotation.y = this.armY;
     this.armL.rotation.x = damp(this.armL.rotation.x, st === 'idle' ? -0.3 + swing * 0.6 : -0.75, 8, dt);
     this.rodRoot.rotation.x = damp(this.rodRoot.rotation.x, rodT, 9, dt);
     this.bodyLean = damp(this.bodyLean, leanT, 8, dt);

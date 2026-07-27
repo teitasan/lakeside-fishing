@@ -31,6 +31,9 @@ const CAST_TOL = 0.06;         // 目印に合っていると見なすパワー�
 const HOURS_PER_SEC = 24 / 720;   // 実時間12分で1日
 const MAX_LINE = 62;
 const EYE_H = 1.62;
+/* カメラ距離（三人称）。CAM_MIN からさらに手前へ回すと一人称 */
+const CAM_MIN = 1.6;
+const CAM_MAX = 9;
 
 /** 湖を作り直して再読み込みした直後は、タイトルを飛ばして再開する */
 export const AUTOSTART_KEY = 'lakeside-fishing-autostart';
@@ -84,6 +87,7 @@ export class Game {
     this.moveAmt = 0;
     this.underwaterCam = false;
     this.camDist = 4.6;
+    this.firstPerson = false;
 
     /* --- 釣り --- */
     this.fs = 'idle'; // idle|charge|flight|wait|nibble|bite|fight|landing|card
@@ -190,6 +194,7 @@ export class Game {
 
     this.school.populate(this.pos, (d) => this.rollSpecies(d));
     if (this.state.settings.debug) this.debug.setEnabled(true);
+    if (this.state.settings.fpv) this._setFirstPerson(true, true);
     this._updateCamera(0.016, true);
     this.renderer.compile(this.scene, this.camera);
     await onProgress('準備完了');
@@ -238,7 +243,16 @@ export class Game {
 
     window.addEventListener('wheel', (e) => {
       if (!this.playing || this.ui.isBlocking()) return;
-      this.camDist = clamp(this.camDist + Math.sign(e.deltaY) * 0.5, 1.6, 9);
+      // 三人称の最短(CAM_MIN)からさらに手前へ回すと一人称、奥へ回すと三人称に戻る
+      const d = Math.sign(e.deltaY);
+      if (!d) return;
+      if (this.firstPerson) {
+        if (d > 0) this._setFirstPerson(false);
+      } else if (d < 0 && this.camDist <= CAM_MIN + 1e-3) {
+        this._setFirstPerson(true);
+      } else {
+        this.camDist = clamp(this.camDist + d * 0.5, CAM_MIN, CAM_MAX);
+      }
     }, { passive: true });
 
     window.addEventListener('keydown', (e) => {
@@ -933,6 +947,11 @@ export class Game {
       return;
     }
 
+    if (this.firstPerson) {
+      this._updateFpvCamera();
+      return;
+    }
+
     const dir = this._aimDir(_v1);
     const pivotY = this.visY + EYE_H;
     // 肩越し（右肩側にずらす）
@@ -968,6 +987,35 @@ export class Game {
     }
     cam.lookAt(look);
     this._setUnderwaterFx(false);
+  }
+
+  /** 一人称：カメラは頭の位置そのまま。視線はマウス（レティクル＝狙い）に完全一致させる */
+  _updateFpvCamera() {
+    const cam = this.camera;
+    // 歩行の上下（三人称の胴の bob より控えめ）
+    const bob = Math.abs(Math.sin(this.angler.walkPhase)) * 0.022 * this.moveAmt;
+    cam.position.set(this.pos.x, this.visY + EYE_H + bob, this.pos.z);
+    if (this.fs === 'fight' && this.fight) {
+      // 手ブレは一人称だと効きすぎるので弱める
+      const t = clamp01(this.fight.tension / this.line.cap);
+      cam.position.x += Math.sin(this.time * 31) * 0.005 * t;
+      cam.position.y += Math.sin(this.time * 27) * 0.005 * t;
+    }
+    const dir = this._aimDir(_v1);
+    cam.lookAt(_v2.copy(cam.position).addScaledVector(dir, 12));
+    this._setUnderwaterFx(false);
+  }
+
+  _setFirstPerson(on, quiet = false) {
+    if (this.firstPerson === on) return;
+    this.firstPerson = on;
+    this.camDist = CAM_MIN;
+    this.angler.setFirstPerson(on);
+    this.state.settings.fpv = on;
+    this.saveState();
+    if (quiet) return;
+    this.audio.click();
+    this.ui.toast(on ? '👁 一人称視点（ホイールを奥へ回すと三人称）' : '三人称視点');
   }
 
   _setUnderwaterFx(on) {
@@ -1258,10 +1306,12 @@ export class Game {
         ui.setPrompt('');
         if (!f) { this.fs = 'idle'; break; }
         const t = clamp01(this.stateTime / 0.85);
+        // 一人称は目の前に来すぎるので、少し遠く・低い位置で持ち上げる
+        const lift = this.firstPerson ? 1.7 : 1.1;
         _v2.copy(this.pos);
-        _v2.y = this.visY + 1.15;
-        _v2.x += Math.sin(this.yaw) * 1.1;
-        _v2.z += Math.cos(this.yaw) * 1.1;
+        _v2.y = this.visY + (this.firstPerson ? 0.95 : 1.15);
+        _v2.x += Math.sin(this.yaw) * lift;
+        _v2.z += Math.cos(this.yaw) * lift;
         f.pos.lerp(_v2, 1 - Math.exp(-6 * dt));
         f.state = 'landed';
         f.mesh.position.copy(f.pos);

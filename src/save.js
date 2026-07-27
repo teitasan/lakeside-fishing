@@ -27,7 +27,8 @@ export function defaultState() {
     records: {}, // id -> {count, maxLen, maxWeight}
     achievements: [],
     // volume = 効果音 / bgm = 環境音（雨・風・水・虫）
-    settings: { volume: 0.7, bgm: 0.7, sens: 1.0, quality: 'mid', shadow: true, randomLake: false, debug: false },
+    // fpv = 一人称視点（ホイールを手前まで回すと切り替わる）
+    settings: { volume: 0.7, bgm: 0.7, sens: 1.0, quality: 'mid', shadow: true, randomLake: false, debug: false, fpv: false },
   };
 }
 
