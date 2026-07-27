@@ -252,16 +252,27 @@ export class Game {
       this.keys.add(e.code);
       switch (e.code) {
         case 'Space': this._actionDown(); break;
-        case 'KeyQ': this._exitLock(); this.ui.openJournal(); this.audio.click(); break;
-        case 'KeyB': this._exitLock(); this.ui.openShop(); this.audio.click(); break;
-        case 'Escape': this._exitLock(); this.ui.openPause(); break;
+        case 'KeyQ': this._cancelCharge(); this._exitLock(); this.ui.openJournal(); this.audio.click(); break;
+        case 'KeyB': this._cancelCharge(); this._exitLock(); this.ui.openShop(); this.audio.click(); break;
+        case 'Escape': this._cancelCharge(); this._exitLock(); this.ui.openPause(); break;
         case 'KeyV': this._toggleUnderwater(); break;
         case 'KeyM': {
           const s = this.state.settings;
-          s.volume = s.volume > 0 ? 0 : 0.7;
+          // 効果音と環境音の両方をまとめてミュート／復帰
+          const muted = s.volume <= 0 && (s.bgm ?? 0) <= 0;
+          if (muted) {
+            s.volume = this._preMute?.volume ?? 0.7;
+            s.bgm = this._preMute?.bgm ?? 0.7;
+          } else {
+            this._preMute = { volume: s.volume, bgm: s.bgm ?? 0.7 };
+            s.volume = 0;
+            s.bgm = 0;
+          }
           this.audio.setVolume(s.volume);
+          this.audio.setBgm(s.bgm);
           document.getElementById('opt-volume').value = s.volume * 100;
-          this.ui.toast(s.volume > 0 ? '🔊 音量オン' : '🔇 ミュート');
+          document.getElementById('opt-bgm').value = s.bgm * 100;
+          this.ui.toast(muted ? '🔊 音を戻した' : '🔇 ミュート');
           this.saveState();
           break;
         }
@@ -301,6 +312,7 @@ export class Game {
     }
     this.audio.init();
     this.audio.setVolume(this.state.settings.volume);
+    this.audio.setBgm(this.state.settings.bgm ?? 0.7);
     this.audio.resume();
     this.playing = true;
     document.body.classList.add('playing');
@@ -508,7 +520,20 @@ export class Game {
 
   _actionUp() {
     this.actionHeld = false;
+    if (this.ui.isBlocking()) return;      // メニュー中は発射しない
     if (this.fs === 'charge') this._releaseCast();
+  }
+
+  /** ため動作を取り消す（メニューを開いた時など） */
+  _cancelCharge() {
+    if (this.fs !== 'charge') return;
+    this.fs = 'idle';
+    this.charge = 0;
+    this.chargeDir = 1;
+    this.castObstruction = null;
+    this.marker.visible = false;
+    this.ui.showPower(false);
+    this.ui.setPrompt('');
   }
 
   /* ---------------- キャスト ---------------- */
@@ -653,28 +678,36 @@ export class Game {
      ========================================================= */
   update(dt) {
     dt = Math.min(dt, 0.1); // 極端に重い環境でも破綻しない範囲でスロー化を抑える
-    this.time += dt;
 
-    if (this.playing) {
+    // メニュー（ポーズ・ショップ・図鑑）を開いている間は世界を止める。
+    // 止めないと、ため中にメニューを開いてもキャストが進み、
+    // ボタンを離した瞬間にメニュー越しに発射されてしまう。
+    const paused = this.playing && this.ui.isBlocking() && this.ui.openModal !== 'catch';
+    const sdt = paused ? 0 : dt;
+    this.time += sdt;
+
+    if (this.playing && !paused) {
       this.state.clock = (this.state.clock + dt * HOURS_PER_SEC) % 24;
       const changed = this.env.tickWeather(dt * HOURS_PER_SEC);
       if (changed) this.ui.toast(`${changed.icon} 天候が「${changed.name}」に変わった`);
     }
 
-    this._updateLook(dt);
-    this._updateMove(dt);
-    this._updateFishing(dt);
-    this._updateCamera(dt);
+    if (!paused) {
+      this._updateLook(dt);
+      this._updateMove(dt);
+      this._updateFishing(dt);
+    }
+    this._updateCamera(sdt);
 
-    this.env.update(dt, this.state.clock, this.camera, this.pos);
-    this.terrain.updateLamp(this.env.nightAmount, dt);
-    this.water.update(dt, this.camera, this.env);
+    this.env.update(sdt, this.state.clock, this.camera, this.pos);
+    this.terrain.updateLamp(this.env.nightAmount, sdt);
+    this.water.update(sdt, this.camera, this.env);
 
     this.audio.setRain(this.env.rainIntensity);
     this.audio.setNight(this.env.nightAmount);
 
-    // 魚群
-    this.school.update(dt, {
+    // 魚群（ポーズ中は入れ替えも止める）
+    if (!paused) this.school.update(dt, {
       water: this.water,
       terrain: this.terrain,
       time: this.time,

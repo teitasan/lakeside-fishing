@@ -26,7 +26,8 @@ export function defaultState() {
     owned: { rod: ['bamboo'], line: ['nylon'], bait: ['worm'] },
     records: {}, // id -> {count, maxLen, maxWeight}
     achievements: [],
-    settings: { volume: 0.7, sens: 1.0, quality: 'mid', shadow: true, randomLake: false, debug: false },
+    // volume = 効果音 / bgm = 環境音（雨・風・水・虫）
+    settings: { volume: 0.7, bgm: 0.7, sens: 1.0, quality: 'mid', shadow: true, randomLake: false, debug: false },
   };
 }
 

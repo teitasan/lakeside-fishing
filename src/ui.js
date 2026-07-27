@@ -188,12 +188,18 @@ export class UI {
     // 設定
     const s = g.state.settings;
     $('opt-volume').value = Math.round(s.volume * 100);
+    $('opt-bgm').value = Math.round((s.bgm ?? 0.7) * 100);
     $('opt-sens').value = Math.round(s.sens * 100);
     $('opt-quality').value = s.quality;
     $('opt-shadow').checked = s.shadow;
     $('opt-volume').addEventListener('input', (e) => {
       s.volume = e.target.value / 100;
       g.audio.setVolume(s.volume);
+      g.saveState();
+    });
+    $('opt-bgm').addEventListener('input', (e) => {
+      s.bgm = e.target.value / 100;
+      g.audio.setBgm(s.bgm);
       g.saveState();
     });
     $('opt-sens').addEventListener('input', (e) => {

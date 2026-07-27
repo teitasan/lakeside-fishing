@@ -7,7 +7,8 @@ export class AudioEngine {
   constructor() {
     this.ctx = null;
     this.ready = false;
-    this.volume = 0.7;
+    this.volume = 0.7;    // 効果音（SE）
+    this.bgm = 0.7;       // 環境音（水・風・雨・虫）
     this._reelClickAt = 0;
     this._noise = null;
   }
@@ -19,9 +20,18 @@ export class AudioEngine {
     if (!AC) return;
     const ctx = (this.ctx = new AC());
 
-    // マスターチェーン: master -> 水中フィルタ -> コンプ -> 出力
+    // マスターチェーン: (SE / 環境音) -> master -> 水中フィルタ -> コンプ -> 出力
     this.master = ctx.createGain();
-    this.master.gain.value = this.volume;
+    this.master.gain.value = 1;
+
+    // 2系統に分けて別々に音量調整できるようにする
+    this.seBus = ctx.createGain();
+    this.seBus.gain.value = this.volume;
+    this.seBus.connect(this.master);
+
+    this.bgmBus = ctx.createGain();
+    this.bgmBus.gain.value = this.bgm;
+    this.bgmBus.connect(this.master);
 
     this.muffle = ctx.createBiquadFilter();
     this.muffle.type = 'lowpass';
@@ -46,9 +56,16 @@ export class AudioEngine {
     this.ready = true;
   }
 
+  /** 効果音（SE）の音量 */
   setVolume(v) {
     this.volume = clamp01(v);
-    if (this.master) this.master.gain.value = this.volume;
+    if (this.seBus) this.seBus.gain.value = this.volume;
+  }
+
+  /** 環境音（雨・風・水・虫）の音量 */
+  setBgm(v) {
+    this.bgm = clamp01(v);
+    if (this.bgmBus) this.bgmBus.gain.value = this.bgm;
   }
 
   /** 水中カメラ時の音の詰まり */
@@ -76,8 +93,8 @@ export class AudioEngine {
     wf.frequency.value = 420;
     wf.Q.value = 0.8;
     const wg = ctx.createGain();
-    wg.gain.value = 0.16;
-    water.connect(wf); wf.connect(wg); wg.connect(this.master);
+    wg.gain.value = 0.08;          // 環境音は控えめに（従来の半分）
+    water.connect(wf); wf.connect(wg); wg.connect(this.bgmBus);
 
     const lfo = ctx.createOscillator();
     lfo.frequency.value = 0.13;
@@ -88,7 +105,7 @@ export class AudioEngine {
     const lfo2 = ctx.createOscillator();
     lfo2.frequency.value = 0.07;
     const lfo2G = ctx.createGain();
-    lfo2G.gain.value = 0.06;
+    lfo2G.gain.value = 0.03;
     lfo2.connect(lfo2G); lfo2G.connect(wg.gain);
 
     // 風
@@ -100,8 +117,8 @@ export class AudioEngine {
     bf.frequency.value = 620;
     bf.Q.value = 0.6;
     const bg = ctx.createGain();
-    bg.gain.value = 0.05;
-    wind.connect(bf); bf.connect(bg); bg.connect(this.master);
+    bg.gain.value = 0.025;
+    wind.connect(bf); bf.connect(bg); bg.connect(this.bgmBus);
     const wlfo = ctx.createOscillator();
     wlfo.frequency.value = 0.05;
     const wlfoG = ctx.createGain();
@@ -117,13 +134,13 @@ export class AudioEngine {
     rf.frequency.value = 1100;
     const rg = ctx.createGain();
     rg.gain.value = 0;
-    rainSrc.connect(rf); rf.connect(rg); rg.connect(this.master);
+    rainSrc.connect(rf); rf.connect(rg); rg.connect(this.bgmBus);
     this.rainGain = rg;
 
     // 虫の声（夜）
     const nightG = ctx.createGain();
     nightG.gain.value = 0;
-    nightG.connect(this.master);
+    nightG.connect(this.bgmBus);
     const cricket = ctx.createOscillator();
     cricket.type = 'triangle';
     cricket.frequency.value = 4200;
@@ -146,14 +163,14 @@ export class AudioEngine {
     if (!this.ready) return;
     const t = this.ctx.currentTime;
     this.rainGain.gain.cancelScheduledValues(t);
-    this.rainGain.gain.linearRampToValueAtTime(clamp01(intensity) * 0.2, t + 0.8);
+    this.rainGain.gain.linearRampToValueAtTime(clamp01(intensity) * 0.1, t + 0.8);
   }
 
   setNight(amount) {
     if (!this.ready) return;
     const t = this.ctx.currentTime;
     this.nightGain.gain.cancelScheduledValues(t);
-    this.nightGain.gain.linearRampToValueAtTime(clamp01(amount) * 0.5, t + 1.5);
+    this.nightGain.gain.linearRampToValueAtTime(clamp01(amount) * 0.25, t + 1.5);
   }
 
   /* ---------------- ワンショット ---------------- */
@@ -172,7 +189,7 @@ export class AudioEngine {
     g.gain.setValueAtTime(0, t);
     g.gain.linearRampToValueAtTime(gain, t + Math.min(0.03, dur * 0.2));
     g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
-    src.connect(f); f.connect(g); g.connect(this.master);
+    src.connect(f); f.connect(g); g.connect(this.seBus);
     src.start(t, rand(0, 1));
     src.stop(t + dur + 0.05);
   }
@@ -188,7 +205,7 @@ export class AudioEngine {
     g.gain.setValueAtTime(0, t);
     g.gain.linearRampToValueAtTime(gain, t + attack);
     g.gain.exponentialRampToValueAtTime(0.0006, t + dur);
-    o.connect(g); g.connect(this.master);
+    o.connect(g); g.connect(this.seBus);
     o.start(t);
     o.stop(t + dur + 0.05);
   }

@@ -423,7 +423,7 @@ ${kv('fog', `${env.scene.fog.near.toFixed(0)}–${env.scene.fog.far.toFixed(0)}`
     const a = g.audio;
     const list = [...this.sounds.entries()].sort((x, y) => y[1].last - x[1].last).slice(0, 10);
     B.sound.innerHTML = `<b>🔊 AUDIO</b>
-${kv('ctx', a.ctx ? a.ctx.state : 'none')}${kv('volume', fmt2(a.volume))}
+${kv('ctx', a.ctx ? a.ctx.state : 'none')}${kv('se / bgm', `${fmt2(a.volume)} / ${fmt2(a.bgm)}`)}
 ${kv('muffle', a.ready ? a.muffle.frequency.value.toFixed(0) + ' Hz' : '—')}${kv('rain g', a.ready ? fmt2(a.rainGain.gain.value) : '—')}
 ${kv('night g', a.ready ? fmt2(a.nightGain.gain.value) : '—')}${kv('events', this.recent.length ? this.recent[0].name : '—')}
 <div class="dbg-snd">${list.map(([name, e]) => {
