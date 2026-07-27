@@ -502,11 +502,35 @@ power = 往復値
     </table></div>
 
     <h3>地形と水深</h3>
+    <p>
+      地形は <b>seed 20240711 で固定</b>されており、何度プレイしても・描画品質を変えても<b>まったく同じ湖</b>が生成されます
+      （<code>src/game.js</code> の <code>new Terrain(scene, { seed: 20240711 })</code>）。以下は実測値です。
+    </p>
+    <pre><span class="cm">// 湖底の高さ関数（over = 岸線からの距離、k = 1 − r/岸線半径）</span>
+水中: h = −(<span class="n">26</span> × k^<span class="n">0.6</span> × smoothstep(<span class="n">0</span>, <span class="n">0.075</span>, k)) + 湖底ノイズ×<span class="n">1.35</span>k − 淵 + 藻場
+陸上: h = over × <span class="n">0.15</span> + 丘ノイズ×<span class="n">7.5</span> + 山リッジ×<span class="n">105</span>×smoothstep(<span class="n">70</span>, <span class="n">320</span>, over)</pre>
+    <p class="src">src/terrain.js — heightAt()</p>
+    <div class="tw"><table>
+      <thead><tr><th class="l">場所</th><th class="num">水深</th><th class="l">狙える魚の層</th></tr></thead>
+      <tbody>
+        <tr><td class="l name">岸線から 1 m</td><td class="num">2.0 m</td><td class="l">モロコ・ブルーギル・ヤマメ・ライギョ（浅場の魚）</td></tr>
+        <tr><td class="l name">岸線から 4 m</td><td class="num">3.8 m</td><td class="l">コモン全般＋ブラックバス・ニジマス</td></tr>
+        <tr><td class="l name">岸線から 8 m</td><td class="num">7.8 m</td><td class="l">ニジマス・バス・コイ・ビワマス</td></tr>
+        <tr><td class="l name">岸線から 20 m</td><td class="num">12.7 m</td><td class="l">ナマズ・イワナ・ビワマス</td></tr>
+        <tr><td class="l name">桟橋の先端（岸線から 26 m）</td><td class="num">14.4 m</td><td class="l">＋<b>湖の主</b>（14 m 以上）が成立</td></tr>
+        <tr><td class="l name">桟橋の先端から 25 m 先</td><td class="num">17.5 m</td><td class="l">＋<b>白龍魚</b>（17 m 以上）が成立</td></tr>
+        <tr><td class="l name">桟橋の先端から 45 m 先（ほぼ最大飛距離）</td><td class="num">19.7 m</td><td class="l">深場の魚が安定</td></tr>
+        <tr><td class="l name">深い淵の最深部（桟橋の先端から 32 m・やや右）</td><td class="num"><b style="color:var(--gold)">24.6 m</b></td><td class="l">レジェンドの層一致がもっとも良くなる</td></tr>
+        <tr><td class="l name">藻場の中心（桟橋の先端から 86 m・右手の岸）</td><td class="num">5.5 m</td><td class="l">周囲 8.8 m を +3.2 m 底上げした「相対的な浅場」。葦が密生</td></tr>
+        <tr><td class="l name">湖心（岸線から 115 m）</td><td class="num">26.0 m</td><td class="l">最深部だが岸から届かない</td></tr>
+      </tbody>
+      <tfoot><tr><td colspan="3" class="l">桟橋は角度 π/2 の方向。岸線半径はノイズで 96〜164 m の範囲で波打ち、桟橋前では <b>115 m</b>。</td></tr></tfoot>
+    </table></div>
     <div class="grid c2">
-      <div class="card tight"><h4>湖の断面</h4><p>岸から約 8 m は 0〜3 m の浅場。そこから急に落ち込み（ドロップオフ）、20 m 先で約 8 m、35 m 先で約 12 m。湖心の最深部は <b>26 m</b>。</p></div>
-      <div class="card tight"><h4>深い淵（ホール）</h4><p>桟橋の左手前、中心から約 96 m の位置に半径 30 m・最大 <b>+13 m</b> 深い窪み。ここだけ <b>23〜34 m</b> に達し、レジェンド（水深 14〜30 m）が成立します。</p></div>
-      <div class="card tight"><h4>藻場（シャローフラット）</h4><p>桟橋の右手、半径 30 m を <b>+3.2 m</b> 底上げした 0.5〜2 m の浅場。葦が密生し、ライギョ・ブルーギル（weed タグ）向き。</p></div>
-      <div class="card tight"><h4>歩ける範囲</h4><p>地形高さ <b>−0.55 m</b> までは入れる（水深 0.55 m まで）。急斜面（勾配 1.5 超）は登れません。桟橋の上は高さ 1.35 m 固定。</p></div>
+      <div class="card tight"><h4>ドロップオフ</h4><p>岸線からすぐに落ち込む急深型です（1 m で 2 m、8 m で 7.8 m）。<b>浅場の魚は岸すぐを、深場の魚は遠投で</b>狙い分けます。キャスト中の予測リングと水深表示がそのまま指標になります。</p></div>
+      <div class="card tight"><h4>深い淵（ホール）</h4><p>中心から 96 m・桟橋の少し右に、半径 30 m・中心で <b>−13 m</b> 掘った窪み。周囲 11.6 m に対して <b>24.6 m</b>。レジェンドの生息層中央（21 m / 23.5 m）に近く、⑥層一致の倍率が最大になります。</p></div>
+      <div class="card tight"><h4>藻場</h4><p>半径 30 m を <b>+3.2 m</b> 底上げ。深場ほど深くないので weed タグ（ライギョ・ブルーギル・バス）の層一致が良くなります。フロッグ（層 0.4 m）はここ向き。</p></div>
+      <div class="card tight"><h4>歩ける範囲</h4><p>地形高さ <b>−0.55 m</b> まで（水深 0.55 m まで）入れます。勾配 1.5 超の急斜面は登れません。桟橋の上は高さ 1.35 m 固定。中心から 460 m が世界の端。</p></div>
     </div>
   </section>
 
