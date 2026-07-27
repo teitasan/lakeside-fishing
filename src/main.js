@@ -1,7 +1,7 @@
 /* ===========================================================
    エントリポイント
    =========================================================== */
-import { Game } from './game.js';
+import { Game, AUTOSTART_KEY } from './game.js';
 import { hasSave } from './save.js';
 
 const canvas = document.getElementById('scene');
@@ -41,6 +41,17 @@ async function boot() {
 
   game.ui.hideLoading();
   if (hasSave()) document.getElementById('btn-continue').classList.remove('hidden');
+
+  // 湖を作り直して再読み込みした場合は、タイトルを飛ばしてそのまま再開
+  let autostart = false;
+  try {
+    autostart = sessionStorage.getItem(AUTOSTART_KEY) === '1';
+    if (autostart) sessionStorage.removeItem(AUTOSTART_KEY);
+  } catch (e) { /* noop */ }
+  if (autostart) {
+    game.start(true);
+    game.ui.toast(`🗺️ 新しい湖に来た（シード ${game.state.seed}）`, 'gold');
+  }
 
   let last = performance.now();
   function frame(now) {

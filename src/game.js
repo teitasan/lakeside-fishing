@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { Environment } from './sky.js';
 import { Terrain } from './terrain.js';
+import { resolveLake } from './lakefield.js';
 import { Water } from './water.js';
 import { FishSchool } from './fish.js';
 import { Angler } from './angler.js';
@@ -24,6 +25,9 @@ const HOURS_PER_SEC = 24 / 720;   // 実時間12分で1日
 const MAX_LINE = 62;
 const EYE_H = 1.62;
 
+/** 湖を作り直して再読み込みした直後は、タイトルを飛ばして再開する */
+export const AUTOSTART_KEY = 'lakeside-fishing-autostart';
+
 const BAIT_COLORS = {
   worm: 0xb9614c, dough: 0xe4d6b4, minnow: 0xa9bcc8, spoon: 0xd7d2b4,
   frog: 0x6e9b46, crank: 0xcf5a42, secret: 0xd9c274,
@@ -37,6 +41,7 @@ const _v3 = new THREE.Vector3();
 export class Game {
   constructor(canvas) {
     this.canvas = canvas;
+    this.bootedWithSave = Save.hasSave();
     this.state = Save.load();
     this.audio = new AudioEngine();
     this.playing = false;
@@ -107,7 +112,18 @@ export class Game {
     this.env.setQuality(q);
 
     await onProgress('湖と山を生成しています');
-    this.terrain = new Terrain(this.scene, { quality: q, seed: 20240711 });
+    // シードを決めて、遊べる湖になるまで検証してから採用する
+    const wantSeed = (this.state.settings.randomLake || !this.state.seed)
+      ? Save.randomLakeSeed() : this.state.seed;
+    const resolved = resolveLake(wantSeed);
+    this.lake = resolved.lake;
+    this.lakeStats = resolved.stats;
+    this.lakeTries = resolved.tries;
+    if (this.state.seed !== resolved.seed) {
+      this.state.seed = resolved.seed;
+      Save.saveNow(this.state);
+    }
+    this.terrain = new Terrain(this.scene, { quality: q, lake: resolved.lake });
 
     await onProgress('水を注いでいます');
     this.water = new Water(this.scene, this.terrain, { quality: q, exposure: EXPOSURE });
@@ -252,6 +268,12 @@ export class Game {
       // 設定は引き継ぎつつ、同じオブジェクトのまま初期化（UI の参照を保つ）
       const keep = this.state.settings;
       Object.assign(this.state, Save.defaultState(), { settings: keep });
+      if (this.bootedWithSave) {
+        // 既存セーブの湖で起動していたので、新しい湖を引き直して作り直す
+        this._reloadWithLake(Save.randomLakeSeed());
+        return;
+      }
+      this.state.seed = this.lake.seed;   // 起動時に引いた湖をそのまま使う
       Save.saveNow(this.state);
     }
     this.audio.init();
@@ -274,6 +296,59 @@ export class Game {
   resetSave() {
     Save.wipe();
     location.reload();
+  }
+
+  /* =========================================================
+     湖（シード）
+     ========================================================= */
+  /** シードを保存して再読み込み。復帰後はタイトルを飛ばしてそのまま再開する */
+  _reloadWithLake(seed) {
+    this.state.seed = seed >>> 0;
+    Save.saveNow(this.state);
+    try { sessionStorage.setItem(AUTOSTART_KEY, '1'); } catch (e) { /* noop */ }
+    location.reload();
+  }
+
+  /** シードを指定して湖を作り直す（再読み込み） */
+  setLakeSeed(seed) {
+    const n = Math.floor(Number(seed));
+    if (!Number.isFinite(n) || n < 1 || n > 0xffffffff) {
+      this.ui.toast('シードは 1〜4294967295 の数値で指定してください', 'bad');
+      this.audio.deny();
+      return false;
+    }
+    this._reloadWithLake(n);
+    return true;
+  }
+
+  newRandomLake() { return this.setLakeSeed(Save.randomLakeSeed()); }
+
+  /** ポーズ画面に出す、いまの湖の要約 */
+  lakeInfo() {
+    const S = this.lakeStats || {};
+    const d = this.terrain.dockEnd, dir = this.terrain.dockDir;
+    const rightX = -dir.z, rightZ = dir.x;
+    const dirOf = (p) => {
+      const vx = p.x - d.x, vz = p.z - d.z;
+      const fwd = vx * dir.x + vz * dir.z;
+      const side = vx * rightX + vz * rightZ;
+      const dist = Math.hypot(vx, vz);
+      const lr = side > 0 ? '右' : '左';
+      const fb = fwd > dist * 0.35 ? '前方' : fwd < -dist * 0.35 ? '後方' : '真横';
+      return `${lr}${fb} ${Math.round(dist)}m`;
+    };
+    return {
+      seed: this.state.seed,
+      tries: this.lakeTries || 1,
+      dockDepth: S.dockTipDepth,
+      holeDepth: S.holeDepth,
+      holeWhere: dirOf(this.terrain.hole),
+      flatDepth: S.flatDepth,
+      flatWhere: dirOf(this.terrain.flat),
+      shoreR: S.shoreR0,
+      minDepth: S.minDepth,
+      maxDepth: S.maxDepth,
+    };
   }
 
   rest() {

@@ -2,29 +2,31 @@
    地形・湖底・岸辺の装飾・桟橋
    =========================================================== */
 import * as THREE from 'three';
-import { makeNoise2D, makeRng, clamp01, lerp, smoothstep, TAU } from './util.js';
+import { makeRng, clamp01, lerp, smoothstep, TAU } from './util.js';
+import { WORLD_SIZE, WATER_REGION, MAX_DEPTH, resolveLake } from './lakefield.js';
 
-export const WORLD_SIZE = 1000;      // 地形メッシュの一辺
-export const WATER_REGION = 440;     // 水面メッシュ & 高さテクスチャの一辺
-export const MAX_DEPTH = 26;
+export { WORLD_SIZE, WATER_REGION, MAX_DEPTH };
 
 const tmpColor = new THREE.Color();
 const tmpSand = new THREE.Color();
 const UP = new THREE.Vector3(0, 1, 0);
 
 export class Terrain {
+  /**
+   * @param {THREE.Scene} scene
+   * @param {object} opts  lake（lakefield.resolveLake の結果）または seed
+   */
   constructor(scene, opts = {}) {
     this.scene = scene;
-    this.seed = opts.seed ?? 20240711;
-    this.noise = makeNoise2D(this.seed);
     this.quality = opts.quality || 'mid';
 
-    // 地形フィーチャ（深い淵・藻場）
-    this.dockAngle = Math.PI * 0.5;
-    const ha = this.dockAngle - 0.34;
-    this.hole = { x: Math.cos(ha) * 96, z: Math.sin(ha) * 96, r: 30, amp: 13 };
-    const sa = this.dockAngle + 0.62;
-    this.flat = { x: Math.cos(sa) * 116, z: Math.sin(sa) * 116, r: 30, amp: 3.2 };
+    // 地形の数学部分は lakefield.js（検証済みの湖）に委譲
+    this.lake = opts.lake || resolveLake(opts.seed ?? 20240711).lake;
+    this.seed = this.lake.seed;
+    this.noise = this.lake.noise;
+    this.hole = this.lake.hole;
+    this.flat = this.lake.flat;
+    this.dockAngle = this.lake.dock.angle;
 
     this._buildHeightTexture();
     this._buildTerrainMesh();
@@ -33,45 +35,9 @@ export class Terrain {
     this._buildProps();
   }
 
-  /* ---------------- 高さ関数 ---------------- */
-  shoreRadius(x, z) {
-    const r = Math.hypot(x, z) || 1e-4;
-    const nx = x / r, nz = z / r;
-    const n = this.noise.fbm(nx * 1.55 + 11.3, nz * 1.55 - 4.7, 3);
-    return 130 + 34 * n;
-  }
-
-  heightAt(x, z) {
-    const r = Math.hypot(x, z);
-    const shoreR = this.shoreRadius(x, z);
-    const over = r - shoreR;
-    let h;
-
-    if (over < 0) {
-      const t = clamp01(r / shoreR);
-      const k = 1 - t;
-      // 岸から少し離れると急に落ちるドロップオフ
-      const depth = MAX_DEPTH * Math.pow(k, 0.6) * smoothstep(0, 0.075, k);
-      h = -depth + this.noise.fbm(x * 0.017, z * 0.017, 3) * 1.35 * k;
-
-      // 深い淵
-      const dh = ((x - this.hole.x) ** 2 + (z - this.hole.z) ** 2) / (this.hole.r * this.hole.r);
-      h -= this.hole.amp * Math.exp(-dh * 1.1);
-      // 藻場（浅くなる）
-      const df = ((x - this.flat.x) ** 2 + (z - this.flat.z) ** 2) / (this.flat.r * this.flat.r);
-      h += this.flat.amp * Math.exp(-df * 1.2) * smoothstep(0.02, 0.22, k);
-    } else {
-      const hills = this.noise.fbm(x * 0.0072 + 3.1, z * 0.0072 - 8.2, 4) * 7.5;
-      const mount = this.noise.ridge(x * 0.0031, z * 0.0031, 4);
-      h = over * 0.15
-        + hills * smoothstep(0, 34, over)
-        + mount * 105 * smoothstep(70, 320, over);
-    }
-
-    // 共通の細部ノイズ（岸線で連続になるよう over=0 で 0）
-    h += this.noise.fbm(x * 0.055, z * 0.055, 2) * 0.42 * smoothstep(0, 11, Math.abs(over));
-    return h;
-  }
+  /* ---------------- 高さ関数（lakefield へ委譲） ---------------- */
+  shoreRadius(x, z) { return this.lake.shoreRadius(x, z); }
+  heightAt(x, z) { return this.lake.heightAt(x, z); }
 
   depthAt(x, z) {
     return Math.max(0, -this.heightAt(x, z));
@@ -181,23 +147,14 @@ export class Terrain {
     }
   }
 
-  /* ---------------- 桟橋 ---------------- */
+  /* ---------------- 桟橋（位置は lakefield が決定・検証済み） ---------------- */
   _findDock() {
-    const a = this.dockAngle;
-    const dir = new THREE.Vector2(Math.cos(a), Math.sin(a));
-    // 岸線（h=0）を二分探索
-    let lo = 60, hi = 220;
-    for (let i = 0; i < 40; i++) {
-      const mid = (lo + hi) / 2;
-      const h = this.heightAt(dir.x * mid, dir.y * mid);
-      if (h < 0) lo = mid; else hi = mid;
-    }
-    const r0 = (lo + hi) / 2;
-    this.shoreR0 = r0;
-    this.dockDir = new THREE.Vector3(-dir.x, 0, -dir.y); // 岸→湖心
-    this.dockStart = new THREE.Vector3(dir.x * (r0 + 7), 0, dir.y * (r0 + 7));
-    this.dockEnd = new THREE.Vector3(dir.x * (r0 - 26), 0, dir.y * (r0 - 26));
-    this.dockY = 1.35;
+    const d = this.lake.dock;
+    this.shoreR0 = d.r0;
+    this.dockDir = new THREE.Vector3(d.dir.x, 0, d.dir.z);   // 岸→湖心
+    this.dockStart = new THREE.Vector3(d.start.x, 0, d.start.z);
+    this.dockEnd = new THREE.Vector3(d.end.x, 0, d.end.z);
+    this.dockY = d.y;
     this.spawnPos = this.dockEnd.clone().addScaledVector(this.dockDir, -3).setY(this.dockY);
   }
 

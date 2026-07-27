@@ -4,7 +4,7 @@
    =========================================================== */
 import * as THREE from 'three';
 import { COMMON_GLSL } from './shaders.js';
-import { WATER_REGION } from './terrain.js';
+import { WATER_REGION } from './lakefield.js';
 import { smoothstep, rand, TAU } from './util.js';
 
 /** 波の定義（dir は正規化して使用） */

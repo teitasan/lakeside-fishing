@@ -176,6 +176,18 @@
         </label>
         <label class="row"><span>影</span><input id="opt-shadow" type="checkbox" checked /></label>
       </div>
+
+      <div class="lake-box">
+        <div class="lake-head">🗺️ いまの湖</div>
+        <div class="lake-info" id="lake-info"></div>
+        <div class="lake-seed">
+          <input id="opt-seed" type="text" inputmode="numeric" spellcheck="false" aria-label="湖のシード" />
+          <button id="btn-seed-apply" class="btn ghost">この湖へ</button>
+          <button id="btn-seed-random" class="btn ghost">🎲 新しい湖</button>
+        </div>
+        <label class="row small"><span>読み込むたびに湖を変える</span><input id="opt-randomlake" type="checkbox" /></label>
+        <div class="lake-note">湖を変えると再読み込みします。お金・レベル・図鑑は引き継がれます。</div>
+      </div>
       <button id="btn-rest" class="btn ghost">🍵 ひと休み（1時間進める）</button>
       <button id="btn-resume" class="btn">釣りに戻る</button>
       <button id="btn-reset" class="btn danger ghost">セーブデータを消す</button>

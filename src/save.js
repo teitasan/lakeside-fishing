@@ -4,6 +4,9 @@
 
 const KEY = 'lakeside-fishing-save-v1';
 
+/** シードを持たない旧セーブ用（これまで固定で使っていた湖） */
+export const LEGACY_SEED = 20240711;
+
 export function defaultState() {
   return {
     version: 1,
@@ -18,13 +21,17 @@ export function defaultState() {
     snapped: 0,
     escaped: 0,
     clock: 5.6, // 夜明け前スタート
+    seed: null, // 湖のシード（null = 起動時にランダムで決める）
     gear: { rod: 'bamboo', line: 'nylon', bait: 'worm' },
     owned: { rod: ['bamboo'], line: ['nylon'], bait: ['worm'] },
     records: {}, // id -> {count, maxLen, maxWeight}
     achievements: [],
-    settings: { volume: 0.7, sens: 1.0, quality: 'mid', shadow: true },
+    settings: { volume: 0.7, sens: 1.0, quality: 'mid', shadow: true, randomLake: false },
   };
 }
+
+/** 湖のシード（1〜0xffffffff） */
+export const randomLakeSeed = () => (Math.floor(Math.random() * 0xfffffffe) + 1) >>> 0;
 
 export function hasSave() {
   try {
@@ -54,6 +61,9 @@ export function load() {
     for (const k of ['money', 'xp', 'level', 'totalCaught', 'totalEarned', 'maxLen', 'clock']) {
       if (typeof out[k] !== 'number' || !isFinite(out[k])) out[k] = base[k];
     }
+    // 旧セーブ（seed を持たない）は、これまでと同じ湖を保つ
+    if (data.seed === undefined || data.seed === null) out.seed = LEGACY_SEED;
+    else if (typeof data.seed !== 'number' || !isFinite(data.seed)) out.seed = null;
     return out;
   } catch (e) {
     console.warn('セーブデータの読み込みに失敗しました', e);

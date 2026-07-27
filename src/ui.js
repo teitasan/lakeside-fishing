@@ -211,6 +211,40 @@ export class UI {
       g.applyQuality();
       g.saveState();
     });
+
+    /* --- 湖（シード） --- */
+    $('opt-randomlake').checked = !!s.randomLake;
+    $('opt-randomlake').addEventListener('change', (e) => {
+      s.randomLake = e.target.checked;
+      g.saveState();
+      this.toast(s.randomLake ? '次の読み込みから湖が毎回変わります' : '湖を固定しました', 'good');
+    });
+    $('btn-seed-random').addEventListener('click', () => {
+      if (confirm('新しい湖を生成します。（お金・レベル・図鑑は引き継がれます）')) g.newRandomLake();
+    });
+    $('btn-seed-apply').addEventListener('click', () => {
+      const v = $('opt-seed').value.trim();
+      if (!v) return;
+      if (String(g.state.seed) === v) { this.toast('すでにこの湖です'); return; }
+      if (confirm(`シード ${v} の湖に切り替えます。`)) g.setLakeSeed(v);
+    });
+    $('opt-seed').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') $('btn-seed-apply').click();
+      e.stopPropagation();
+    });
+  }
+
+  /** ポーズ画面の湖情報を更新 */
+  renderLakeInfo() {
+    const g = this.game;
+    if (!g.lakeStats) return;
+    const i = g.lakeInfo();
+    $('opt-seed').value = String(i.seed);
+    $('lake-info').innerHTML = `
+      <div><span class="k">桟橋の先</span><b>水深 ${fmt1(i.dockDepth)} m</b></div>
+      <div><span class="k">深い淵</span><b>${fmt1(i.holeDepth)} m</b>　<span style="opacity:.7">先端から ${i.holeWhere}</span></div>
+      <div><span class="k">藻場</span><b>${fmt1(i.flatDepth)} m</b>　<span style="opacity:.7">先端から ${i.flatWhere}</span></div>
+      <div><span class="k">狙える水深</span><b>${fmt1(i.minDepth)} 〜 ${fmt1(i.maxDepth)} m</b></div>`;
   }
 
   /* ---------------- 汎用 ---------------- */
@@ -468,6 +502,7 @@ export class UI {
   }
 
   openPause() {
+    this.renderLakeInfo();
     this.el.pause.classList.add('open');
     this.openModal = 'pause';
   }
