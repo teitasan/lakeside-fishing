@@ -28,7 +28,7 @@ const CAST_SPEED_MIN = 4.5;    // 最弱キャストの初速（足元 4〜5m �
 const CAST_SPEED_MAX = 28.5;
 const AIM_MAX = 50;            // 照準が届く最大距離
 const CAST_TOL = 0.06;         // 目印に合っていると見なすパワーの許容差
-const HOURS_PER_SEC = 24 / 720;   // 実時間12分で1日
+const HOURS_PER_SEC = 1 / 60;   // 実 1 秒 = ゲーム内 1 分（1 日 = 実 24 分）
 const MAX_LINE = 62;
 const EYE_H = 1.62;
 /* レベル解禁前でも残る重みの下限（伝説タグの魚は対象外＝完全に解禁待ち）
@@ -1412,8 +1412,7 @@ export class Game {
       if (d < 4.5) return '…<b>何かが寄ってきた</b>（Vで水中カメラ）';
     }
     const d = this.terrain.depthAt(this.bobber.x, this.bobber.z);
-    const bd = this.rigDepthAt(this.bobber.x, this.bobber.z);
-    return `アタリを待つ…（水深 ${fmt1(d)}m / ${this.rigLayer.name} ${fmt1(bd)}m）　<b>クリック</b>で回収`;
+    return `アタリを待つ…（水深 ${fmt1(d)}m / タナ ${this.rigLayer.name}）　<b>クリック</b>で回収`;
   }
 
   /* ---------------- 着水 ---------------- */

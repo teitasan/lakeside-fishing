@@ -199,7 +199,7 @@ footer { border-top: 1px solid var(--line); padding: 22px; text-align: center; c
     <h2><span class="num">0</span>単位と記号</h2>
     <div class="grid c3">
       <div class="card tight"><h4>長さ</h4><p>ワールド 1 単位 = <b>1 m</b>。魚の全長は cm。水深 m。</p></div>
-      <div class="card tight"><h4>時間</h4><p>式の <code>dt</code> は実時間の秒。ゲーム内時刻は実 30 秒で 1 時間（1 日 = 実 12 分）。</p></div>
+      <div class="card tight"><h4>時間</h4><p>式の <code>dt</code> は実時間の秒。<b>実 1 秒 = ゲーム内 1 分</b>（1 時間 = 実 1 分、1 日 = 実 24 分）。</p></div>
       <div class="card tight"><h4>0〜1 の量</h4><p>テンション比・残り距離・体力は 0〜1 の内部値。HUD のバーはそのまま％表示。</p></div>
     </div>
     <p>以下、<code>sp</code> は魚種データ、<code>rod</code>/<code>line</code>/<code>bait</code> は装備データ、<code>F</code> はファイト中の状態を指します。</p>
@@ -669,7 +669,7 @@ y(t) = lerp(先端, 着水点, t) − sin(πt) × min(距離×<span class="n">0.
   <section id="s6">
     <h2><span class="num">6</span>環境（時間・天候・地形）</h2>
     <h3>時間</h3>
-    <p>実時間 1 秒でゲーム内 <code>24/720 = 0.0333</code> 時間（＝ 2 分）進みます。<b>1 日 = 実 12 分</b>、夜は実 4 分ほど。メニューの「ひと休み」で 1 時間ジャンプできます。</p>
+    <p>実時間 1 秒でゲーム内 <code>1/60</code> 時間（＝ <b>1 分</b>）進みます。<b>1 日 = 実 24 分</b>、夜は実 9 分ほど。急ぐときはメニューの「ひと休み」で 1 時間ジャンプできます。</p>
     <div class="tw"><table>
       <thead><tr><th class="l">時間帯タグ</th><th class="l">ゲーム内時刻</th><th class="l">主な魚</th></tr></thead>
       <tbody>

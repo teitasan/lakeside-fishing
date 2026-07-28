@@ -501,8 +501,8 @@ export class UI {
       this.el.depth.textContent = depStr;
       this._last.depth = depStr;
     }
-    // タナ（層の名前と、いまの場所での実際の深さ）
-    const rigStr = g.hudRig > 0 ? `${g.rigLayer.name} ${fmt1(g.hudRig)} m` : g.rigLayer.name;
+    // タナ（層の名前だけ。実際の深さは水深から自動なので出さない）
+    const rigStr = g.rigLayer.name;
     if (this._last.rig !== rigStr) {
       this.el.rig.textContent = rigStr;
       this._last.rig = rigStr;
@@ -687,14 +687,10 @@ export class UI {
     for (const el of document.querySelectorAll('#rig-col .rig-band')) {
       const L = RIG_LAYERS.find((x) => x.id === el.dataset.layer);
       el.classList.toggle('on', L.id === cur.id);
-      el.querySelector('.mt').textContent = spot != null
-        ? `${fmt1(g.rigDepthFor(spot, L))} m` : `水深の ${Math.round(L.ratio * 100)}%`;
+      el.querySelector('.mt').textContent = L.short;
     }
     $('rig-depth').textContent = spot != null ? `${fmt1(spot)} m` : '—';
-    $('rig-eff').textContent = eff != null ? `${fmt1(eff)} m` : `水深の ${Math.round(cur.ratio * 100)}%`;
-    $('rig-note').textContent = spot == null
-      ? `${cur.desc}。狙う場所を決めると実際の深さが出ます`
-      : `${cur.desc}（水深 ${fmt1(spot)} m の ${Math.round(cur.ratio * 100)}% ＝ ${fmt1(eff)} m）`;
+    $('rig-note').textContent = cur.desc;
 
     /* ここ（その水深）× この層 で食いつく魚。生息水深と遊泳層の両方で絞る。
        図鑑と同じ扱いで、未発見はまとめて「???」の数だけ見せる */
