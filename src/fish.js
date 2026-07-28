@@ -3,6 +3,7 @@
    =========================================================== */
 import * as THREE from 'three';
 import { clamp, clamp01, lerp, rand, smoothstep, TAU, damp } from './util.js';
+import { depthBandAt } from './data.js';
 
 /** 見やすさのための視覚倍率（実寸だと小さすぎるため） */
 export const VIS_SCALE = 1.4;
@@ -513,11 +514,11 @@ export class Fish {
     this.state = 'idle';
   }
 
-  /** 好む水深（実際の水深で制限） */
-  preferredY(depth) {
-    const sp = this.species;
-    const dmin = Math.min(sp.depth[0], Math.max(0.4, depth - 0.5));
-    const dmax = Math.min(sp.depth[1], Math.max(0.6, depth - 0.4));
+  /** 好む水深（実際の水深で制限）。日周移動する魚は時間帯で上下する */
+  preferredY(depth, band = null) {
+    const [b0, b1] = depthBandAt(this.species, band);
+    const dmin = Math.min(b0, Math.max(0.4, depth - 0.5));
+    const dmax = Math.min(b1, Math.max(0.6, depth - 0.4));
     return -lerp(dmin, dmax, this._depthBias ?? 0.5);
   }
 
@@ -532,7 +533,7 @@ export class Fish {
       if (d < Math.max(0.5, this.species.depth[0] * 0.5)) continue;
       if (d > this.species.depth[1] + 8) continue;
       this._depthBias = clamp01((this._depthBias ?? 0.5) + rand(-0.3, 0.3));
-      this.target.set(x, this.preferredY(d), z);
+      this.target.set(x, this.preferredY(d, ctx.band), z);
       return true;
     }
     // 見つからなければ深い方へ

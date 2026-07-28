@@ -406,6 +406,8 @@ d0 ≦ 水深 ≦ d1              → <span class="n">1.00</span>
 <span class="cm">// ⑥ 遊泳層：魚ごとに 表層/中層/底層 それぞれの食いつきの重み（0〜1）を持つ。</span>
 <span class="cm">//    プレイヤーの 3 択と直接掛ける（絶対メートルの比較はしない）ので、</span>
 <span class="cm">//    浅場でも「底物は表層で食わない」「藻場のライギョは表層で食う」が成立する</span>
+<span class="cm">//    一部の魚は時間帯ごとに重みが入れ替わる（日周鉛直移動）。</span>
+<span class="cm">//    また ② の生息水深も sp.diel で時間帯ごとに上下する（夜に浅場へ差す魚）</span>
 
 <span class="cm">// ⑦ レベル解禁（伝説タグ以外は下限 0.013 = 解禁前でも極低確率で掛かる）</span>
 レア度4（エピック）  × max(<span class="n">0.013</span>, clamp01((Lv − <span class="n">2</span>) / <span class="n">5</span>))  <span class="cm">// Lv3 から出始め Lv7 で全開</span>
@@ -468,6 +470,35 @@ d0 ≦ 水深 ≦ d1              → <span class="n">1.00</span>
       ・水深 20 m：どの層でもドジョウ <b>0%</b>（生息水深の外）<br>
       ・藻場 2.5 m：ライギョは表層 <b>10.2%</b>／底層 3.6%、ザリガニは表層 0.5%／底層 <b>12.4%</b><br>
       ・水深 18 m 夕：表層＝ワカサギ 50%、中層＝ワカサギ 29%・ビワマス 22%、底層＝ナマズ 24%・ビワマス 17%
+    </div>
+
+    <h3>時間帯で釣れる深さが変わる（日周移動）</h3>
+    <p>
+      現実の湖では、多くの魚が<b>1 日のうちで泳ぐ深さを変えます</b>。代表的なのは
+      <b>日周鉛直移動（diel vertical migration）</b>で、動物プランクトンが昼は捕食者を避けて深みに沈み、
+      夜に浮上するのに合わせて、それを食べる魚も同じように上下します（ワカサギの氷上釣りで
+      「昼は底、朝夕は浮く」と言われるのはこれ）。ほかにも
+    </p>
+    <ul>
+      <li><b>朝夕のマズメ</b>：鱒類・ブラックバスは水温と光量が落ちる朝夕に浅い層へ差して水面を意識し、日中は深い層・カバーの底に落ちる</li>
+      <li><b>夜の接岸</b>：ナマズ・ウナギ・コイ・エビ・カニは夜になると浅場へ出て餌を探し、日中は深場の底や穴に潜む</li>
+      <li><b>逆パターン</b>：ライギョは変温動物で日中の高水温を好み、<b>昼に水面のカバーで浮いている</b>。夜は沈む</li>
+      <li><b>夜明けの一瞬</b>：白龍魚（架空）は夜明けだけ水面を割る、というフレーバーをそのまま実装に落としている</li>
+    </ul>
+    <p>
+      実装は 2 つの入口を用意しています。<b>層が入れ替わる魚</b>は <code>layer</code> を時間帯ごとの表にし、
+      <b>浅場と深場を行き来する魚</b>は <code>diel</code>（−1 で浅場寄り 〜 +1 で深場寄り）で
+      <b>生息水深の帯そのもの</b>を上下させます（ずれ幅は帯の 35%）。両方持つ魚もいます。
+    </p>
+    <div class="tw tall" id="dielTable"></div>
+    <p class="src">src/data.js — swimLayer(sp, band) / depthBandAt(sp, band) / dielNote()</p>
+    <div class="note">
+      図鑑には <b>🕒 日中は深く・朝夕は浅く</b> のように自動生成した一言が出ます（時間帯ごとの層と生息水深から計算）。
+      仕掛けウインドウ（<kbd>E</kbd>）の「ここで食いつく魚」も<b>いまの時間帯</b>で判定するので、
+      同じ場所・同じ層でも昼と夜で ◎○△ が入れ替わります。<br>
+      実測（水深 14 m・くもり・ミミズ／ワカサギの出現率）：
+      <b>朝 表層 43.6%</b> → 昼はどの層も 16〜19% → <b>夜 表層 52.3% / 底層 4.2%</b>。<br>
+      ナマズ（水深 4 m の底層）：昼 0% → <b>夜 7.9%</b>。ライギョ（水深 2.5 m の表層）：<b>昼 3.8%</b> → 夜 0.7%。
     </div>
 
     <h3>アタリまでの流れとタイミング</h3>
@@ -815,7 +846,7 @@ y(t) = lerp(先端, 着水点, t) − sin(πt) × min(距離×<span class="n">0.
 <script type="module">
 import {
   SPECIES, RARITY, RODS, LINES, BAITS, ACHIEVEMENTS, RIG_LAYERS,
-  baitStrengths, TAG_LABEL, swimLayer, swimLayerLabel, depthFit,
+  baitStrengths, TAG_LABEL, swimLayer, swimLayerLabel, depthFit, depthBandAt, dielNote,
   FIGHT_PATTERNS, fightPattern, weightOf, valueOf, xpOf,
 } from './src/data.js';
 import { xpForLevel } from './src/save.js';
@@ -850,6 +881,26 @@ const FISH = SPECIES.filter((s) => s.rarity > 0);
 const JUNK = SPECIES.filter((s) => s.rarity === 0);
 const rcolor = (r) => RARITY[r].color;
 const rlabel = (r) => RARITY[r].label;
+const DIEL_DESC = {
+  wakasagi: 'プランクトンを追う日周鉛直移動。昼は深い層、朝夕〜夜は浮く',
+  rainbow: '朝夕は水面でライズ、日中は深い層へ',
+  yamame: '朝マズメに水面を意識し、日中は沈む',
+  iwana: '日中は底に張り付き、朝夕に浮いて虫を食う',
+  biwatrout: '朝は浅い層、日中は深層（トローリングの定番）',
+  sakuramasu: '朝夕は浮き、日中は深い層',
+  bass: '朝夕はシャローの表層、日中はディープ。夜も浅い',
+  snakehead: '日中は水面のカバーで浮く。夜は沈む（他と逆）',
+  itou: '朝夕に浅場の表層で待ち伏せ、日中は深場の底',
+  nushi: '夜は中層まで上がってくる。日中は淵の底',
+  dragonfish: '夜明けだけ水面を割る',
+  namazu: '夜にシャローへ差す。日中は深場の底',
+  unagi: '日中は底の穴、夜に浅場へ出る',
+  koi: '夜〜朝マズメに浅場へ入って餌を漁る',
+  funa: '夜は岸寄りの浅場へ',
+  crayfish: '夜行性。暗くなると石の間から浅場へ',
+  prawn: '夜行性。暗くなると浅場へ出てくる',
+  mokuzugani: '夜に浅場を歩き回る',
+};
 const avgLen = (sp, p = 2.1) => sp.len[0] + (sp.len[1] - sp.len[0]) * (1 / (p + 1));
 
 /* ============================================================
@@ -1304,6 +1355,39 @@ function runRoll() {
     <tfoot><tr><td colspan="11" class="l">
       すべて既存の更新式に掛ける倍率（1.00 = 従来どおり）。<span style="color:var(--bad)">赤</span>＝プレイヤーに不利側、<span style="color:var(--good)">緑</span>＝有利側。
       走り間隔は大きいほど走りが稀。張力回復は「離している間の減少速度」で、小さいほど休みにくい。
+    </td></tr></tfoot></table>`;
+})();
+
+/* ============================================================
+   2.5 日周移動の表
+   ============================================================ */
+(function dielTable() {
+  const bands = [['dawn', '朝'], ['day', '日中'], ['dusk', '夕'], ['night', '夜']];
+  const moving = FISH.filter((sp) => dielNote(sp));
+  const cell = (sp, b) => {
+    const L = swimLayer(sp, b);
+    const best = RIG_LAYERS.reduce((a, x) => (L[x.id] > L[a.id] ? x : a), RIG_LAYERS[1]);
+    const [d0, d1] = depthBandAt(sp, b);
+    const moved = Math.abs(d0 - sp.depth[0]) > 0.05;
+    const col = best.id === 'top' ? 'var(--cyan)' : best.id === 'bottom' ? 'var(--warn)' : 'inherit';
+    return `<td class="num" style="color:${col}">${best.name.replace('層', '')}<br>
+      <span style="opacity:.55;font-size:9.5px">${RIG_LAYERS.map((x) => f2(L[x.id])).join('/')}</span>
+      ${moved ? `<br><span style="opacity:.6;font-size:9.5px">${f1(d0)}〜${f1(d1)}m</span>` : ''}</td>`;
+  };
+  document.getElementById('dielTable').innerHTML = `<table><thead><tr>
+    <th class="l">魚</th><th class="num">生息水深</th>
+    ${bands.map(([, n]) => `<th class="num">${n}<br><span style="opacity:.5;font-size:9px">層 / 表·中·底</span></th>`).join('')}
+    <th class="l">図鑑の一言</th><th class="l">実際の行動</th>
+    </tr></thead><tbody>${moving.map((sp) => `<tr>
+      <td class="l name">${sp.name}</td>
+      <td class="num">${sp.depth[0]}–${sp.depth[1]}m</td>
+      ${bands.map(([b]) => cell(sp, b)).join('')}
+      <td class="l" style="white-space:normal">🕒 ${dielNote(sp)}</td>
+      <td class="l" style="white-space:normal;color:var(--fg-dim);font-size:11px">${DIEL_DESC[sp.id] || ''}</td>
+    </tr>`).join('')}</tbody>
+    <tfoot><tr><td colspan="${bands.length + 4}" class="l">
+      各セルは<b>その時間帯にいちばん食う層</b>と、表層/中層/底層それぞれの重み。
+      生息水深が動く魚はその時間帯の帯も併記（<code>diel</code>）。ここに出ていない魚は 1 日中同じ層です。
     </td></tr></tfoot></table>`;
 })();
 

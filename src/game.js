@@ -519,8 +519,9 @@ export class Game {
       let w = sp.spawn;
       if (w <= 0) return 0;
       /* ② 生息水深：その場所の水深が、その魚が居る水深か。
-         帯を外れるほど 0 に近づき、大きく外れたら完全に 0（＝深場にドジョウは居ない） */
-      const fit = depthFit(sp, depth);
+         帯を外れるほど 0 に近づき、大きく外れたら完全に 0（＝深場にドジョウは居ない）。
+         日周移動する魚は時間帯で帯そのものがずれる（夜に浅場へ差すナマズなど） */
+      const fit = depthFit(sp, depth, band);
       if (fit <= 0) return 0;
       w *= fit;
       w *= sp.times[band] ?? 1;
@@ -529,8 +530,9 @@ export class Game {
         w *= this.baitAffinity(sp);
         /* ⑥ 遊泳層：プレイヤーが選んだ層 × その魚がその層で食うか。
            絶対メートルではなく相対位置で比べるので、浅場でも
-           「底物は表層で食わない」「藻場の雷魚は表層で食う」が成立する */
-        w *= swimLayer(sp)[layerId] ?? 1;
+           「底物は表層で食わない」「藻場の雷魚は表層で食う」が成立する。
+           日周鉛直移動を持つ魚は、時間帯ごとに重みが入れ替わる */
+        w *= swimLayer(sp, band)[layerId] ?? 1;
         if (sp.rarity >= 3) w *= bait.rare;
         w *= this.rod.attract;
         /* 序盤に強すぎる魚が来て理不尽にならないよう、レベルで解禁。
@@ -849,6 +851,7 @@ export class Game {
       center: this.pos,
       bait: this.baitPos,
       rollSpecies: (d) => this.rollSpecies(d),
+      band: timeBand(this.state.clock),
       onSplash: (f) => {
         if (f.pos.distanceTo(this.camera.position) < 60) this.audio.splash(0.6);
       },

@@ -163,6 +163,7 @@ export const SPECIES = [
     len: [14, 36], wc: 2.7, depth: [1, 6.5], spawn: 30, times: T.any, weather: W.cloudy,
     str: 0.7, sta: 0.7, agg: 0.3, value: 26, perCm: 2.0,
     fight: 'tank',
+    diel: { dawn: -0.4, day: 0.3, dusk: -0.3, night: -0.5 }, // 夜は岸寄りの浅場へ
     colors: { top: '#5b5535', mid: '#9c9257', belly: '#ded7ad', fin: '#7c7143' },
     flavor: '「釣りはフナに始まりフナに終わる」。',
   },
@@ -203,6 +204,7 @@ export const SPECIES = [
     len: [8, 16], wc: 1.45, depth: [0.5, 4.5], spawn: 20, times: T.nightish, weather: W.any,
     str: 0.3, sta: 0.4, agg: 0.15, value: 22, perCm: 2.8,
     fight: 'dash',
+    diel: { dawn: -0.2, day: 0.4, dusk: -0.4, night: -0.8 }, // 夜行性。暗くなると浅場へ出てくる
     colors: { top: '#5b6470', mid: '#a9b3bd', belly: '#e8eaea', fin: '#cfd6d4' },
     flavor: '長い腕をゆらり。夜、石の間から出てくる。素揚げが最高。',
   },
@@ -211,6 +213,7 @@ export const SPECIES = [
     len: [5, 15], wc: 3.5, depth: [0.4, 3], spawn: 22, times: T.any, weather: W.any,
     str: 0.5, sta: 0.7, agg: 0.1, value: 14, perCm: 1.5,
     fight: 'deadweight',
+    diel: { dawn: -0.2, day: 0.4, dusk: -0.4, night: -0.8 }, // 夜行性。暗くなると石の間から浅場へ出てくる
     colors: { top: '#7a2c1e', mid: '#c05334', belly: '#e8b18c', fin: '#8e3a24' },
     flavor: 'ハサミを振り上げて一歩も引かない。引くだけ引いて離さない。',
   },
@@ -221,6 +224,13 @@ export const SPECIES = [
     len: [21, 54], wc: 1.3, depth: [1, 8.5], spawn: 20, times: T.twilight, weather: W.cloudy,
     str: 1.0, sta: 0.95, agg: 0.8, value: 90, perCm: 4.2,
     fight: 'jumper',
+    layer: { // 朝夕は水面でライズ、日中は深い層へ落ちる
+      dawn: { top: 1.0, mid: 0.9, bottom: 0.25 },
+      day: { top: 0.3, mid: 0.85, bottom: 1.0 },
+      dusk: { top: 1.0, mid: 0.9, bottom: 0.25 },
+      night: { top: 0.6, mid: 1.0, bottom: 0.5 },
+    },
+    diel: { dawn: -0.6, day: 0.6, dusk: -0.6, night: -0.2 }, // 時間帯で生息水深も動く
     colors: { top: '#3f6a63', mid: '#93b3a8', belly: '#f2efe4', fin: '#d97a86' },
     flavor: '横腹に虹。銀鱗を翻して跳ねる。',
   },
@@ -229,6 +239,13 @@ export const SPECIES = [
     len: [24, 58], wc: 1.55, depth: [1, 7.5], spawn: 19, times: T.twilight, weather: W.cloudy,
     str: 1.15, sta: 1.0, agg: 1.1, value: 110, perCm: 4.6,
     fight: 'dash',
+    layer: { // 朝夕はシャローの表層、日中はディープに落ちる。夜も浅い
+      dawn: { top: 1.0, mid: 0.8, bottom: 0.2 },
+      day: { top: 0.35, mid: 0.9, bottom: 1.0 },
+      dusk: { top: 1.0, mid: 0.8, bottom: 0.2 },
+      night: { top: 1.0, mid: 0.85, bottom: 0.35 },
+    },
+    diel: { dawn: -0.8, day: 0.7, dusk: -0.8, night: -0.3 }, // 時間帯で生息水深も動く
     colors: { top: '#2f4a2c', mid: '#6f8f52', belly: '#e3e0bd', fin: '#33472b' },
     flavor: '大口を開けて小魚を襲う。エラ洗いに注意。',
   },
@@ -237,6 +254,12 @@ export const SPECIES = [
     len: [17, 42], wc: 1.2, depth: [0.5, 5], spawn: 16, times: T.dawnOnly, weather: W.rain,
     str: 0.95, sta: 0.9, agg: 0.9, value: 130, perCm: 5.0,
     fight: 'jumper',
+    layer: { // 朝マズメに水面を意識し、日中は沈む
+      dawn: { top: 1.0, mid: 0.85, bottom: 0.2 },
+      day: { top: 0.45, mid: 1.0, bottom: 0.7 },
+      dusk: { top: 0.95, mid: 0.9, bottom: 0.25 },
+      night: { top: 0.5, mid: 1.0, bottom: 0.5 },
+    },
     colors: { top: '#3d5560', mid: '#96a8a6', belly: '#f4f0e2', fin: '#8d9a8e' },
     flavor: 'パーマークが並ぶ渓流の女王。神経質で警戒心が強い。',
   },
@@ -245,6 +268,7 @@ export const SPECIES = [
     len: [34, 84], wc: 1.25, depth: [3.5, 15], spawn: 15, times: T.nightish, weather: W.rain,
     str: 1.35, sta: 1.3, agg: 0.6, value: 150, perCm: 4.0,
     fight: 'shake',
+    diel: { dawn: 0, day: 0.8, dusk: -0.5, night: -1 }, // 夜にシャローへ差して餌を探す。日中は深場の底
     colors: { top: '#3a3a2e', mid: '#6b6550', belly: '#cfc7a4', fin: '#4a463a' },
     flavor: '長いヒゲでゆらり。掛かると重量感のある首振り。',
   },
@@ -253,6 +277,7 @@ export const SPECIES = [
     len: [38, 92], wc: 2.5, depth: [1.5, 9.5], spawn: 14, times: T.any, weather: W.cloudy,
     str: 1.5, sta: 1.55, agg: 0.5, value: 170, perCm: 3.6,
     fight: 'tank',
+    diel: { dawn: -0.6, day: 0.5, dusk: -0.4, night: -0.8 }, // 夜から朝マズメに浅場へ入って餌を漁る
     colors: { top: '#5a4a2c', mid: '#a3854a', belly: '#e6dcb4', fin: '#7c6234' },
     flavor: '悠然と泳ぐ湖の主候補。走り出すと止まらない。',
   },
@@ -261,6 +286,12 @@ export const SPECIES = [
     len: [7, 16], wc: 0.85, depth: [4, 14], spawn: 15, times: T.twilight, weather: W.cloudy,
     str: 0.5, sta: 0.5, agg: 0.45, value: 70, perCm: 4.6,
     fight: 'dash',
+    layer: { // プランクトンを追って昼は深い層、朝夕〜夜は浮く（氷上釣りでも昼は底層）
+      dawn: { top: 0.95, mid: 1.0, bottom: 0.3 },
+      day: { top: 0.15, mid: 0.7, bottom: 1.0 },
+      dusk: { top: 0.95, mid: 1.0, bottom: 0.3 },
+      night: { top: 1.0, mid: 0.9, bottom: 0.2 },
+    },
     colors: { top: '#5b6c74', mid: '#c3ced2', belly: '#f6f4ec', fin: '#dfe3e0' },
     flavor: '深場を群れで回る細身の小魚。天ぷらの王様。',
   },
@@ -285,6 +316,7 @@ export const SPECIES = [
     len: [6, 14], wc: 14, depth: [1, 8], spawn: 12, times: T.nightish, weather: W.rain,
     str: 0.9, sta: 1.3, agg: 0.1, value: 240, perCm: 9,
     fight: 'deadweight',
+    diel: { dawn: -0.2, day: 0.4, dusk: -0.4, night: -0.8 }, // 夜に浅場を歩き回る
     colors: { top: '#3f4a3c', mid: '#75775e', belly: '#c9c2a4', fin: '#565a48' },
     flavor: 'ハサミに毛の生えた川のカニ。味は絶品、根掛かりのように重い。',
   },
@@ -295,7 +327,13 @@ export const SPECIES = [
     len: [24, 62], wc: 1.25, depth: [3, 13], spawn: 9, times: T.dawnOnly, weather: W.rain,
     str: 1.25, sta: 1.15, agg: 1.0, value: 340, perCm: 8.0,
     fight: 'shake',
-    layer: { top: 0.35, mid: 1.0, bottom: 0.85 }, // 深場では底に着く
+    layer: { // 日中は底に張り付き、朝夕に浮いて虫を食う
+      dawn: { top: 0.8, mid: 1.0, bottom: 0.5 },
+      day: { top: 0.15, mid: 0.7, bottom: 1.0 },
+      dusk: { top: 0.8, mid: 1.0, bottom: 0.5 },
+      night: { top: 0.35, mid: 1.0, bottom: 0.85 },
+    },
+    diel: { dawn: -0.5, day: 0.5, dusk: -0.5, night: 0 }, // 時間帯で生息水深も動く
     colors: { top: '#2f4048', mid: '#7d8f8c', belly: '#f0e9d2', fin: '#c9a06d' },
     flavor: '白い斑点をまとう冷水の主。深い淵の底に潜む。',
   },
@@ -304,6 +342,12 @@ export const SPECIES = [
     len: [38, 94], wc: 1.15, depth: [0.5, 4.5], spawn: 8, times: T.dayish, weather: W.clear,
     str: 1.6, sta: 1.4, agg: 1.5, value: 380, perCm: 7.2,
     fight: 'dash',
+    layer: { // 日中は水面のカバーで浮いている。夜は沈む（他の魚と逆）
+      dawn: { top: 0.9, mid: 0.9, bottom: 0.4 },
+      day: { top: 1.0, mid: 0.7, bottom: 0.15 },
+      dusk: { top: 0.95, mid: 0.85, bottom: 0.3 },
+      night: { top: 0.4, mid: 0.9, bottom: 1.0 },
+    },
     colors: { top: '#33402a', mid: '#6d7a45', belly: '#d3cf9d', fin: '#3e4a2c' },
     flavor: '藻の陰から爆発的に襲いかかる雷魚。ドラグが鳴る。',
   },
@@ -321,7 +365,13 @@ export const SPECIES = [
     len: [29, 68], wc: 1.35, depth: [6, 19], spawn: 7, times: T.twilight, weather: W.cloudy,
     str: 1.45, sta: 1.3, agg: 1.2, value: 460, perCm: 8.6,
     fight: 'jumper',
-    layer: { top: 0.3, mid: 1.0, bottom: 0.7 }, // 深層を回遊する
+    layer: { // 朝は浅い層に上がり、日中は深層へ（トローリングの定番）
+      dawn: { top: 0.9, mid: 1.0, bottom: 0.35 },
+      day: { top: 0.1, mid: 0.65, bottom: 1.0 },
+      dusk: { top: 0.75, mid: 1.0, bottom: 0.5 },
+      night: { top: 0.3, mid: 1.0, bottom: 0.8 },
+    },
+    diel: { dawn: -0.7, day: 0.7, dusk: -0.5, night: 0 }, // 時間帯で生息水深も動く
     colors: { top: '#2b4a5e', mid: '#8fa8b6', belly: '#f5f1e6', fin: '#b06a72' },
     flavor: '深層を回遊する幻の鱒。銀色の魚体に淡い紅。',
   },
@@ -330,6 +380,7 @@ export const SPECIES = [
     len: [40, 100], wc: 0.6, depth: [2, 12], spawn: 7, times: T.nightish, weather: W.rain,
     str: 1.5, sta: 1.75, agg: 0.5, value: 520, perCm: 9.5,
     fight: 'shake',
+    diel: { dawn: 0.2, day: 0.7, dusk: -0.4, night: -1 }, // 日中は底の穴に潜み、夜に浅場へ出てくる
     colors: { top: '#2c2b28', mid: '#5a5646', belly: '#e0d8b8', fin: '#3a382e' },
     flavor: '夜、底穴から出て餌を探す。掛けてからが本当の勝負。',
   },
@@ -338,7 +389,13 @@ export const SPECIES = [
     len: [34, 72], wc: 1.4, depth: [5, 17], spawn: 6, times: T.twilight, weather: W.rain,
     str: 1.6, sta: 1.45, agg: 1.35, value: 600, perCm: 9.5,
     fight: 'jumper',
-    layer: { top: 0.5, mid: 1.0, bottom: 0.6 }, // 中層を泳ぐ
+    layer: { // 朝夕は浮き、日中は深い層に落ちる
+      dawn: { top: 1.0, mid: 0.95, bottom: 0.3 },
+      day: { top: 0.25, mid: 0.8, bottom: 1.0 },
+      dusk: { top: 0.95, mid: 1.0, bottom: 0.35 },
+      night: { top: 0.4, mid: 1.0, bottom: 0.7 },
+    },
+    diel: { dawn: -0.6, day: 0.6, dusk: -0.6, night: 0 }, // 時間帯で生息水深も動く
     colors: { top: '#3a5566', mid: '#c2ccd2', belly: '#faf7ee', fin: '#d98f96' },
     flavor: '海へ降りずに残った銀鱗。桜の頃に走り出す。',
   },
@@ -374,6 +431,13 @@ export const SPECIES = [
     len: [70, 150], wc: 1.1, depth: [6, 20], spawn: 2.2, times: T.twilight, weather: W.rain,
     str: 2.45, sta: 2.5, agg: 1.5, value: 2200, perCm: 20,
     fight: 'jumper',
+    layer: { // 朝夕に浅場の表層で待ち伏せ、日中は深場の底へ
+      dawn: { top: 1.0, mid: 0.9, bottom: 0.3 },
+      day: { top: 0.3, mid: 0.9, bottom: 1.0 },
+      dusk: { top: 1.0, mid: 0.9, bottom: 0.3 },
+      night: { top: 0.6, mid: 1.0, bottom: 0.6 },
+    },
+    diel: { dawn: -0.8, day: 0.5, dusk: -0.8, night: -0.2 }, // 時間帯で生息水深も動く
     colors: { top: '#41504e', mid: '#9aa8a2', belly: '#f2ecdc', fin: '#b6837a' },
     flavor: '幻の巨大魚。深場の縁でゆっくりと大きな尾を振る。',
   },
@@ -384,6 +448,13 @@ export const SPECIES = [
     len: [138, 232], wc: 1.6, depth: [14, 28], spawn: 0.32, times: T.nightish, weather: W.rain,
     str: 3.3, sta: 3.2, agg: 1.4, value: 7000, perCm: 34,
     fight: 'tank',
+    layer: { // 夜は中層まで上がってくる。日中は淵の底で動かない
+      dawn: { top: 0.5, mid: 1.0, bottom: 0.9 },
+      day: { top: 0.1, mid: 0.6, bottom: 1.0 },
+      dusk: { top: 0.5, mid: 1.0, bottom: 0.9 },
+      night: { top: 0.7, mid: 1.0, bottom: 0.7 },
+    },
+    diel: { dawn: -0.2, day: 0.5, dusk: -0.2, night: -0.5 }, // 時間帯で生息水深も動く
     colors: { top: '#22262a', mid: '#4b5157', belly: '#9aa3a6', fin: '#2c3135' },
     flavor: '湖底の岩屋に潜む巨大ナマズ。村の古老が「あれには触るな」と言った。',
   },
@@ -392,7 +463,12 @@ export const SPECIES = [
     len: [118, 268], wc: 0.75, depth: [17, 30], spawn: 0.45, times: T.dawnOnly, weather: W.clear,
     str: 3.8, sta: 3.6, agg: 2.0, value: 12000, perCm: 46,
     fight: 'jumper',
-    layer: { top: 0.25, mid: 1.0, bottom: 0.9 }, // 深層の主
+    layer: { // 夜明けだけ水面を割る。それ以外は深層
+      dawn: { top: 1.0, mid: 0.9, bottom: 0.3 },
+      day: { top: 0.15, mid: 0.8, bottom: 1.0 },
+      dusk: { top: 0.4, mid: 1.0, bottom: 0.9 },
+      night: { top: 0.25, mid: 1.0, bottom: 0.95 },
+    },
     colors: { top: '#c9d6e2', mid: '#eef4fb', belly: '#ffffff', fin: '#9fd0e8' },
     flavor: '夜明けの霧の中、白い影が水面を割る。龍の子ともいわれる。',
   },
@@ -525,9 +601,8 @@ const SWIM = {
   any: { top: 0.55, mid: 1.00, bottom: 0.75 },
 };
 
-/** 魚の遊泳層（sp.layer があればそれ。無ければタグから） */
-export function swimLayer(sp) {
-  if (sp.layer) return sp.layer;
+/** タグから決まる既定の遊泳層 */
+function defaultSwim(sp) {
   if (sp.rarity === 0) return SWIM.bottom;                       // ゴミは底に沈んでいる
   const t = sp.tags;
   if (t.includes('weed') && t.includes('predator')) return SWIM.surface;
@@ -539,12 +614,69 @@ export function swimLayer(sp) {
   return SWIM.any;
 }
 
+/**
+ * 魚の遊泳層。
+ * sp.layer は {top,mid,bottom} か、時間帯ごとの {dawn:{...}, day:{...}, ...}。
+ * 後者は日周鉛直移動（昼は深い層／朝夕は浮く など）を表す。
+ * band を渡さない場合は 4 時間帯の平均（図鑑の表示用）。
+ */
+export function swimLayer(sp, band = null) {
+  const raw = sp.layer || defaultSwim(sp);
+  if (raw.top !== undefined) return raw;
+  if (band && raw[band]) return raw[band];
+  const bands = ['dawn', 'day', 'dusk', 'night'];
+  const out = { top: 0, mid: 0, bottom: 0 };
+  for (const b of bands) for (const k of ['top', 'mid', 'bottom']) out[k] += raw[b][k] / bands.length;
+  return out;
+}
+
 /** 図鑑・表に出す遊泳層の短い名前（重み 0.8 以上の層を拾う） */
-export function swimLayerLabel(sp) {
-  const L = swimLayer(sp);
+export function swimLayerLabel(sp, band = null) {
+  const L = swimLayer(sp, band);
   const on = RIG_LAYERS.filter((x) => L[x.id] >= 0.8).map((x) => x.name.replace('層', ''));
   if (!on.length) return RIG_LAYERS.reduce((a, x) => (L[x.id] > L[a.id] ? x : a), RIG_LAYERS[1]).name;
   return on.length === 3 ? '全層' : on.join('〜') + '層';
+}
+
+/* ---------------- 日周移動（時間帯で釣れる深さが変わる） ---------------- */
+/** sp.diel[band]：−1 で浅場寄り / +1 で深場寄り。生息水深の帯をずらす量に使う */
+export const dielShift = (sp, band) => (sp.diel && band ? sp.diel[band] ?? 0 : 0);
+
+/** その時間帯の生息水深帯（日周移動で上下にずれる。ずれ幅は帯の 35%） */
+export function depthBandAt(sp, band = null) {
+  const [d0, d1] = sp.depth;
+  const s = dielShift(sp, band);
+  if (!s) return [d0, d1];
+  const amp = (d1 - d0) * 0.35 * s;
+  return [Math.max(0.4, d0 + amp), Math.max(0.9, d1 + amp)];
+}
+
+/** 「その時間帯にどのくらい深い所に居るか」0（表層）〜1（底）の目安 */
+function depthScore(sp, band) {
+  const L = swimLayer(sp, band);
+  const sum = L.top + L.mid + L.bottom || 1;
+  const rel = (L.mid * 0.5 + L.bottom) / sum;              // 層の好み
+  return rel + dielShift(sp, band) * 0.22;                 // 場所の深浅も足す
+}
+
+const BAND_NAME = { dawn: '朝', day: '日中', dusk: '夕', night: '夜' };
+
+/** 図鑑に出す一言（例「日中は深く・朝夕は浅く」）。動きが小さい魚は null */
+export function dielNote(sp) {
+  const bands = ['dawn', 'day', 'dusk', 'night'];
+  const sc = bands.map((b) => [b, depthScore(sp, b)]);
+  const lo = sc.reduce((a, x) => (x[1] < a[1] ? x : a));
+  const hi = sc.reduce((a, x) => (x[1] > a[1] ? x : a));
+  if (hi[1] - lo[1] < 0.1) return null;
+  const near = (v) => sc.filter(([, x]) => Math.abs(x - v) < 0.045).map(([b]) => b);
+  const nm = (list) => {
+    const l = [...list];
+    if (l.includes('dawn') && l.includes('dusk')) {                // 朝と夕はまとめる
+      return ['朝夕', ...l.filter((b) => b !== 'dawn' && b !== 'dusk').map((b) => BAND_NAME[b])].join('・');
+    }
+    return l.map((b) => BAND_NAME[b]).join('・');
+  };
+  return `${nm(near(hi[1]))}は深く・${nm(near(lo[1]))}は浅く`;
 }
 
 /**
@@ -555,8 +687,8 @@ export function swimLayerLabel(sp) {
  * 例）ドジョウ [0.5, 4] → 水深 7.2m 以上で 0（20m の場所には居ない）
  *     湖の主 [14, 28] → 水深 9.1m 未満で 0
  */
-export function depthFit(sp, depth) {
-  const [d0, d1] = sp.depth;
+export function depthFit(sp, depth, band = null) {
+  const [d0, d1] = depthBandAt(sp, band);
   if (depth >= d0 && depth <= d1) return 1;
   const tol = depth < d0 ? Math.max(1.0, d0 * 0.35) : Math.max(2.5, (d1 - d0) * 0.9);
   const out = depth < d0 ? d0 - depth : depth - d1;

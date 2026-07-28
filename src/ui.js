@@ -3,10 +3,10 @@
    =========================================================== */
 import {
   SPECIES, RARITY, GEAR, GEAR_LABEL, ACHIEVEMENTS, RIG_LAYERS,
-  valueOf, gearStats, swimLayer, swimLayerLabel, depthFit,
+  valueOf, gearStats, swimLayer, swimLayerLabel, depthFit, dielNote,
 } from './data.js';
 import { PROFILES, BODY, profileAt, CRUST_SHAPES } from './fish.js';
-import { fmtInt, fmt1, fmtWeight, fmtClock, timeBandLabel, clamp01 } from './util.js';
+import { fmtInt, fmt1, fmtWeight, fmtClock, timeBand, timeBandLabel, clamp01 } from './util.js';
 import { xpForLevel } from './save.js';
 import { iconHtml, iconLabel, loadIcon, preloadIcons, JUNK_ICONS } from './icons.js';
 
@@ -643,7 +643,8 @@ export class UI {
       if (rec) {
         info.innerHTML = `
           <div class="jn"><span>${sp.name}</span><span class="jr" style="color:${RARITY[sp.rarity].color}">${RARITY[sp.rarity].label}</span></div>
-          <div class="jm">${rec.count} 匹 / 最大 ${fmt1(rec.maxLen)} cm<br>${fmtWeight(rec.maxWeight)}・${fmtInt(valueOf(sp, rec.maxLen))} G<br><span style="opacity:.55">水深 ${sp.depth[0]}〜${sp.depth[1]} m・${swimLayerLabel(sp)}</span></div>`;
+          <div class="jm">${rec.count} 匹 / 最大 ${fmt1(rec.maxLen)} cm<br>${fmtWeight(rec.maxWeight)}・${fmtInt(valueOf(sp, rec.maxLen))} G<br><span style="opacity:.55">水深 ${sp.depth[0]}〜${sp.depth[1]} m・${swimLayerLabel(sp)}${
+            dielNote(sp) ? `<br>🕒 ${dielNote(sp)}` : ''}</span></div>`;
       } else if (sp.rarity === 0) {
         info.innerHTML = `
           <div class="jn"><span>???</span><span class="jr">${RARITY[0].label}</span></div>
@@ -672,8 +673,9 @@ export class UI {
 
   /* ---------------- 仕掛け（タナ） ---------------- */
   openRig() {
-    // 開いた時点の狙い先の水深で深さを計算する（開いている間はゲームが止まる）
+    // 開いた時点の狙い先の水深と時間帯で判定する（開いている間はゲームが止まる）
     this._rigSpotDepth = this.game.hudDepth > 0 ? this.game.hudDepth : null;
+    this._rigBand = timeBand(this.game.state.clock);
     this.renderRig();
     this.el.rigWin.classList.add('open');
     this.openModal = 'rig';
@@ -691,19 +693,23 @@ export class UI {
       el.querySelector('.mt').textContent = L.short;
     }
     $('rig-depth').textContent = spot != null ? `${fmt1(spot)} m` : '—';
-    $('rig-note').textContent = cur.desc;
+    $('rig-note').textContent = `${cur.desc}（いまは${timeBandLabel(g.state.clock)}）`;
 
     /* ここ（その水深）× この層 で食いつく魚。生息水深と遊泳層の両方で絞る。
        図鑑と同じ扱いで、未発見はまとめて「???」の数だけ見せる */
+    const band = this._rigBand;
+    const score = (sp) => depthFit(sp, spot, band) * swimLayer(sp, band)[cur.id];
     const here = spot == null ? [] : SPECIES
-      .filter((sp) => sp.rarity > 0 && depthFit(sp, spot) > 0.35 && swimLayer(sp)[cur.id] >= 0.5)
-      .sort((a, b) => (depthFit(b, spot) * swimLayer(b)[cur.id]) - (depthFit(a, spot) * swimLayer(a)[cur.id]));
+      .filter((sp) => sp.rarity > 0 && depthFit(sp, spot, band) > 0.35 && swimLayer(sp, band)[cur.id] >= 0.5)
+      .sort((a, b) => score(b) - score(a));
     const known = here.filter((sp) => s.records[sp.id]);
     const unknown = here.length - known.length;
+    // ◎ ＝ その層にぴったり、○ ＝ まあまあ、△ ＝ 端の方（時間帯で変わる）
+    const mark = (sp) => (score(sp) >= 0.75 ? '◎' : score(sp) >= 0.45 ? '○' : '△');
     $('rig-fish').innerHTML = spot == null
       ? '<i class="unknown">狙う場所を決めると出ます</i>'
       : here.length
-        ? known.map((sp) => `<i style="color:${RARITY[sp.rarity].color}">${sp.name}</i>`).join('')
+        ? known.map((sp) => `<i style="color:${RARITY[sp.rarity].color}">${sp.name} ${mark(sp)}</i>`).join('')
           + (unknown ? `<i class="unknown">??? ×${unknown}</i>` : '')
         : '<i class="unknown">この層で食う魚は居ない</i>';
   }
