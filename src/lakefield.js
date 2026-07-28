@@ -8,7 +8,7 @@
      - キャストで届く範囲に、全魚種の生息層が必ず存在する
    =========================================================== */
 import { makeNoise2D, makeRng, clamp, clamp01, smoothstep, TAU } from './util.js';
-import { REAL_FISH } from './data.js';
+import { REAL_FISH, depthFit } from './data.js';
 
 export const WORLD_SIZE = 1000;    // 地形メッシュの一辺
 export const WATER_REGION = 440;   // 水面メッシュ & 高さテクスチャの一辺
@@ -282,10 +282,12 @@ export function analyzeLake(lake, opts = {}) {
     }
   }
 
-  // 全魚種の生息層（fit = 1 の窓）が届く範囲にあるか
+  /* 全魚種の生息水深（depthFit が 1 になる窓）が届く範囲にあるか。
+     判定はゲーム本体と同じ depthFit を使う */
   const unreachable = REAL_FISH.filter((sp) => {
-    const lo = sp.depth[0], hi = sp.depth[1] + 3;
-    return !(maxDepth >= lo && minDepth <= hi);
+    const lo = sp.depth[0], hi = sp.depth[1];
+    const reach = maxDepth >= lo && minDepth <= hi;
+    return !reach || depthFit(sp, clamp(maxDepth, lo, hi)) < 1;
   }).map((sp) => sp.name);
 
   return {

@@ -146,6 +146,7 @@ export const SPECIES = [
     len: [7, 16], wc: 1.4, depth: [0.5, 3.5], spawn: 34, times: T.dayish, weather: W.any,
     str: 0.35, sta: 0.4, agg: 0.2, value: 14, perCm: 1.2,
     fight: 'dash',
+    layer: { top: 0.5, mid: 1.0, bottom: 0.8 }, // 群れで中層〜底を回る
     colors: { top: '#6d7a5c', mid: '#a8b291', belly: '#e8e6d6', fin: '#c9c3a6' },
     flavor: '群れで泳ぐ小さな魚。佃煮がうまい。',
   },
@@ -294,6 +295,7 @@ export const SPECIES = [
     len: [24, 62], wc: 1.25, depth: [3, 13], spawn: 9, times: T.dawnOnly, weather: W.rain,
     str: 1.25, sta: 1.15, agg: 1.0, value: 340, perCm: 8.0,
     fight: 'shake',
+    layer: { top: 0.35, mid: 1.0, bottom: 0.85 }, // 深場では底に着く
     colors: { top: '#2f4048', mid: '#7d8f8c', belly: '#f0e9d2', fin: '#c9a06d' },
     flavor: '白い斑点をまとう冷水の主。深い淵の底に潜む。',
   },
@@ -310,6 +312,7 @@ export const SPECIES = [
     len: [52, 118], wc: 1.7, depth: [1.5, 8], spawn: 7, times: T.dayish, weather: W.clear,
     str: 1.85, sta: 1.8, agg: 0.7, value: 420, perCm: 6.4,
     fight: 'tank',
+    layer: { top: 0.9, mid: 0.85, bottom: 0.5 }, // 水面の水草を食べる
     colors: { top: '#4d5340', mid: '#95a077', belly: '#e5e3c6', fin: '#6c7452' },
     flavor: '水草を食べる巨体。一度走られたら覚悟が必要。',
   },
@@ -318,6 +321,7 @@ export const SPECIES = [
     len: [29, 68], wc: 1.35, depth: [6, 19], spawn: 7, times: T.twilight, weather: W.cloudy,
     str: 1.45, sta: 1.3, agg: 1.2, value: 460, perCm: 8.6,
     fight: 'jumper',
+    layer: { top: 0.3, mid: 1.0, bottom: 0.7 }, // 深層を回遊する
     colors: { top: '#2b4a5e', mid: '#8fa8b6', belly: '#f5f1e6', fin: '#b06a72' },
     flavor: '深層を回遊する幻の鱒。銀色の魚体に淡い紅。',
   },
@@ -334,6 +338,7 @@ export const SPECIES = [
     len: [34, 72], wc: 1.4, depth: [5, 17], spawn: 6, times: T.twilight, weather: W.rain,
     str: 1.6, sta: 1.45, agg: 1.35, value: 600, perCm: 9.5,
     fight: 'jumper',
+    layer: { top: 0.5, mid: 1.0, bottom: 0.6 }, // 中層を泳ぐ
     colors: { top: '#3a5566', mid: '#c2ccd2', belly: '#faf7ee', fin: '#d98f96' },
     flavor: '海へ降りずに残った銀鱗。桜の頃に走り出す。',
   },
@@ -360,6 +365,7 @@ export const SPECIES = [
     len: [86, 196], wc: 0.9, depth: [4, 16], spawn: 2.6, times: T.nightish, weather: W.clear,
     str: 2.6, sta: 2.1, agg: 1.7, value: 1700, perCm: 17,
     fight: 'dash',
+    layer: { top: 0.95, mid: 1.0, bottom: 0.5 }, // 水面で空気を吸う
     colors: { top: '#3c4433', mid: '#7c8560', belly: '#d6d3ab', fin: '#4a5238' },
     flavor: 'ワニのような顎。誰が湖に放したのか、誰も知らない。',
   },
@@ -375,7 +381,7 @@ export const SPECIES = [
   /* ---------------- レジェンド ---------------- */
   {
     id: 'nushi', name: '湖の主', rarity: 5, tags: ['deep', 'predator', 'legend'], shape: 'eel',
-    len: [138, 232], wc: 1.6, depth: [14, 28], spawn: 0.25, times: T.nightish, weather: W.rain,
+    len: [138, 232], wc: 1.6, depth: [14, 28], spawn: 0.32, times: T.nightish, weather: W.rain,
     str: 3.3, sta: 3.2, agg: 1.4, value: 7000, perCm: 34,
     fight: 'tank',
     colors: { top: '#22262a', mid: '#4b5157', belly: '#9aa3a6', fin: '#2c3135' },
@@ -386,6 +392,7 @@ export const SPECIES = [
     len: [118, 268], wc: 0.75, depth: [17, 30], spawn: 0.45, times: T.dawnOnly, weather: W.clear,
     str: 3.8, sta: 3.6, agg: 2.0, value: 12000, perCm: 46,
     fight: 'jumper',
+    layer: { top: 0.25, mid: 1.0, bottom: 0.9 }, // 深層の主
     colors: { top: '#c9d6e2', mid: '#eef4fb', belly: '#ffffff', fin: '#9fd0e8' },
     flavor: '夜明けの霧の中、白い影が水面を割る。龍の子ともいわれる。',
   },
@@ -499,6 +506,62 @@ export const RIG_LAYERS = [
   { id: 'bottom', name: '底層', ratio: 0.88, desc: '底べた。大物と底モノ。ゴミも増える' },
 ];
 export const rigLayerOf = (id) => RIG_LAYERS.find((l) => l.id === id) || RIG_LAYERS[1];
+
+/* ===========================================================
+   遊泳層（水中のどの層で食うか）と 生息水深（どの水深の場所に居るか）
+
+   sp.depth は「その魚が居る場所の水深」だけを表す。水中のどの層で
+   食いつくかは別軸で、下の重み（表層/中層/底層）で表す。
+   両方を掛けるので「水深 20m の表層でドジョウ」「浅場の表層で底物」が
+   起きなくなる。未指定ならタグ・体型から自動で決まる。
+   =========================================================== */
+const SWIM = {
+  bottom: { top: 0.05, mid: 0.40, bottom: 1.00 },   // 底物・ヒゲ物・甲殻類
+  carp: { top: 0.15, mid: 0.70, bottom: 1.00 },     // コイ科（底を漁る）
+  surface: { top: 1.00, mid: 0.85, bottom: 0.30 },  // 藻場の肉食魚（水面を襲う）
+  trout: { top: 0.80, mid: 1.00, bottom: 0.45 },    // 鱒（中層〜表層）
+  midwater: { top: 0.90, mid: 1.00, bottom: 0.35 }, // 中層を群れで回る小物
+  deepPred: { top: 0.30, mid: 0.85, bottom: 1.00 }, // 深場の底に着く大型肉食魚
+  any: { top: 0.55, mid: 1.00, bottom: 0.75 },
+};
+
+/** 魚の遊泳層（sp.layer があればそれ。無ければタグから） */
+export function swimLayer(sp) {
+  if (sp.layer) return sp.layer;
+  if (sp.rarity === 0) return SWIM.bottom;                       // ゴミは底に沈んでいる
+  const t = sp.tags;
+  if (t.includes('weed') && t.includes('predator')) return SWIM.surface;
+  if (t.includes('bottom')) return SWIM.bottom;
+  if (t.includes('carp')) return SWIM.carp;
+  if (t.includes('trout')) return SWIM.trout;
+  if (t.includes('predator') && t.includes('deep')) return SWIM.deepPred;
+  if (t.includes('mid')) return SWIM.midwater;
+  return SWIM.any;
+}
+
+/** 図鑑・表に出す遊泳層の短い名前（重み 0.8 以上の層を拾う） */
+export function swimLayerLabel(sp) {
+  const L = swimLayer(sp);
+  const on = RIG_LAYERS.filter((x) => L[x.id] >= 0.8).map((x) => x.name.replace('層', ''));
+  if (!on.length) return RIG_LAYERS.reduce((a, x) => (L[x.id] > L[a.id] ? x : a), RIG_LAYERS[1]).name;
+  return on.length === 3 ? '全層' : on.join('〜') + '層';
+}
+
+/**
+ * 生息水深との適合（その場所の水深が、その魚が居る水深か）
+ * 帯の中 1.0 → 外れるほど線形に 0 まで落ちる。
+ *  浅い側は d0 の 35%（最低 1m）だけ許す ＝ 深場の魚は浅場に出て来ない
+ *  深い側は帯の幅の 90%（最低 2.5m）だけ許す ＝ 少し深いだけなら居る
+ * 例）ドジョウ [0.5, 4] → 水深 7.2m 以上で 0（20m の場所には居ない）
+ *     湖の主 [14, 28] → 水深 9.1m 未満で 0
+ */
+export function depthFit(sp, depth) {
+  const [d0, d1] = sp.depth;
+  if (depth >= d0 && depth <= d1) return 1;
+  const tol = depth < d0 ? Math.max(1.0, d0 * 0.35) : Math.max(2.5, (d1 - d0) * 0.9);
+  const out = depth < d0 ? d0 - depth : depth - d1;
+  return Math.max(0, 1 - out / tol);
+}
 
 /** 旧セーブ（ルアー）からの読み替え */
 export const BAIT_ALIAS = { spoon: 'roe', frog: 'shrimp', crank: 'minnow' };

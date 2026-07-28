@@ -13,7 +13,7 @@ import { Debug } from './debug.js';
 import { AudioEngine } from './audio.js';
 import * as Save from './save.js';
 import {
-  REAL_FISH, JUNK, GEAR, ACHIEVEMENTS, RIG_LAYERS, rigLayerOf,
+  REAL_FISH, JUNK, GEAR, ACHIEVEMENTS, RIG_LAYERS, rigLayerOf, swimLayer, depthFit,
   weightOf, valueOf, xpOf, rollLength, fightPattern,
 } from './data.js';
 import {
@@ -32,8 +32,9 @@ const HOURS_PER_SEC = 24 / 720;   // 実時間12分で1日
 const MAX_LINE = 62;
 const EYE_H = 1.62;
 /* レベル解禁前でも残る重みの下限（伝説タグの魚は対象外＝完全に解禁待ち）
-   0.013 = Lv1・深い淵の底層・夜で エピックが約 1%（100 回のアタリに 1 回） */
-const LV_FLOOR = 0.013;
+   0.008 = Lv1・深い淵の底層・夜で エピックが約 1%（100 回のアタリに 1 回）。
+   生息水深の判定が厳しくなり深場の競合が減ったので、以前より小さい値で足りる */
+const LV_FLOOR = 0.008;
 /* カメラ距離（三人称）。CAM_MIN からさらに手前へ回すと一人称 */
 const CAM_MIN = 1.6;
 const CAM_MAX = 9;
@@ -500,33 +501,35 @@ export class Game {
     return sum / n;
   }
 
-  /** 水深 depth の場所に居そうな魚を抽選 */
+  /**
+   * 水深 depth の場所に居そうな魚を抽選
+   * opts.bait: エサ・タナ・レベルまで考慮する（アタリの抽選）。
+   *            省略時は「そこに居るか」だけ（魚群の配置用）
+   * opts.layer: プレイヤーが選んだ層（top|mid|bottom）
+   */
   rollSpecies(depth, opts = {}) {
     const band = timeBand(this.state.clock);
     const wk = this.env.weather.key;
     const useBait = !!opts.bait;
     const bait = this.bait;
-    const baitDepth = opts.baitDepth ?? 0;
+    const layerId = opts.layer ?? this.rigLayer.id;
 
     return weightedPick(REAL_FISH, (sp) => {
       let w = sp.spawn;
       if (w <= 0) return 0;
-      const [d0, d1] = sp.depth;
-      if (depth < d0 * 0.55) return 0;
-      // 水深適合
-      const fit = depth >= d0 && depth <= d1 + 3 ? 1 : depth > d1 ? 0.18 : 0.09;
+      /* ② 生息水深：その場所の水深が、その魚が居る水深か。
+         帯を外れるほど 0 に近づき、大きく外れたら完全に 0（＝深場にドジョウは居ない） */
+      const fit = depthFit(sp, depth);
+      if (fit <= 0) return 0;
       w *= fit;
       w *= sp.times[band] ?? 1;
       w *= sp.weather[wk] ?? 1;
       if (useBait) {
         w *= this.baitAffinity(sp);
-        /* タナ（プレイヤーが決めた層）と魚の生息層の一致。
-           エサから層を切り離したので、ここがプレイヤーの一番大きな選択になる。
-           合わせれば ×1.68 / 外せば ×0.08（21 倍差）。
-           旧仕様（エサ固定の層 / 11 倍差）より効きを強くしてタナ合わせを主役にした */
-        const mid = (d0 + d1) / 2;
-        const spread = Math.max(2.0, (d1 - d0) * 0.62);
-        w *= 0.08 + 1.6 * Math.exp(-((baitDepth - mid) ** 2) / (2 * spread * spread));
+        /* ⑥ 遊泳層：プレイヤーが選んだ層 × その魚がその層で食うか。
+           絶対メートルではなく相対位置で比べるので、浅場でも
+           「底物は表層で食わない」「藻場の雷魚は表層で食う」が成立する */
+        w *= swimLayer(sp)[layerId] ?? 1;
         if (sp.rarity >= 3) w *= bait.rare;
         w *= this.rod.attract;
         /* 序盤に強すぎる魚が来て理不尽にならないよう、レベルで解禁。
@@ -1462,7 +1465,7 @@ export class Game {
     if (Math.random() < junkP) {
       sp = pick(JUNK);
     } else {
-      sp = this.rollSpecies(depth, { bait: true, baitDepth });
+      sp = this.rollSpecies(depth, { bait: true, layer: this.rigLayer.id });
     }
     if (!sp) { this.biteTimer = rand(2, 4); return; }
 

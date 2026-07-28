@@ -388,24 +388,24 @@ F.runTimer = rand(<span class="n">1.4</span>, <span class="n">3.2</span>)       
     </p>
 
     <pre>w = sp.spawn                                            <span class="cm">// ① 基礎出現量</span>
-  × 水深適合                                            <span class="cm">// ②</span>
+  × 生息水深の適合 depthFit(sp, その場所の水深)          <span class="cm">// ② どこに居るか</span>
   × sp.times[時間帯]                                    <span class="cm">// ③ 朝/昼/夕/夜</span>
   × sp.weather[天候]                                    <span class="cm">// ④ 晴/曇/雨</span>
   × エサ相性                                            <span class="cm">// ⑤ タグの平均</span>
-  × (<span class="n">0.08</span> + <span class="n">1.6</span> × exp(−(タナの深さ − 生息層中央)² / (2σ²)))   <span class="cm">// ⑥ タナの一致</span>
+  × 遊泳層[プレイヤーが選んだ層]                        <span class="cm">// ⑥ 水中のどこで食うか</span>
   × (レア度≧3 なら bait.rare) × rod.attract             <span class="cm">// ⑦ レア補正</span>
   × レベル解禁（エピック/レジェンドのみ）
 
-<span class="cm">// ② 水深適合：sp.depth = [d0, d1]</span>
-depth &lt; d0 × <span class="n">0.55</span>            → <span class="n">0</span>（絶対に出ない）
-d0 ≦ depth ≦ d1 + <span class="n">3</span>         → <span class="n">1.00</span>
-depth &gt; d1 + <span class="n">3</span>             → <span class="n">0.18</span>
-それ以外（浅すぎ）           → <span class="n">0.09</span>
+<span class="cm">// ② 生息水深：sp.depth = [d0, d1] は「その魚が居る場所の水深」</span>
+d0 ≦ 水深 ≦ d1              → <span class="n">1.00</span>
+水深 &lt; d0                   → <span class="n">1</span> − (d0 − 水深) / max(<span class="n">1.0</span>, d0 × <span class="n">0.35</span>)   <span class="cm">// 下限 0</span>
+水深 &gt; d1                   → <span class="n">1</span> − (水深 − d1) / max(<span class="n">2.5</span>, (d1 − d0) × <span class="n">0.9</span>)  <span class="cm">// 下限 0</span>
+  <span class="cm">// 例：ドジョウ [0.5, 4] は水深 7.2 m 以上で 0 ＝ 深場には居ない</span>
+  <span class="cm">//     湖の主 [14, 28] は水深 9.1 m 未満で 0 ＝ 浅場には出て来ない</span>
 
-<span class="cm">// ⑥ σ = max(2.0, (d1 − d0) × 0.62)</span>
-<span class="cm">//    タナの深さ = clamp(着水地点の水深 × 層の比率, 0.35, 水深 − 0.35)</span>
-<span class="cm">//    層の比率：表層 0.15 / 中層 0.50 / 底層 0.88（プレイヤーが 3 択で選ぶ）</span>
-<span class="cm">//    合っていれば ×1.68 / 完全に外すと ×0.08（21 倍差）。エサではなく層で決める</span>
+<span class="cm">// ⑥ 遊泳層：魚ごとに 表層/中層/底層 それぞれの食いつきの重み（0〜1）を持つ。</span>
+<span class="cm">//    プレイヤーの 3 択と直接掛ける（絶対メートルの比較はしない）ので、</span>
+<span class="cm">//    浅場でも「底物は表層で食わない」「藻場のライギョは表層で食う」が成立する</span>
 
 <span class="cm">// ⑦ レベル解禁（伝説タグ以外は下限 0.013 = 解禁前でも極低確率で掛かる）</span>
 レア度4（エピック）  × max(<span class="n">0.013</span>, clamp01((Lv − <span class="n">2</span>) / <span class="n">5</span>))  <span class="cm">// Lv3 から出始め Lv7 で全開</span>
@@ -426,32 +426,48 @@ depth &gt; d1 + <span class="n">3</span>             → <span class="n">0.18</s
       <div class="tw tall" id="rollOut"></div>
     </div>
 
-    <h3>タナ（狙う層）を決める</h3>
+    <h3>タナ（狙う層）を決める — 生息水深 × 遊泳層</h3>
     <p>
-      エサを入れる層は<b>プレイヤーが 3 択で選びます</b>（<kbd>E</kbd> の仕掛けウインドウ。マウスでクリック、<kbd>↑</kbd><kbd>↓</kbd>でも可）。
-      実際の深さは<b>着水地点の水深に対する比率</b>で自動的に決まるので、浅場でも深場でも同じ選択がそのまま「浅い／真ん中／底」を意味します。
-      エサ側は層を持たないため、<b>「どのエサを」×「どの層に」</b>が、そのアタリで何が食いつくかを決めます。
+      魚のデータは<b>2 軸に分かれています</b>。
+      <b>生息水深</b>（<code>depth</code>）はその魚が居る<b>場所の水深</b>、
+      <b>遊泳層</b>（<code>layer</code>）は<b>水中のどの層で食うか</b>です。
+      プレイヤーは <kbd>E</kbd> の仕掛けウインドウで <b>表層／中層／底層</b> の 3 択を選び、
+      抽選では「その場所の水深が合っているか」×「その層で食うか」の両方が掛かります。
     </p>
+    <div class="grid c2">
+      <div class="card tight"><h4>なぜ 2 軸なのか</h4><p>1 軸（生息層だけ）だと
+        <b>水深 20 m の水面下 3 m</b> と <b>水深 3 m の底</b> を区別できず、深場の表層でドジョウが釣れてしまいます。
+        また「浅場に居るが<b>表層</b>で食う魚」（ライギョ）と「浅場の<b>底</b>に居る魚」（ザリガニ）を書き分けられません。</p></div>
+      <div class="card tight"><h4>タナの実際の深さ</h4><p><code>clamp(水深 × 比率, 0.35, 水深 − 0.35)</code>。
+        比率は<b>表層 15% / 中層 50% / 底層 88%</b>。この深さは<b>見た目（仕掛けの位置）と底層のゴミ判定</b>に使い、
+        魚の抽選には⑥の遊泳層の重みを使います。</p></div>
+    </div>
     <div class="tw"><table>
-      <thead><tr><th class="l">層</th><th class="num">比率</th><th class="num">水深 3 m</th><th class="num">水深 18 m</th><th class="num">水深 25 m</th><th class="l">性格</th></tr></thead>
+      <thead><tr><th class="l">遊泳層の既定（タグから自動）</th><th class="num">表層</th><th class="num">中層</th><th class="num">底層</th><th class="l">当てはまる魚</th></tr></thead>
       <tbody>
-        <tr><td class="l name">表層</td><td class="num">15%</td><td class="num">0.45 m</td><td class="num">2.7 m</td><td class="num">3.8 m</td>
-            <td class="l">小物と、浅い層を回る魚。ゴミは少ない</td></tr>
-        <tr><td class="l name">中層</td><td class="num">50%</td><td class="num">1.5 m</td><td class="num">9.0 m</td><td class="num">12.5 m</td>
-            <td class="l">広く当たる無難な層。深場では鱒・ナマズ系</td></tr>
-        <tr><td class="l name">底層</td><td class="num">88%</td><td class="num">2.6 m</td><td class="num">15.8 m</td><td class="num">22.0 m</td>
-            <td class="l">底物と大物。<b>ゴミも増える</b></td></tr>
+        <tr><td class="l name">底物・ヒゲ物・甲殻類</td><td class="num">0.05</td><td class="num">0.40</td><td class="num" style="color:var(--good)">1.00</td>
+            <td class="l">ドジョウ・ナマズ・ウナギ・チョウザメ・ザリガニ・モクズガニ</td></tr>
+        <tr><td class="l name">コイ科</td><td class="num">0.15</td><td class="num">0.70</td><td class="num" style="color:var(--good)">1.00</td>
+            <td class="l">マブナ・コイ・ニゴイ・アオウオ</td></tr>
+        <tr><td class="l name">藻場の肉食魚</td><td class="num" style="color:var(--good)">1.00</td><td class="num">0.85</td><td class="num">0.30</td>
+            <td class="l">ライギョ・ブラックバス</td></tr>
+        <tr><td class="l name">鱒</td><td class="num">0.80</td><td class="num" style="color:var(--good)">1.00</td><td class="num">0.45</td>
+            <td class="l">ニジマス・ヤマメ・イトウ</td></tr>
+        <tr><td class="l name">中層の小物</td><td class="num">0.90</td><td class="num" style="color:var(--good)">1.00</td><td class="num">0.35</td>
+            <td class="l">ウグイ・オイカワ・タナゴ・ワカサギ・ブルーギル・ハス</td></tr>
+        <tr><td class="l name">深場の大型肉食魚</td><td class="num">0.30</td><td class="num">0.85</td><td class="num" style="color:var(--good)">1.00</td>
+            <td class="l">湖の主</td></tr>
       </tbody>
-      <tfoot><tr><td colspan="6" class="l">深さは <code>clamp(水深 × 比率, 0.35, 水深 − 0.35)</code>。底に埋まらないよう 0.35 m の余裕を残します。
-        <b>キャスト後は変更できません</b>（クリックで回収してから結び直す）。選択はセーブされます。</td></tr></tfoot>
+      <tfoot><tr><td colspan="5" class="l">タグと合わない魚だけ個別に指定しています：モロコ・イワナ・ソウギョ（水面の水草）・
+        ビワマス・サクラマス・アリゲーターガー（水面で空気を吸う）・白龍魚。下の魚データ表に実際の値が出ます。</td></tr></tfoot>
     </table></div>
-    <p class="src">src/data.js — RIG_LAYERS / src/game.js — rigLayer / rigDepthFor() / _openRig() / src/ui.js — openRig()</p>
+    <p class="src">src/data.js — swimLayer() / depthFit() / RIG_LAYERS　src/game.js — rigLayer / rollSpecies()</p>
     <div class="note">
-      仕掛けウインドウには<b>その場所での実際の深さ</b>と<b>その層にいる魚</b>（未発見は <code>??? ×n</code>）が出ます。
-      <b>タナを合わせた魚は重み ×1.68、完全に外した魚は ×0.08</b> なので、
-      同じ場所・同じエサでも層を変えるだけで釣れる魚が入れ替わります。
-      実測（水深 18 m・夕・くもり・Lv12 の 1 位）：表層＝ナマズ、中層＝ナマズ、底層＝ビワマス。
-      イクラなら中層でビワマス 22%、底層で 31%。
+      実測（Lv12・カーボン・ミミズ）：<br>
+      ・水深 3 m 昼：表層でドジョウ <b>0.2%</b>／底層で <b>2.7%</b>（夜・雨なら 4.0% / 23.9%）<br>
+      ・水深 20 m：どの層でもドジョウ <b>0%</b>（生息水深の外）<br>
+      ・藻場 2.5 m：ライギョは表層 <b>10.2%</b>／底層 3.6%、ザリガニは表層 0.5%／底層 <b>12.4%</b><br>
+      ・水深 18 m 夕：表層＝ワカサギ 50%、中層＝ワカサギ 29%・ビワマス 22%、底層＝ナマズ 24%・ビワマス 17%
     </div>
 
     <h3>アタリまでの流れとタイミング</h3>
@@ -793,7 +809,8 @@ y(t) = lerp(先端, 着水点, t) − sin(πt) × min(距離×<span class="n">0.
 
 <script type="module">
 import {
-  SPECIES, RARITY, RODS, LINES, BAITS, ACHIEVEMENTS, RIG_LAYERS, baitStrengths, TAG_LABEL,
+  SPECIES, RARITY, RODS, LINES, BAITS, ACHIEVEMENTS, RIG_LAYERS,
+  baitStrengths, TAG_LABEL, swimLayer, swimLayerLabel, depthFit,
   FIGHT_PATTERNS, fightPattern, weightOf, valueOf, xpOf,
 } from './src/data.js';
 import { xpForLevel } from './src/save.js';
@@ -1154,22 +1171,19 @@ function biteWeights({ depth, hour, weather, baitId, rodId, level, layer }) {
   const band = timeBand(hour);
   const bait = BAITS.find((b) => b.id === baitId);
   const rod = RODS.find((r) => r.id === rodId);
-  // タナの深さ＝水深 × 層の比率（底に埋まらないよう余裕を残す）
+  // タナの深さは見た目・ゴミ判定用（抽選は遊泳層の重みで決まる）
   const L = RIG_LAYERS.find((x) => x.id === layer) || RIG_LAYERS[1];
   const baitDepth = clamp(depth * L.ratio, 0.35, Math.max(0.35, depth - 0.35));
   const rows = FISH.map((sp) => {
     let w = sp.spawn;
     const parts = {};
-    const [d0, d1] = sp.depth;
-    if (depth < d0 * 0.55) return { sp, w: 0, parts, why: '水深不足' };
-    const fit = depth >= d0 && depth <= d1 + 3 ? 1 : depth > d1 ? 0.18 : 0.09;
+    const fit = depthFit(sp, depth);
+    if (fit <= 0) return { sp, w: 0, parts, why: '生息水深の外' };
     parts.fit = fit;
     parts.time = sp.times[band] ?? 1;
     parts.weather = sp.weather[weather] ?? 1;
     parts.aff = baitAffinity(sp, bait);
-    const mid = (d0 + d1) / 2;
-    const spread = Math.max(2.0, (d1 - d0) * 0.62);
-    parts.layer = 0.08 + 1.6 * Math.exp(-((baitDepth - mid) ** 2) / (2 * spread * spread));
+    parts.layer = swimLayer(sp)[layer];
     parts.rare = sp.rarity >= 3 ? bait.rare : 1;
     parts.attract = rod.attract;
     // レベル解禁：伝説タグ以外は解禁前も 0.013 の重みで残る（ゲーム本体の LV_FLOOR）
@@ -1221,8 +1235,8 @@ function runRoll() {
     ? '<table><tbody><tr><td class="l" style="color:var(--bad)">この条件で成立する魚がいません（アタリは 2〜4 秒後に再抽選されます）</td></tr></tbody></table>'
     : `<table><thead><tr>
         <th class="l">魚</th><th class="l">レア度</th><th class="num">確率</th><th style="width:150px"></th>
-        <th class="num">生息層</th><th class="num">①spawn</th><th class="num">②水深</th><th class="num">③時間</th>
-        <th class="num">④天候</th><th class="num">⑤エサ</th><th class="num">⑥層一致</th><th class="num">⑦レア</th><th class="num">Lv</th>
+        <th class="num">生息水深</th><th class="num">①spawn</th><th class="num">②水深</th><th class="num">③時間</th>
+        <th class="num">④天候</th><th class="num">⑤エサ</th><th class="num">⑥遊泳層</th><th class="num">⑦レア</th><th class="num">Lv</th>
       </tr></thead><tbody>
       ${sorted.map(({ sp, w, parts }) => {
         const p = w / total;
@@ -1296,7 +1310,7 @@ function runRoll() {
     let sep = '';
     if (sp.rarity !== cur) {
       cur = sp.rarity;
-      sep = `<tr class="sep"><td colspan="15">${rlabel(sp.rarity)}${sp.rarity === 0 ? '（ゴミ・出現重み 0：専用抽選）' : ''}</td></tr>`;
+      sep = `<tr class="sep"><td colspan="16">${rlabel(sp.rarity)}${sp.rarity === 0 ? '（ゴミ・出現重み 0：専用抽選）' : ''}</td></tr>`;
     }
     const L = avgLen(sp);
     return sep + `<tr>
@@ -1305,6 +1319,8 @@ function runRoll() {
       <td class="num">${sp.len[0]}–${sp.len[1]}</td>
       <td class="num">${f1(L)}</td>
       <td class="num">${sp.depth[0]}–${sp.depth[1]}</td>
+      <td class="l" style="font-size:10.5px">${swimLayerLabel(sp)}<br><span style="opacity:.55">${
+        RIG_LAYERS.map((x) => f2(swimLayer(sp)[x.id])).join(' / ')}</span></td>
       <td class="num">${sp.wc}</td>
       <td class="num">${fw(weightOf(sp, L))}</td>
       <td class="num" style="color:var(--gold)">${sp.str}</td>
@@ -1320,12 +1336,13 @@ function runRoll() {
   document.getElementById('spTable').innerHTML = `<table><thead><tr>
     <th class="l">魚</th><th class="num">spawn<br><span style="opacity:.6">基礎出現</span></th>
     <th class="num">全長 cm</th><th class="num">平均<br>全長</th><th class="num">水深 m</th>
+    <th class="l">遊泳層<br><span style="opacity:.6">表/中/底</span></th>
     <th class="num">wc<br><span style="opacity:.6">体重係数</span></th><th class="num">平均<br>重量</th>
     <th class="num">str<br><span style="opacity:.6">引き</span></th><th class="num">sta<br><span style="opacity:.6">体力</span></th>
     <th class="num">agg<br><span style="opacity:.6">突進</span></th><th class="l">ファイト<br>の型</th>
     <th class="num">value<br><span style="opacity:.6">基礎額</span></th><th class="num">perCm</th><th class="num">平均<br>売値G</th>
     <th class="l">タグ</th></tr></thead><tbody>${rows}</tbody>
-    <tfoot><tr><td colspan="15" class="l">平均全長 = 範囲の 32%（<code>random()^2.1</code> の期待値）。平均重量・売値はその全長での計算値。</td></tr></tfoot></table>`;
+    <tfoot><tr><td colspan="16" class="l">平均全長 = 範囲の 32%（<code>random()^2.1</code> の期待値）。平均重量・売値はその全長での計算値。</td></tr></tfoot></table>`;
 
   // 時間帯・天候
   const cell = (v) => `<td class="num" style="color:${v >= 1.3 ? 'var(--good)' : v <= 0.5 ? 'var(--bad)' : v < 1 ? 'var(--warn)' : 'inherit'}">${f2(v)}</td>`;

@@ -1,7 +1,10 @@
 /* ===========================================================
    HUD / モーダル / 図鑑・ショップ
    =========================================================== */
-import { SPECIES, RARITY, GEAR, GEAR_LABEL, ACHIEVEMENTS, RIG_LAYERS, valueOf, baitStrengths } from './data.js';
+import {
+  SPECIES, RARITY, GEAR, GEAR_LABEL, ACHIEVEMENTS, RIG_LAYERS,
+  valueOf, baitStrengths, swimLayer, swimLayerLabel, depthFit,
+} from './data.js';
 import { PROFILES, BODY, profileAt, CRUST_SHAPES } from './fish.js';
 import { fmtInt, fmt1, fmtWeight, fmtClock, timeBandLabel, clamp01 } from './util.js';
 import { xpForLevel } from './save.js';
@@ -639,7 +642,7 @@ export class UI {
       if (rec) {
         info.innerHTML = `
           <div class="jn"><span>${sp.name}</span><span class="jr" style="color:${RARITY[sp.rarity].color}">${RARITY[sp.rarity].label}</span></div>
-          <div class="jm">${rec.count} 匹 / 最大 ${fmt1(rec.maxLen)} cm<br>${fmtWeight(rec.maxWeight)}・${fmtInt(valueOf(sp, rec.maxLen))} G</div>`;
+          <div class="jm">${rec.count} 匹 / 最大 ${fmt1(rec.maxLen)} cm<br>${fmtWeight(rec.maxWeight)}・${fmtInt(valueOf(sp, rec.maxLen))} G<br><span style="opacity:.55">水深 ${sp.depth[0]}〜${sp.depth[1]} m・${swimLayerLabel(sp)}</span></div>`;
       } else if (sp.rarity === 0) {
         info.innerHTML = `
           <div class="jn"><span>???</span><span class="jr">${RARITY[0].label}</span></div>
@@ -647,7 +650,7 @@ export class UI {
       } else {
         info.innerHTML = `
           <div class="jn"><span>???</span><span class="jr">${RARITY[sp.rarity].label}</span></div>
-          <div class="jm">未発見<br>水深 ${sp.depth[0]}〜${sp.depth[1]} m</div>`;
+          <div class="jm">未発見<br>水深 ${sp.depth[0]}〜${sp.depth[1]} m・${swimLayerLabel(sp)}</div>`;
       }
       d.appendChild(info);
       grid.appendChild(d);
@@ -693,16 +696,19 @@ export class UI {
       ? `${cur.desc}。狙う場所を決めると実際の深さが出ます`
       : `${cur.desc}（水深 ${fmt1(spot)} m の ${Math.round(cur.ratio * 100)}% ＝ ${fmt1(eff)} m）`;
 
-    /* この層にいる魚。図鑑と同じ扱いで、未発見はまとめて「???」の数だけ見せる */
-    const at = eff ?? 2;
-    const here = SPECIES.filter((sp) => sp.rarity > 0 && at >= sp.depth[0] && at <= sp.depth[1]);
-    const known = here.filter((sp) => s.records[sp.id])
-      .sort((a, b) => b.rarity - a.rarity || b.len[1] - a.len[1]);
+    /* ここ（その水深）× この層 で食いつく魚。生息水深と遊泳層の両方で絞る。
+       図鑑と同じ扱いで、未発見はまとめて「???」の数だけ見せる */
+    const here = spot == null ? [] : SPECIES
+      .filter((sp) => sp.rarity > 0 && depthFit(sp, spot) > 0.35 && swimLayer(sp)[cur.id] >= 0.5)
+      .sort((a, b) => (depthFit(b, spot) * swimLayer(b)[cur.id]) - (depthFit(a, spot) * swimLayer(a)[cur.id]));
+    const known = here.filter((sp) => s.records[sp.id]);
     const unknown = here.length - known.length;
-    $('rig-fish').innerHTML = here.length
-      ? known.map((sp) => `<i style="color:${RARITY[sp.rarity].color}">${sp.name}</i>`).join('')
-        + (unknown ? `<i class="unknown">??? ×${unknown}</i>` : '')
-      : '<i class="unknown">この層には居ない</i>';
+    $('rig-fish').innerHTML = spot == null
+      ? '<i class="unknown">狙う場所を決めると出ます</i>'
+      : here.length
+        ? known.map((sp) => `<i style="color:${RARITY[sp.rarity].color}">${sp.name}</i>`).join('')
+          + (unknown ? `<i class="unknown">??? ×${unknown}</i>` : '')
+        : '<i class="unknown">この層で食う魚は居ない</i>';
   }
 
   openPause() {
