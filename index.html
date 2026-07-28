@@ -41,6 +41,7 @@
       <div class="info-row"><span class="lbl">天候</span><span id="weather-name">晴れ</span></div>
       <div class="info-row"><span class="lbl">狙い</span><span id="aim">-- m</span></div>
       <div class="info-row"><span class="lbl">水深</span><span id="depth">-- m</span></div>
+      <div class="info-row"><span class="lbl">タナ</span><span id="rig">-- m</span></div>
       <div class="info-row"><span class="lbl">釣果</span><span id="caught-count">0</span></div>
     </div>
 
@@ -81,6 +82,7 @@
       <span><b>移動</b> WASD</span>
       <span><b>視点</b> マウス</span>
       <span><b>キャスト/巻く</b> クリック or Space</span>
+      <span><b>タナ</b> E</span>
       <span><b>図鑑</b> Q</span>
       <span><b>ショップ</b> B</span>
       <span><b>水中カメラ</b> V</span>
@@ -100,6 +102,7 @@
       <div class="title-keys">
         <div><kbd>マウス</kbd>で狙う（<b>見下ろすと近く／水平で遠く</b>）。水面の輪が狙い点</div>
         <div><kbd>クリック</kbd>長押し → メーターの<b>緑の帯</b>で離すと狙い通りに落ちる</div>
+        <div><kbd>E</kbd>で<b>タナ（狙う層）</b>を決める。エサとタナの組み合わせで釣れる魚が変わる</div>
         <div><kbd>WASD</kbd> で岸を歩いてポイントを探す（<kbd>ホイール</kbd>を手前まで回すと<b>一人称</b>）</div>
         <div>ウキが沈んだら すぐに<kbd>クリック</kbd>で アワセ！</div>
         <div>ヒット後は <kbd>押し続けて巻く</kbd> / <kbd>離してテンションを抜く</kbd></div>
@@ -143,10 +146,10 @@
       <nav class="tabs">
         <button class="tab active" data-tab="rod">ロッド</button>
         <button class="tab" data-tab="line">ライン</button>
-        <button class="tab" data-tab="bait">エサ・ルアー</button>
+        <button class="tab" data-tab="bait">エサ</button>
       </nav>
       <div class="shop-list" id="shop-list"></div>
-      <footer class="shop-foot">上位ロッドは<b>レベル</b>で解禁されます。エサは水深と魚種の相性を変えます。</footer>
+      <footer class="shop-foot">上位ロッドは<b>レベル</b>で解禁されます。エサは<b>どの魚が食いつくか</b>を変えます（狙う層＝<b>タナ</b>は <b>E</b> キーの仕掛けウインドウで別に決めます）。</footer>
     </div>
   </div>
 
@@ -160,6 +163,33 @@
       </header>
       <div class="journal-grid" id="journal-grid"></div>
       <footer class="shop-foot" id="journal-ach"></footer>
+    </div>
+  </div>
+
+  <!-- ============ 仕掛け（タナ） ============ -->
+  <div id="rig-window" class="modal">
+    <div class="card small">
+      <h2>🎣 仕掛け</h2>
+      <p class="rig-lead">エサを沈める深さ（<b>タナ</b>）を決めます。水の柱を<b>クリック／ドラッグ</b>。</p>
+      <div class="rig-main">
+        <div class="rig-col" id="rig-col">
+          <div class="rig-bed" id="rig-bed"><span>底</span></div>
+          <div class="rig-hand" id="rig-hand"><i></i><b id="rig-val">2.0 m</b></div>
+          <div class="rig-ticks" id="rig-ticks"></div>
+        </div>
+        <div class="rig-side">
+          <div class="rig-row"><span>いまの水深</span><b id="rig-depth">-- m</b></div>
+          <div class="rig-row"><span>タナ</span><b id="rig-eff">-- m</b></div>
+          <div class="rig-note" id="rig-note"></div>
+          <div class="rig-fishhead">この層にいる魚</div>
+          <div class="rig-fish" id="rig-fish"></div>
+        </div>
+      </div>
+      <div class="rig-btns">
+        <button class="btn ghost" id="rig-minus">▲ 浅く</button>
+        <button class="btn ghost" id="rig-plus">▼ 深く</button>
+      </div>
+      <button id="btn-rig-close" class="btn">これで釣る <small>(E / Esc)</small></button>
     </div>
   </div>
 

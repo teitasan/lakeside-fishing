@@ -229,7 +229,7 @@ export const SPECIES = [
     str: 1.15, sta: 1.0, agg: 1.1, value: 110, perCm: 4.6,
     fight: 'dash',
     colors: { top: '#2f4a2c', mid: '#6f8f52', belly: '#e3e0bd', fin: '#33472b' },
-    flavor: '大口を開けてルアーを襲う。エラ洗いに注意。',
+    flavor: '大口を開けて小魚を襲う。エラ洗いに注意。',
   },
   {
     id: 'yamame', name: 'ヤマメ', rarity: 2, tags: ['trout'], shape: 'slim',
@@ -375,7 +375,7 @@ export const SPECIES = [
   /* ---------------- レジェンド ---------------- */
   {
     id: 'nushi', name: '湖の主', rarity: 5, tags: ['deep', 'predator', 'legend'], shape: 'eel',
-    len: [138, 232], wc: 1.6, depth: [14, 28], spawn: 0.85, times: T.nightish, weather: W.rain,
+    len: [138, 232], wc: 1.6, depth: [14, 28], spawn: 0.25, times: T.nightish, weather: W.rain,
     str: 3.3, sta: 3.2, agg: 1.4, value: 7000, perCm: 34,
     fight: 'tank',
     colors: { top: '#22262a', mid: '#4b5157', belly: '#9aa3a6', fin: '#2c3135' },
@@ -442,53 +442,74 @@ export const LINES = [
  * junk: ゴミを引く確率の倍率
  * aff: 魚のタグ別の食いつき倍率
  */
+/* エサ（ルアーは廃止。放置して待つ釣りに合わないため、すべて置き餌・生き餌に統一）
+   depth は持たない：狙う層（タナ）はプレイヤーが仕掛け側で決める。
+   aff = タグ別の食いつき。タナ × エサの組み合わせで釣れる魚が変わる */
 export const BAITS = [
   {
     id: 'worm', name: 'ミミズ', icon: '🪱', price: 0, level: 1,
-    depth: 30, attract: 1.0, rare: 1.0, junk: 1.0,
+    attract: 1.0, rare: 1.0, junk: 1.0,
     aff: { bottom: 1.7, carp: 1.4, mid: 1.0, predator: 0.6, trout: 0.8, weed: 0.9, deep: 1.0 },
-    desc: '底まで沈めて待つ万能エサ。底モノに強い。',
+    desc: '万能の置き餌。底を突く魚に強い。',
+  },
+  {
+    id: 'akamushi', name: 'アカムシ', icon: '🧵', price: 180, level: 1,
+    attract: 1.14, rare: 0.88, junk: 0.9,
+    aff: { mid: 1.6, bottom: 1.3, weed: 1.2, carp: 1.0, trout: 0.9, predator: 0.3, deep: 0.7 },
+    desc: '極小の赤い虫。小物のアタリが速いが、大物は寄らない。',
   },
   {
     id: 'dough', name: '練り餌', icon: '🍡', price: 250, level: 1,
-    depth: 2.5, attract: 1.08, rare: 1.05, junk: 0.8,
+    attract: 1.08, rare: 1.05, junk: 0.8,
     aff: { carp: 1.9, bottom: 1.2, mid: 1.2, predator: 0.4, trout: 0.7, weed: 1.0, deep: 0.8 },
-    desc: 'フナ・コイの大好物。中層を狙う。',
+    desc: 'フナ・コイの大好物。練り込んで針に付ける。',
   },
   {
-    id: 'minnow', name: '小魚（生き餌）', icon: '🐟', price: 900, level: 2,
-    depth: 4.0, attract: 1.18, rare: 1.15, junk: 0.6,
-    aff: { predator: 2.0, trout: 1.3, mid: 1.1, bottom: 0.8, carp: 0.5, weed: 1.2, deep: 1.2 },
-    desc: '肉食魚が狂う生き餌。中層をゆらゆら泳ぐ。',
+    id: 'roe', name: 'イクラ', icon: '🍥', price: 900, level: 2,
+    attract: 1.16, rare: 1.15, junk: 0.6,
+    aff: { trout: 2.0, mid: 1.2, deep: 1.1, predator: 0.9, bottom: 0.8, weed: 0.8, carp: 0.6 },
+    desc: '鱒が目の色を変える一粒。流れの中で映える。',
   },
   {
-    id: 'spoon', name: 'スプーン', icon: '🥄', price: 1400, level: 3,
-    depth: 1.8, attract: 1.22, rare: 1.2, junk: 0.4,
-    aff: { trout: 2.0, predator: 1.5, mid: 1.1, carp: 0.35, bottom: 0.3, weed: 0.8, deep: 0.7 },
-    desc: 'きらめきで鱒を誘う金属ルアー。表層〜中層向き。',
+    id: 'shrimp', name: '川エビ', icon: '🦐', price: 1600, level: 3,
+    attract: 1.2, rare: 1.25, junk: 0.5,
+    aff: { predator: 1.9, deep: 1.4, bottom: 1.3, trout: 1.2, weed: 1.2, mid: 1.0, carp: 0.6 },
+    desc: '生きたまま付ける定番の生き餌。何にでも効く。',
   },
   {
-    id: 'frog', name: 'フロッグ', icon: '🐸', price: 2200, level: 4,
-    depth: 0.4, attract: 1.14, rare: 1.2, junk: 0.35,
-    aff: { weed: 2.3, predator: 1.6, mid: 0.9, trout: 0.8, carp: 0.4, bottom: 0.2, deep: 0.4 },
-    desc: '水面をポコポコ。藻場の大物を水面爆発で誘う。',
-  },
-  {
-    id: 'crank', name: 'ディープクランク', icon: '🎏', price: 3800, level: 6,
-    depth: 11.0, attract: 1.24, rare: 1.35, junk: 0.5,
-    aff: { deep: 2.2, predator: 1.35, bottom: 1.2, trout: 1.1, mid: 0.8, carp: 0.7, weed: 0.3 },
-    desc: '一気に深場まで潜るルアー。深層の大物用。',
+    id: 'minnow', name: '小魚（泳がせ）', icon: '🐟', price: 3800, level: 6,
+    attract: 1.22, rare: 1.45, junk: 0.4,
+    aff: { predator: 2.2, deep: 1.8, trout: 1.3, mid: 1.0, bottom: 0.9, weed: 1.0, carp: 0.4 },
+    desc: '生きた小魚を泳がせる大物狙い。小物は寄りつかない。',
   },
   {
     id: 'secret', name: '秘伝の撒き餌', icon: '🍶', price: 12000, level: 10,
-    depth: 8.0, attract: 1.7, rare: 2.2, junk: 0.25,
+    attract: 1.7, rare: 2.2, junk: 0.25,
     aff: { deep: 1.6, legend: 2.6, predator: 1.4, trout: 1.4, carp: 1.4, bottom: 1.4, mid: 1.4, weed: 1.2 },
     desc: '老人が「主を呼ぶ」と言って売ってくれた壺。何かがおかしい匂い。',
   },
 ];
 
+/** 旧セーブ（ルアー）からの読み替え */
+export const BAIT_ALIAS = { spoon: 'roe', frog: 'shrimp', crank: 'minnow' };
+
+/** タグの日本語名（ショップ・マニュアルの表示用） */
+export const TAG_LABEL = {
+  bottom: '底物', mid: '中層', weed: '藻場', carp: 'コイ科',
+  trout: '鱒', predator: '肉食魚', deep: '深場', legend: '伝説',
+};
+
+/** エサが得意な魚（aff の上位）を短く並べる */
+export function baitStrengths(bait, n = 3) {
+  return Object.entries(bait.aff)
+    .filter(([, v]) => v >= 1.2)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, n)
+    .map(([k]) => TAG_LABEL[k] || k);
+}
+
 export const GEAR = { rod: RODS, line: LINES, bait: BAITS };
-export const GEAR_LABEL = { rod: 'ロッド', line: 'ライン', bait: 'エサ・ルアー' };
+export const GEAR_LABEL = { rod: 'ロッド', line: 'ライン', bait: 'エサ' };
 
 /* ===========================================================
    実績

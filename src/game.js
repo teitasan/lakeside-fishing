@@ -34,6 +34,9 @@ const EYE_H = 1.62;
 /* レベル解禁前でも残る重みの下限（伝説タグの魚は対象外＝完全に解禁待ち）
    0.022 = Lv1・深い淵の夜で エピックが約 1%（100 回のアタリに 1 回） */
 const LV_FLOOR = 0.022;
+/* タナ（狙う層）の可変範囲 m。湖の最深部は 30m 前後 */
+const RIG_MIN = 0.5;
+const RIG_MAX = 30;
 /* カメラ距離（三人称）。CAM_MIN からさらに手前へ回すと一人称 */
 const CAM_MIN = 1.6;
 const CAM_MAX = 9;
@@ -54,8 +57,8 @@ function pullLabel(pull0) {
 }
 
 const BAIT_COLORS = {
-  worm: 0xb9614c, dough: 0xe4d6b4, minnow: 0xa9bcc8, spoon: 0xd7d2b4,
-  frog: 0x6e9b46, crank: 0xcf5a42, secret: 0xd9c274,
+  worm: 0xb9614c, akamushi: 0xc23a3a, dough: 0xe4d6b4, roe: 0xf07a3c,
+  shrimp: 0xd9b9a8, minnow: 0xa9bcc8, secret: 0xd9c274,
 };
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -73,6 +76,7 @@ export class Game {
     this.playing = false;
     this.time = 0;
     this.hudDepth = 0;
+    this.hudRig = 0;
 
     /* --- 入力 --- */
     this.keys = new Set();
@@ -243,9 +247,9 @@ export class Game {
 
     window.addEventListener('wheel', (e) => {
       if (!this.playing || this.ui.isBlocking()) return;
-      // 三人称の最短(CAM_MIN)からさらに手前へ回すと一人称、奥へ回すと三人称に戻る
       const d = Math.sign(e.deltaY);
       if (!d) return;
+      // 三人称の最短(CAM_MIN)からさらに手前へ回すと一人称、奥へ回すと三人称に戻る
       if (this.firstPerson) {
         if (d > 0) this._setFirstPerson(false);
       } else if (d < 0 && this.camDist <= CAM_MIN + 1e-3) {
@@ -257,6 +261,14 @@ export class Game {
 
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Space') e.preventDefault();
+      // 仕掛けウインドウを開いている間は上下キーで微調整（押しっぱなし可）
+      if (this.ui.openModal === 'rig' && (e.code === 'ArrowUp' || e.code === 'ArrowDown')) {
+        e.preventDefault();
+        this.nudgeRigDepth(e.code === 'ArrowDown' ? 1 : -1);
+        this.ui.renderRig();
+        this.audio.reelTick(0.35);
+        return;
+      }
       if (e.repeat) return;
 
       // デバッグ表示はどの状態でも切り替えられる
@@ -272,7 +284,7 @@ export class Game {
         return;
       }
       if (this.ui.isBlocking()) {
-        if (e.code === 'Escape' || e.code === 'KeyQ' || e.code === 'KeyB') this.ui.closeAll();
+        if (e.code === 'Escape' || e.code === 'KeyQ' || e.code === 'KeyB' || e.code === 'KeyE') this.ui.closeAll();
         return;
       }
       if (!this.playing) {
@@ -286,6 +298,7 @@ export class Game {
         case 'KeyQ': this._cancelCharge(); this._exitLock(); this.ui.openJournal(); this.audio.click(); break;
         case 'KeyB': this._cancelCharge(); this._exitLock(); this.ui.openShop(); this.audio.click(); break;
         case 'Escape': this._cancelCharge(); this._exitLock(); this.ui.openPause(); break;
+        case 'KeyE': this._openRig(); break;
         case 'KeyV': this._toggleUnderwater(); break;
         case 'KeyM': {
           const s = this.state.settings;
@@ -506,10 +519,13 @@ export class Game {
       w *= sp.weather[wk] ?? 1;
       if (useBait) {
         w *= this.baitAffinity(sp);
-        // 餌の層と魚の層の一致
+        /* タナ（プレイヤーが決めた層）と魚の生息層の一致。
+           エサから層を切り離したので、ここがプレイヤーの一番大きな選択になる。
+           合わせれば ×1.68 / 外せば ×0.08（21 倍差）。
+           旧仕様（エサ固定の層 / 11 倍差）より効きを強くしてタナ合わせを主役にした */
         const mid = (d0 + d1) / 2;
-        const spread = Math.max(2.5, (d1 - d0) * 0.75);
-        w *= 0.14 + 1.4 * Math.exp(-((baitDepth - mid) ** 2) / (2 * spread * spread));
+        const spread = Math.max(2.0, (d1 - d0) * 0.62);
+        w *= 0.08 + 1.6 * Math.exp(-((baitDepth - mid) ** 2) / (2 * spread * spread));
         if (sp.rarity >= 3) w *= bait.rare;
         w *= this.rod.attract;
         /* 序盤に強すぎる魚が来て理不尽にならないよう、レベルで解禁。
@@ -1058,10 +1074,53 @@ export class Game {
     return this.water.surfaceY(x, z);
   }
 
+  /* ---------------- タナ（狙う層） ---------------- */
+  /** 設定値。エサとは独立で、プレイヤーが上下キー / Shift+ホイールで決める */
+  get rigDepth() {
+    return clamp(this.state.rigDepth ?? 2, RIG_MIN, RIG_MAX);
+  }
+
+  /** その場所で実際にエサが届く層（水深で頭を打つ＝底べた） */
+  rigDepthAt(x, z) {
+    const d = this.terrain.depthAt(x, z);
+    return clamp(Math.min(this.rigDepth, Math.max(0.35, d - 0.35)), 0.35, RIG_MAX);
+  }
+
+  /** 底に着いている（設定より浅い所にエサがある）か */
+  get rigOnBottom() {
+    return this.hudRig < this.rigDepth - 0.05;
+  }
+
+  /** 仕掛けウインドウ（E）。投げてしまったら結び直せないので、キャスト前だけ */
+  _openRig() {
+    if (this.fs !== 'idle' && this.fs !== 'charge') {
+      this.ui.toast('キャスト後はタナを変えられません（<b>クリック</b>で回収してから）', 'bad');
+      this.audio.deny();
+      return;
+    }
+    this._cancelCharge();
+    this._exitLock();
+    this.ui.openRig();
+    this.audio.click();
+  }
+
+  /** m 指定（ウインドウのクリック・ドラッグ用）。0.25m 刻みに丸める */
+  setRigDepth(v) {
+    const next = clamp(Math.round(v / 0.25) * 0.25, RIG_MIN, RIG_MAX);
+    if (next === this.state.rigDepth) return;
+    this.state.rigDepth = next;
+    this.saveState();
+  }
+
+  /** dir: +1 で深く / −1 で浅く。浅い側は細かく、深い側は粗く動かす */
+  nudgeRigDepth(dir) {
+    const cur = this.rigDepth;
+    const step = cur < 3 ? 0.25 : cur < 8 ? 0.5 : 1;
+    this.setRigDepth(cur + dir * step);
+  }
+
   get baitY() {
-    const d = this.terrain.depthAt(this.bobber.x, this.bobber.z);
-    const target = Math.min(this.bait.depth, Math.max(0.35, d - 0.35));
-    return -target;
+    return -this.rigDepthAt(this.bobber.x, this.bobber.z);
   }
 
   _updateFishing(dt) {
@@ -1083,6 +1142,7 @@ export class Game {
         this._updateAim();
         const ad = this.terrain.depthAt(this.aimPoint.x, this.aimPoint.z);
         this.hudDepth = ad;
+        this.hudRig = this.rigDepthAt(this.aimPoint.x, this.aimPoint.z);
         this.hudAim = this.aimDist;
         this.aimMarker.visible = true;
         this.aimMarker.position.set(
@@ -1097,7 +1157,7 @@ export class Game {
         this.marker.visible = false;
         ui.showPower(false);
         ui.showFight(false);
-        ui.setPrompt('<b>水面の輪で狙い</b>、長押しして<b>目印で離す</b>（見下ろすと近く／水平で遠く）');
+        ui.setPrompt(`<b>水面の輪で狙い</b>、長押しして<b>目印で離す</b>　/　<b>E</b> でタナ ${fmt1(this.rigDepth)}m`);
         break;
       }
 
@@ -1138,6 +1198,7 @@ export class Game {
         }
         const obstruct = this.castObstruction;
         this.hudDepth = d;
+        this.hudRig = this.rigDepthAt(_v2.x, _v2.z);
         this.marker.visible = true;
         this.marker.position.set(_v2.x, (d > 0 ? this.water.surfaceY(_v2.x, _v2.z) : this.terrain.heightAt(_v2.x, _v2.z)) + 0.06, _v2.z);
         this.marker.scale.setScalar(1 + (1 - this.charge) * 0.5);
@@ -1215,6 +1276,7 @@ export class Game {
       case 'nibble': {
         const surf = this.water.surfaceY(this.bobber.x, this.bobber.z);
         this.hudDepth = this.terrain.depthAt(this.bobber.x, this.bobber.z);
+        this.hudRig = this.rigDepthAt(this.bobber.x, this.bobber.z);
         this.hudAim = 0;
         this.aimMarker.visible = false;
         this.baitPos.set(this.bobber.x, this.baitY, this.bobber.z);
@@ -1349,8 +1411,9 @@ export class Game {
       if (d < 4.5) return '…<b>何かが寄ってきた</b>（Vで水中カメラ）';
     }
     const d = this.terrain.depthAt(this.bobber.x, this.bobber.z);
-    const bd = Math.min(this.bait.depth, Math.max(0.35, d - 0.35));
-    return `アタリを待つ…（水深 ${fmt1(d)}m / エサの層 ${fmt1(bd)}m）　<b>クリック</b>で回収`;
+    const bd = this.rigDepthAt(this.bobber.x, this.bobber.z);
+    const tana = bd < this.rigDepth - 0.05 ? `タナ ${fmt1(bd)}m（底）` : `タナ ${fmt1(bd)}m`;
+    return `アタリを待つ…（水深 ${fmt1(d)}m / ${tana}）　<b>クリック</b>で回収`;
   }
 
   /* ---------------- 着水 ---------------- */
@@ -1394,8 +1457,11 @@ export class Game {
     const depth = this.terrain.depthAt(x, z);
     const baitDepth = -this.baitY;
 
-    // ゴミ抽選
-    const junkP = 0.085 * this.bait.junk * (depth < 1.4 ? 1.8 : 1) * (this.state.totalCaught < 3 ? 0.3 : 1);
+    /* ゴミ抽選：ゴミは底に沈んでいるものなので、タナを底べたにすると増え、
+       中層に浮かせると減る（タナを選ぶ意味をゴミ側にも持たせる） */
+    const onBottom = baitDepth >= depth - 0.5;
+    const junkP = 0.085 * this.bait.junk * (depth < 1.4 ? 1.8 : 1)
+      * (onBottom ? 1.5 : 0.55) * (this.state.totalCaught < 3 ? 0.3 : 1);
     let sp = null;
     if (Math.random() < junkP) {
       sp = pick(JUNK);

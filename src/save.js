@@ -2,6 +2,8 @@
    セーブデータ（localStorage）
    =========================================================== */
 
+import { BAITS, BAIT_ALIAS } from './data.js';
+
 const KEY = 'lakeside-fishing-save-v1';
 
 /** シードを持たない旧セーブ用（これまで固定で使っていた湖） */
@@ -21,6 +23,7 @@ export function defaultState() {
     snapped: 0,
     escaped: 0,
     clock: 5.6, // 夜明け前スタート
+    rigDepth: 2.0, // 狙う層（タナ）m。プレイヤーが上下キーで決める
     seed: null, // 湖のシード（null = 起動時にランダムで決める）
     gear: { rod: 'bamboo', line: 'nylon', bait: 'worm' },
     owned: { rod: ['bamboo'], line: ['nylon'], bait: ['worm'] },
@@ -60,9 +63,15 @@ export function load() {
     };
     out.records = (data.records && typeof data.records === 'object') ? data.records : {};
     out.achievements = Array.isArray(data.achievements) ? data.achievements : [];
-    for (const k of ['money', 'xp', 'level', 'totalCaught', 'totalEarned', 'maxLen', 'clock']) {
+    for (const k of ['money', 'xp', 'level', 'totalCaught', 'totalEarned', 'maxLen', 'clock', 'rigDepth']) {
       if (typeof out[k] !== 'number' || !isFinite(out[k])) out[k] = base[k];
     }
+    // ルアー廃止（spoon/frog/crank）：装備・所持を対応するエサに読み替える
+    const baitIds = new Set(BAITS.map((b) => b.id));
+    const toBait = (id) => (baitIds.has(id) ? id : BAIT_ALIAS[id]);
+    out.gear.bait = toBait(out.gear.bait) || base.gear.bait;
+    out.owned.bait = uniq(out.owned.bait.map(toBait).filter(Boolean));
+    if (!out.owned.bait.includes(out.gear.bait)) out.owned.bait.push(out.gear.bait);
     // 旧セーブ（seed を持たない）は、これまでと同じ湖を保つ
     if (data.seed === undefined || data.seed === null) out.seed = LEGACY_SEED;
     else if (typeof data.seed !== 'number' || !isFinite(data.seed)) out.seed = null;

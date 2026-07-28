@@ -1,13 +1,15 @@
 /* ===========================================================
    HUD / モーダル / 図鑑・ショップ
    =========================================================== */
-import { SPECIES, RARITY, GEAR, GEAR_LABEL, ACHIEVEMENTS, valueOf } from './data.js';
+import { SPECIES, RARITY, GEAR, GEAR_LABEL, ACHIEVEMENTS, valueOf, baitStrengths } from './data.js';
 import { PROFILES, BODY, profileAt, CRUST_SHAPES } from './fish.js';
 import { fmtInt, fmt1, fmtWeight, fmtClock, timeBandLabel, clamp01 } from './util.js';
 import { xpForLevel } from './save.js';
 
 const $ = (id) => document.getElementById(id);
 const JUNK_EMOJI = { boot: '🥾', can: '🥫', weeds: '🌿', driftwood: '🪵' };
+/** 仕掛けウインドウの水柱が表す深さ（m）＝ game.js の RIG_MAX と合わせる */
+const RIG_UI_MAX = 30;
 
 /* ---------------- 魚のシルエット描画 ---------------- */
 export function drawFishIcon(canvas, sp, opts = {}) {
@@ -264,7 +266,7 @@ export class UI {
       money: $('money'), level: $('level'), xpFill: $('xp-fill'), xpText: $('xp-text'),
       gearRod: $('gear-rod'), gearBait: $('gear-bait'),
       clock: $('clock'), dayLabel: $('daylabel'), weatherIcon: $('weather-icon'),
-      weatherName: $('weather-name'), depth: $('depth'), caught: $('caught-count'),
+      weatherName: $('weather-name'), depth: $('depth'), rig: $('rig'), caught: $('caught-count'),
       prompt: $('prompt'), power: $('power-meter'), powerFill: $('power-fill'),
       powerBand: $('power-band'), powerMark: $('power-mark'),
       powerTrack: document.querySelector('.pm-track'), aim: $('aim'),
@@ -273,6 +275,7 @@ export class UI {
       danger: $('danger-flash'), biteAlert: $('bite-alert'), toasts: $('toasts'),
       loading: $('loading'), title: $('title-screen'),
       catchCard: $('catch-card'), shop: $('shop'), journal: $('journal'), pause: $('pause'),
+      rigWin: $('rig-window'),
     };
 
     this._bind();
@@ -286,6 +289,32 @@ export class UI {
     $('btn-card-ok').addEventListener('click', () => g.dismissCatch());
     $('btn-resume').addEventListener('click', () => this.closeAll());
     $('btn-rest').addEventListener('click', () => g.rest());
+    $('btn-rig-close').addEventListener('click', () => this.closeAll());
+    $('rig-minus').addEventListener('click', () => { g.nudgeRigDepth(-1); this.renderRig(); g.audio.reelTick(0.35); });
+    $('rig-plus').addEventListener('click', () => { g.nudgeRigDepth(1); this.renderRig(); g.audio.reelTick(0.35); });
+    /* 水の柱：クリック／ドラッグ／ホイールでタナを決める */
+    const col = $('rig-col');
+    const pick = (ev) => {
+      const r = col.getBoundingClientRect();
+      const t = clamp01((ev.clientY - r.top) / r.height);
+      g.setRigDepth(t * RIG_UI_MAX);
+      this.renderRig();
+    };
+    col.addEventListener('pointerdown', (e) => {
+      col.setPointerCapture(e.pointerId);
+      this._rigDrag = true;
+      pick(e);
+      g.audio.reelTick(0.35);
+    });
+    col.addEventListener('pointermove', (e) => { if (this._rigDrag) pick(e); });
+    col.addEventListener('pointerup', () => { this._rigDrag = false; });
+    col.addEventListener('pointercancel', () => { this._rigDrag = false; });
+    col.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      g.nudgeRigDepth(Math.sign(e.deltaY));
+      this.renderRig();
+      g.audio.reelTick(0.35);
+    }, { passive: false });
     $('btn-reset').addEventListener('click', () => {
       if (confirm('セーブデータを削除して最初からやり直しますか？')) g.resetSave();
     });
@@ -482,6 +511,14 @@ export class UI {
       this.el.depth.textContent = depStr;
       this._last.depth = depStr;
     }
+    // タナ（設定値。水深で頭を打っているときは実効値と「底」を添える）
+    const onBottom = g.rigOnBottom;
+    const rigStr = onBottom ? `${fmt1(g.rigDepth)} m → 底 ${fmt1(g.hudRig)} m` : `${fmt1(g.rigDepth)} m`;
+    if (this._last.rig !== rigStr) {
+      this.el.rig.textContent = rigStr;
+      this.el.rig.classList.toggle('warn', onBottom);
+      this._last.rig = rigStr;
+    }
     const aimStr = g.hudAim > 0 ? `${fmt1(g.hudAim)} m` : '—';
     if (this._last.aim !== aimStr) {
       this.el.aim.textContent = aimStr;
@@ -556,8 +593,9 @@ export class UI {
       } else if (kind === 'line') {
         stats.push(`強度 ×${it.cap.toFixed(2)}`);
       } else {
-        stats.push(`狙う水深 ${it.depth >= 20 ? '底' : it.depth.toFixed(1) + 'm'}`,
-          `アタリ ×${it.attract.toFixed(2)}`, `レア度 ×${it.rare.toFixed(2)}`);
+        stats.push(`得意 ${baitStrengths(it).join('・')}`,
+          `アタリ ×${it.attract.toFixed(2)}`, `レア度 ×${it.rare.toFixed(2)}`,
+          `ゴミ ×${it.junk.toFixed(2)}`);
       }
       div.innerHTML = `
         <div class="ic">${it.icon}</div>
@@ -643,6 +681,59 @@ export class UI {
     this.openModal = 'journal';
   }
 
+  /* ---------------- 仕掛け（タナ） ---------------- */
+  openRig() {
+    // 目盛り（5m ごと）は初回だけ組む
+    const ticks = $('rig-ticks');
+    if (!ticks.childElementCount) {
+      for (let m = 5; m < RIG_UI_MAX; m += 5) {
+        const d = document.createElement('div');
+        d.style.top = `${(m / RIG_UI_MAX) * 100}%`;
+        d.textContent = `${m}m`;
+        ticks.appendChild(d);
+      }
+    }
+    // 開いた時点の狙い先の水深で「底」を描く（開いている間はゲームが止まる）
+    this._rigSpotDepth = this.game.hudDepth > 0 ? this.game.hudDepth : null;
+    this.renderRig();
+    this.el.rigWin.classList.add('open');
+    this.openModal = 'rig';
+  }
+
+  renderRig() {
+    const g = this.game, s = g.state;
+    const set = g.rigDepth;
+    const spot = this._rigSpotDepth;
+    const eff = spot != null ? Math.min(set, Math.max(0.35, spot - 0.35)) : set;
+    const pct = (v) => `${clamp01(v / RIG_UI_MAX) * 100}%`;
+
+    $('rig-hand').style.top = pct(set);
+    $('rig-val').textContent = `${fmt1(set)} m`;
+    $('rig-depth').textContent = spot != null ? `${fmt1(spot)} m` : '—';
+    $('rig-eff').textContent = `${fmt1(eff)} m`;
+    // 底（水深より深い所）を塗る
+    const bed = $('rig-bed');
+    if (spot != null && spot < RIG_UI_MAX) {
+      bed.style.height = `${(1 - clamp01(spot / RIG_UI_MAX)) * 100}%`;
+      bed.style.display = 'flex';
+    } else {
+      bed.style.height = '0';
+      bed.style.display = 'none';
+    }
+    $('rig-note').textContent = spot == null ? '狙う場所を決めるとここに水深が出ます'
+      : eff < set - 0.05 ? `設定が水深より深いので、底べた（${fmt1(eff)} m）になります` : '';
+
+    /* この層にいる魚。図鑑と同じ扱いで、未発見はまとめて「???」の数だけ見せる */
+    const here = SPECIES.filter((sp) => sp.rarity > 0 && eff >= sp.depth[0] && eff <= sp.depth[1]);
+    const known = here.filter((sp) => s.records[sp.id])
+      .sort((a, b) => b.rarity - a.rarity || b.len[1] - a.len[1]);
+    const unknown = here.length - known.length;
+    $('rig-fish').innerHTML = here.length
+      ? known.map((sp) => `<i style="color:${RARITY[sp.rarity].color}">${sp.name}</i>`).join('')
+        + (unknown ? `<i class="unknown">??? ×${unknown}</i>` : '')
+      : '<i class="unknown">この層には居ない</i>';
+  }
+
   openPause() {
     this.renderLakeInfo();
     this.el.pause.classList.add('open');
@@ -650,7 +741,7 @@ export class UI {
   }
 
   closeAll() {
-    for (const k of ['shop', 'journal', 'pause']) this.el[k].classList.remove('open');
+    for (const k of ['shop', 'journal', 'pause', 'rigWin']) this.el[k].classList.remove('open');
     if (this.openModal !== 'catch') this.openModal = null;
     this.game.audio.click();
   }
