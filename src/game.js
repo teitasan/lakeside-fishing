@@ -162,39 +162,25 @@ export class Game {
 
     this.angler = new Angler(this.scene);
 
-    /* 水面のマーカー（狙い点・着水予測）
-       輪だけだと遠くでは水面を寝かせて見るので線に潰れて見えないため、
-       中央に短い縦のピンを立てて、どの距離でも位置が分かるようにしている */
-    const mkMarker = (r0, r1, color, opacity, pinH) => {
+    /* 水面のマーカー（狙い点・着水予測）は水面に置いた輪 */
+    const mkMarker = (r0, r1, color, opacity) => {
       const mat = new THREE.MeshBasicMaterial({
         color, transparent: true, opacity, depthWrite: false, fog: false, side: THREE.DoubleSide,
       });
-      const ringGeo = new THREE.RingGeometry(r0, r1, 36);
-      ringGeo.rotateX(-Math.PI / 2);
-      const g = new THREE.Group();
-      const ring = new THREE.Mesh(ringGeo, mat);
-      ring.renderOrder = 6;
-      const pinGeo = new THREE.CylinderGeometry(r0 * 0.14, r0 * 0.07, pinH, 6);
-      pinGeo.translate(0, pinH * 0.5, 0);
-      const pin = new THREE.Mesh(pinGeo, mat);
-      pin.renderOrder = 6;
-      const knob = new THREE.SphereGeometry(r0 * 0.2, 8, 6);
-      knob.translate(0, pinH, 0);
-      const top = new THREE.Mesh(knob, mat);
-      top.renderOrder = 6;
-      g.add(ring, pin, top);
-      g.visible = false;
-      this.scene.add(g);
-      return { group: g, mat };
+      const geo = new THREE.RingGeometry(r0, r1, 36);
+      geo.rotateX(-Math.PI / 2);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.visible = false;
+      mesh.renderOrder = 6;
+      this.scene.add(mesh);
+      return mesh;
     };
-    // キャスト予測マーカー
-    const pred = mkMarker(0.86, 1.12, 0xffe98a, 0.92, 1.5);
-    this.marker = pred.group;
-    this.markerMat = pred.mat;
-    // 狙い点のマーカー（視線が水面と交わる位置）＝ 画面中央の照準の代わり
-    const aim = mkMarker(0.5, 0.66, 0x9ff0ff, 0.85, 1.15);
-    this.aimMarker = aim.group;
-    this.aimMat = aim.mat;
+    // キャスト予測の輪
+    this.marker = mkMarker(0.86, 1.12, 0xffe98a, 0.92);
+    this.markerMat = this.marker.material;
+    // 狙い点の輪（視線が水面と交わる位置）
+    this.aimMarker = mkMarker(0.5, 0.66, 0x9ff0ff, 0.85);
+    this.aimMat = this.aimMarker.material;
 
     this.ui = new UI(this);
     this.debug = new Debug(this);

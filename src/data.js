@@ -199,7 +199,7 @@ export const SPECIES = [
   },
   {
     id: 'prawn', name: 'テナガエビ', rarity: 1, tags: ['bottom', 'weed'], shape: 'shrimp',
-    len: [4, 14], wc: 0.35, depth: [0.5, 4.5], spawn: 20, times: T.nightish, weather: W.any,
+    len: [8, 16], wc: 1.45, depth: [0.5, 4.5], spawn: 20, times: T.nightish, weather: W.any,
     str: 0.3, sta: 0.4, agg: 0.15, value: 22, perCm: 2.8,
     fight: 'dash',
     colors: { top: '#5b6470', mid: '#a9b3bd', belly: '#e8eaea', fin: '#cfd6d4' },
