@@ -1,15 +1,13 @@
 /* ===========================================================
    HUD / モーダル / 図鑑・ショップ
    =========================================================== */
-import { SPECIES, RARITY, GEAR, GEAR_LABEL, ACHIEVEMENTS, valueOf, baitStrengths } from './data.js';
+import { SPECIES, RARITY, GEAR, GEAR_LABEL, ACHIEVEMENTS, RIG_LAYERS, valueOf, baitStrengths } from './data.js';
 import { PROFILES, BODY, profileAt, CRUST_SHAPES } from './fish.js';
 import { fmtInt, fmt1, fmtWeight, fmtClock, timeBandLabel, clamp01 } from './util.js';
 import { xpForLevel } from './save.js';
 
 const $ = (id) => document.getElementById(id);
 const JUNK_EMOJI = { boot: '🥾', can: '🥫', weeds: '🌿', driftwood: '🪵' };
-/** 仕掛けウインドウの水柱が表す深さ（m）＝ game.js の RIG_MAX と合わせる */
-const RIG_UI_MAX = 30;
 
 /* ---------------- 魚のシルエット描画 ---------------- */
 export function drawFishIcon(canvas, sp, opts = {}) {
@@ -290,31 +288,20 @@ export class UI {
     $('btn-resume').addEventListener('click', () => this.closeAll());
     $('btn-rest').addEventListener('click', () => g.rest());
     $('btn-rig-close').addEventListener('click', () => this.closeAll());
-    $('rig-minus').addEventListener('click', () => { g.nudgeRigDepth(-1); this.renderRig(); g.audio.reelTick(0.35); });
-    $('rig-plus').addEventListener('click', () => { g.nudgeRigDepth(1); this.renderRig(); g.audio.reelTick(0.35); });
-    /* 水の柱：クリック／ドラッグ／ホイールでタナを決める */
+    /* 3 つの層のボタンを作る（クリックで選択） */
     const col = $('rig-col');
-    const pick = (ev) => {
-      const r = col.getBoundingClientRect();
-      const t = clamp01((ev.clientY - r.top) / r.height);
-      g.setRigDepth(t * RIG_UI_MAX);
-      this.renderRig();
-    };
-    col.addEventListener('pointerdown', (e) => {
-      col.setPointerCapture(e.pointerId);
-      this._rigDrag = true;
-      pick(e);
-      g.audio.reelTick(0.35);
-    });
-    col.addEventListener('pointermove', (e) => { if (this._rigDrag) pick(e); });
-    col.addEventListener('pointerup', () => { this._rigDrag = false; });
-    col.addEventListener('pointercancel', () => { this._rigDrag = false; });
-    col.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      g.nudgeRigDepth(Math.sign(e.deltaY));
-      this.renderRig();
-      g.audio.reelTick(0.35);
-    }, { passive: false });
+    for (const L of RIG_LAYERS) {
+      const d = document.createElement('div');
+      d.className = `rig-band ${L.id}`;
+      d.dataset.layer = L.id;
+      d.innerHTML = `<span class="nm">${L.name}</span><span class="mt"></span>`;
+      d.addEventListener('click', () => {
+        g.setRigLayer(L.id);
+        this.renderRig();
+        g.audio.reelTick(0.35);
+      });
+      col.appendChild(d);
+    }
     $('btn-reset').addEventListener('click', () => {
       if (confirm('セーブデータを削除して最初からやり直しますか？')) g.resetSave();
     });
@@ -511,12 +498,10 @@ export class UI {
       this.el.depth.textContent = depStr;
       this._last.depth = depStr;
     }
-    // タナ（設定値。水深で頭を打っているときは実効値と「底」を添える）
-    const onBottom = g.rigOnBottom;
-    const rigStr = onBottom ? `${fmt1(g.rigDepth)} m → 底 ${fmt1(g.hudRig)} m` : `${fmt1(g.rigDepth)} m`;
+    // タナ（層の名前と、いまの場所での実際の深さ）
+    const rigStr = g.hudRig > 0 ? `${g.rigLayer.name} ${fmt1(g.hudRig)} m` : g.rigLayer.name;
     if (this._last.rig !== rigStr) {
       this.el.rig.textContent = rigStr;
-      this.el.rig.classList.toggle('warn', onBottom);
       this._last.rig = rigStr;
     }
     const aimStr = g.hudAim > 0 ? `${fmt1(g.hudAim)} m` : '—';
@@ -683,17 +668,7 @@ export class UI {
 
   /* ---------------- 仕掛け（タナ） ---------------- */
   openRig() {
-    // 目盛り（5m ごと）は初回だけ組む
-    const ticks = $('rig-ticks');
-    if (!ticks.childElementCount) {
-      for (let m = 5; m < RIG_UI_MAX; m += 5) {
-        const d = document.createElement('div');
-        d.style.top = `${(m / RIG_UI_MAX) * 100}%`;
-        d.textContent = `${m}m`;
-        ticks.appendChild(d);
-      }
-    }
-    // 開いた時点の狙い先の水深で「底」を描く（開いている間はゲームが止まる）
+    // 開いた時点の狙い先の水深で深さを計算する（開いている間はゲームが止まる）
     this._rigSpotDepth = this.game.hudDepth > 0 ? this.game.hudDepth : null;
     this.renderRig();
     this.el.rigWin.classList.add('open');
@@ -702,29 +677,25 @@ export class UI {
 
   renderRig() {
     const g = this.game, s = g.state;
-    const set = g.rigDepth;
     const spot = this._rigSpotDepth;
-    const eff = spot != null ? Math.min(set, Math.max(0.35, spot - 0.35)) : set;
-    const pct = (v) => `${clamp01(v / RIG_UI_MAX) * 100}%`;
+    const cur = g.rigLayer;
+    const eff = spot != null ? g.rigDepthFor(spot, cur) : null;
 
-    $('rig-hand').style.top = pct(set);
-    $('rig-val').textContent = `${fmt1(set)} m`;
-    $('rig-depth').textContent = spot != null ? `${fmt1(spot)} m` : '—';
-    $('rig-eff').textContent = `${fmt1(eff)} m`;
-    // 底（水深より深い所）を塗る
-    const bed = $('rig-bed');
-    if (spot != null && spot < RIG_UI_MAX) {
-      bed.style.height = `${(1 - clamp01(spot / RIG_UI_MAX)) * 100}%`;
-      bed.style.display = 'flex';
-    } else {
-      bed.style.height = '0';
-      bed.style.display = 'none';
+    for (const el of document.querySelectorAll('#rig-col .rig-band')) {
+      const L = RIG_LAYERS.find((x) => x.id === el.dataset.layer);
+      el.classList.toggle('on', L.id === cur.id);
+      el.querySelector('.mt').textContent = spot != null
+        ? `${fmt1(g.rigDepthFor(spot, L))} m` : `水深の ${Math.round(L.ratio * 100)}%`;
     }
-    $('rig-note').textContent = spot == null ? '狙う場所を決めるとここに水深が出ます'
-      : eff < set - 0.05 ? `設定が水深より深いので、底べた（${fmt1(eff)} m）になります` : '';
+    $('rig-depth').textContent = spot != null ? `${fmt1(spot)} m` : '—';
+    $('rig-eff').textContent = eff != null ? `${fmt1(eff)} m` : `水深の ${Math.round(cur.ratio * 100)}%`;
+    $('rig-note').textContent = spot == null
+      ? `${cur.desc}。狙う場所を決めると実際の深さが出ます`
+      : `${cur.desc}（水深 ${fmt1(spot)} m の ${Math.round(cur.ratio * 100)}% ＝ ${fmt1(eff)} m）`;
 
     /* この層にいる魚。図鑑と同じ扱いで、未発見はまとめて「???」の数だけ見せる */
-    const here = SPECIES.filter((sp) => sp.rarity > 0 && eff >= sp.depth[0] && eff <= sp.depth[1]);
+    const at = eff ?? 2;
+    const here = SPECIES.filter((sp) => sp.rarity > 0 && at >= sp.depth[0] && at <= sp.depth[1]);
     const known = here.filter((sp) => s.records[sp.id])
       .sort((a, b) => b.rarity - a.rarity || b.len[1] - a.len[1]);
     const unknown = here.length - known.length;

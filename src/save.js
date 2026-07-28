@@ -2,7 +2,7 @@
    セーブデータ（localStorage）
    =========================================================== */
 
-import { BAITS, BAIT_ALIAS } from './data.js';
+import { BAITS, BAIT_ALIAS, RIG_LAYERS } from './data.js';
 
 const KEY = 'lakeside-fishing-save-v1';
 
@@ -23,7 +23,7 @@ export function defaultState() {
     snapped: 0,
     escaped: 0,
     clock: 5.6, // 夜明け前スタート
-    rigDepth: 2.0, // 狙う層（タナ）m。プレイヤーが上下キーで決める
+    rigLayer: 'mid', // 狙う層（タナ）: top|mid|bottom。実際の深さは水深×比率
     seed: null, // 湖のシード（null = 起動時にランダムで決める）
     gear: { rod: 'bamboo', line: 'nylon', bait: 'worm' },
     owned: { rod: ['bamboo'], line: ['nylon'], bait: ['worm'] },
@@ -63,9 +63,15 @@ export function load() {
     };
     out.records = (data.records && typeof data.records === 'object') ? data.records : {};
     out.achievements = Array.isArray(data.achievements) ? data.achievements : [];
-    for (const k of ['money', 'xp', 'level', 'totalCaught', 'totalEarned', 'maxLen', 'clock', 'rigDepth']) {
+    for (const k of ['money', 'xp', 'level', 'totalCaught', 'totalEarned', 'maxLen', 'clock']) {
       if (typeof out[k] !== 'number' || !isFinite(out[k])) out[k] = base[k];
     }
+    // タナが m 指定だった頃のセーブ → 3 択に読み替える（保存側の値だけを見る）
+    if (!RIG_LAYERS.some((l) => l.id === data.rigLayer)) {
+      const d = typeof data.rigDepth === 'number' ? data.rigDepth : null;
+      out.rigLayer = d === null ? 'mid' : d <= 3 ? 'top' : d <= 12 ? 'mid' : 'bottom';
+    }
+    delete out.rigDepth;
     // ルアー廃止（spoon/frog/crank）：装備・所持を対応するエサに読み替える
     const baitIds = new Set(BAITS.map((b) => b.id));
     const toBait = (id) => (baitIds.has(id) ? id : BAIT_ALIAS[id]);

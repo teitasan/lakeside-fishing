@@ -392,7 +392,7 @@ F.runTimer = rand(<span class="n">1.4</span>, <span class="n">3.2</span>)       
   × sp.times[時間帯]                                    <span class="cm">// ③ 朝/昼/夕/夜</span>
   × sp.weather[天候]                                    <span class="cm">// ④ 晴/曇/雨</span>
   × エサ相性                                            <span class="cm">// ⑤ タグの平均</span>
-  × (<span class="n">0.08</span> + <span class="n">1.6</span> × exp(−(タナ − 生息層中央)² / (2σ²)))       <span class="cm">// ⑥ タナの一致</span>
+  × (<span class="n">0.08</span> + <span class="n">1.6</span> × exp(−(タナの深さ − 生息層中央)² / (2σ²)))   <span class="cm">// ⑥ タナの一致</span>
   × (レア度≧3 なら bait.rare) × rod.attract             <span class="cm">// ⑦ レア補正</span>
   × レベル解禁（エピック/レジェンドのみ）
 
@@ -403,11 +403,12 @@ depth &gt; d1 + <span class="n">3</span>             → <span class="n">0.18</s
 それ以外（浅すぎ）           → <span class="n">0.09</span>
 
 <span class="cm">// ⑥ σ = max(2.0, (d1 − d0) × 0.62)</span>
-<span class="cm">//    タナ = min(プレイヤー設定, max(0.35, 水深 − 0.35))  ← 設定より浅い所では底べたになる</span>
-<span class="cm">//    合っていれば ×1.68 / 完全に外すと ×0.08（21 倍差）。エサではなくタナで層を決める</span>
+<span class="cm">//    タナの深さ = clamp(着水地点の水深 × 層の比率, 0.35, 水深 − 0.35)</span>
+<span class="cm">//    層の比率：表層 0.15 / 中層 0.50 / 底層 0.88（プレイヤーが 3 択で選ぶ）</span>
+<span class="cm">//    合っていれば ×1.68 / 完全に外すと ×0.08（21 倍差）。エサではなく層で決める</span>
 
-<span class="cm">// ⑦ レベル解禁（伝説タグ以外は下限 0.022 = 解禁前でも極低確率で掛かる）</span>
-レア度4（エピック）  × max(<span class="n">0.022</span>, clamp01((Lv − <span class="n">2</span>) / <span class="n">5</span>))  <span class="cm">// Lv3 から出始め Lv7 で全開</span>
+<span class="cm">// ⑦ レベル解禁（伝説タグ以外は下限 0.013 = 解禁前でも極低確率で掛かる）</span>
+レア度4（エピック）  × max(<span class="n">0.013</span>, clamp01((Lv − <span class="n">2</span>) / <span class="n">5</span>))  <span class="cm">// Lv3 から出始め Lv7 で全開</span>
 レア度5（レジェンド）× clamp01((Lv − <span class="n">5</span>) / <span class="n">6</span>)           <span class="cm">// 湖の主・白龍魚は tags に legend → 下限なし</span></pre>
 
     <div class="note">
@@ -427,26 +428,30 @@ depth &gt; d1 + <span class="n">3</span>             → <span class="n">0.18</s
 
     <h3>タナ（狙う層）を決める</h3>
     <p>
-      エサが沈む深さは<b>プレイヤーが決めます</b>（<kbd>E</kbd> で仕掛けウインドウ → 水の柱をクリック／ドラッグ。<kbd>↑</kbd><kbd>↓</kbd>とホイールでも微調整）。
-      エサ側は層を持たないので、<b>「どのエサを」×「どの層に」</b>の組み合わせが、そのアタリで何が食いつくかを決めます。
+      エサを入れる層は<b>プレイヤーが 3 択で選びます</b>（<kbd>E</kbd> の仕掛けウインドウ。マウスでクリック、<kbd>↑</kbd><kbd>↓</kbd>でも可）。
+      実際の深さは<b>着水地点の水深に対する比率</b>で自動的に決まるので、浅場でも深場でも同じ選択がそのまま「浅い／真ん中／底」を意味します。
+      エサ側は層を持たないため、<b>「どのエサを」×「どの層に」</b>が、そのアタリで何が食いつくかを決めます。
     </p>
     <div class="tw"><table>
-      <thead><tr><th class="l">項目</th><th class="l">値</th><th class="l">補足</th></tr></thead>
+      <thead><tr><th class="l">層</th><th class="num">比率</th><th class="num">水深 3 m</th><th class="num">水深 18 m</th><th class="num">水深 25 m</th><th class="l">性格</th></tr></thead>
       <tbody>
-        <tr><td class="l name">範囲</td><td class="l num">0.5 〜 30 m</td><td class="l">湖の最深部（約 30 m）まで。セーブされる</td></tr>
-        <tr><td class="l name">刻み</td><td class="l num">クリックは 0.25 m / ▲▼ と ↑↓ は 3 m 未満 0.25 m・8 m 未満 0.5 m・それ以上 1 m</td>
-            <td class="l">浅いタナは細かく、深いタナは粗く動く</td></tr>
-        <tr><td class="l name">底べた</td><td class="l num">min(設定, 水深 − 0.35 m)</td>
-            <td class="l">設定が水深より深いと底に着く。HUD が「→ 底 ○ m」に変わる</td></tr>
-        <tr><td class="l name">変更できる状態</td><td class="l num">キャスト前（idle）だけ</td>
-            <td class="l">投げてからは結び直せない。<b>クリックで回収</b>してから変える</td></tr>
+        <tr><td class="l name">表層</td><td class="num">15%</td><td class="num">0.45 m</td><td class="num">2.7 m</td><td class="num">3.8 m</td>
+            <td class="l">小物と、浅い層を回る魚。ゴミは少ない</td></tr>
+        <tr><td class="l name">中層</td><td class="num">50%</td><td class="num">1.5 m</td><td class="num">9.0 m</td><td class="num">12.5 m</td>
+            <td class="l">広く当たる無難な層。深場では鱒・ナマズ系</td></tr>
+        <tr><td class="l name">底層</td><td class="num">88%</td><td class="num">2.6 m</td><td class="num">15.8 m</td><td class="num">22.0 m</td>
+            <td class="l">底物と大物。<b>ゴミも増える</b></td></tr>
       </tbody>
+      <tfoot><tr><td colspan="6" class="l">深さは <code>clamp(水深 × 比率, 0.35, 水深 − 0.35)</code>。底に埋まらないよう 0.35 m の余裕を残します。
+        <b>キャスト後は変更できません</b>（クリックで回収してから結び直す）。選択はセーブされます。</td></tr></tfoot>
     </table></div>
-    <p class="src">src/game.js — rigDepth / rigDepthAt() / setRigDepth() / _openRig() / src/ui.js — openRig()</p>
+    <p class="src">src/data.js — RIG_LAYERS / src/game.js — rigLayer / rigDepthFor() / _openRig() / src/ui.js — openRig()</p>
     <div class="note">
-      魚の生息層は図鑑（未発見でも「水深 ○〜○ m」が見えます）と下の魚データ表で分かります。
+      仕掛けウインドウには<b>その場所での実際の深さ</b>と<b>その層にいる魚</b>（未発見は <code>??? ×n</code>）が出ます。
       <b>タナを合わせた魚は重み ×1.68、完全に外した魚は ×0.08</b> なので、
-      同じ場所・同じエサでもタナだけで釣れる魚が入れ替わります。
+      同じ場所・同じエサでも層を変えるだけで釣れる魚が入れ替わります。
+      実測（水深 18 m・夕・くもり・Lv12 の 1 位）：表層＝ナマズ、中層＝ナマズ、底層＝ビワマス。
+      イクラなら中層でビワマス 22%、底層で 31%。
     </div>
 
     <h3>アタリまでの流れとタイミング</h3>
@@ -484,7 +489,7 @@ depth &gt; d1 + <span class="n">3</span>             → <span class="n">0.18</s
         78 m 以上離れる／水深 0.35 m 未満に乗り上げると 26〜58 m 先へ入れ替わります。</p></div>
       <div class="card tight"><h4>ただし条件は違う</h4><p>泳いでいる魚の抽選には<b>エサ・タナ・ロッド・レベル解禁が掛かりません</b>。
         つまり Lv1 でも<b>レジェンドが泳いでいるのは見えます</b>。アタリの抽選ではレア度 4 が Lv3〜7、
-        レア度 5 が Lv6〜11 で解禁されますが、<b>伝説（湖の主・白龍魚）以外は解禁前も重み 0.022 で残る</b>ので、
+        レア度 5 が Lv6〜11 で解禁されますが、<b>伝説（湖の主・白龍魚）以外は解禁前も重み 0.013 で残る</b>ので、
         Lv1 でもエピックが掛かることがあります。</p></div>
     </div>
 
@@ -513,12 +518,12 @@ depth &gt; d1 + <span class="n">3</span>             → <span class="n">0.18</s
     <h4>ゴミが釣れる確率</h4>
     <pre>P(ゴミ) = <span class="n">0.085</span> × bait.junk
         × (水深 &lt; <span class="n">1.4</span> m ? <span class="n">1.8</span> : <span class="n">1</span>)
-        × (タナが底べた ? <span class="n">1.5</span> : <span class="n">0.55</span>)      <span class="cm">// ゴミは底に沈んでいる</span>
+        × (底層 ? <span class="n">1.5</span> : <span class="n">0.55</span>)              <span class="cm">// ゴミは底に沈んでいる</span>
         × (総釣果 &lt; 3 匹 ? <span class="n">0.3</span> : <span class="n">1</span>)</pre>
     <p>
-      ミミズ（junk 1.0）を底べたにすると 12.8%、同じミミズを中層に浮かせると 4.7%。
-      秘伝の撒き餌（junk 0.25）なら底でも 3.2% です。ゴミは泳いで来ないのでその場で即・前アタリになります。
-      <b>底を釣ると大物とゴミが同時に増える</b>のが、タナを浅く取る動機になります。
+      ミミズ（junk 1.0）で底層なら 12.8%、同じミミズを中層・表層にすると 4.7%。
+      秘伝の撒き餌（junk 0.25）なら底層でも 3.2% です。ゴミは泳いで来ないのでその場で即・前アタリになります。
+      <b>底層は大物とゴミが同時に増える</b>のが、層を上げる動機になります。
     </p>
   </section>
 
@@ -571,7 +576,7 @@ p    = <span class="n">2.1</span> − min(<span class="n">1.2</span>, bait.rare 
     <h3>エサ</h3>
     <p>
       <b>attract</b>＝アタリの速さ、<b>rare</b>＝レア度 3 以上の重み＆サイズ補正、<b>junk</b>＝ゴミ率の倍率、<b>aff</b>＝タグ別の食いつき。
-      <b>エサは層を持ちません</b>（狙う層＝タナは <kbd>E</kbd> の仕掛けウインドウで別に決めます）。
+      <b>エサは層を持ちません</b>（狙う層＝タナは <kbd>E</kbd> の仕掛けウインドウで 表層／中層／底層 の 3 択で決めます）。
       ルアーは<b>投げて放置する操作と噛み合わない</b>ため廃止し、すべて置き餌・生き餌に置き換えました。
     </p>
     <div class="tw" id="baitTable"></div>
@@ -737,7 +742,7 @@ y(t) = lerp(先端, 着水点, t) − sin(πt) × min(距離×<span class="n">0.
     <div class="grid c2">
       <div class="card tight"><h4>ドロップオフ</h4><p>岸線からすぐ落ち込む急深型です（岸から 1 m で約 2 m、8 m で約 8 m）。<b>浅場の魚は岸すぐ、深場の魚は遠投</b>で狙い分けます。キャスト中の予測リングと水深表示がそのまま指標になります。</p></div>
       <div class="card tight"><h4>深い淵（ホール）</h4><p>桟橋から見て左右どちらかの前方、岸から 26〜36 m 内側に半径 30 m。<b>必ず水深 24 m 前後</b>になるよう掘る量が決まるので、どの湖でもレジェンドの層（湖の主 14〜28 m / 白龍魚 17〜30 m）が成立します。</p></div>
-      <div class="card tight"><h4>藻場</h4><p>淵の反対側、岸から 14〜24 m 内側。<b>必ず水深 2.5 m 前後</b>。weed タグ（ライギョ・ブルーギル・バス）をタナ 1〜2 m で狙う場所。葦が密生します。</p></div>
+      <div class="card tight"><h4>藻場</h4><p>淵の反対側、岸から 14〜24 m 内側。<b>必ず水深 2.5 m 前後</b>。weed タグ（ライギョ・ブルーギル・バス）を中層〜底層で狙う場所（水深 2.5 m なので底層でも 2.2 m）。葦が密生します。</p></div>
       <div class="card tight"><h4>歩ける範囲</h4><p>地形高さ <b>−0.55 m</b> まで（水深 0.55 m まで）入れます。勾配 1.5 超の急斜面は登れません。中心から 460 m が世界の端。</p></div>
     </div>
   </section>
@@ -788,7 +793,7 @@ y(t) = lerp(先端, 着水点, t) − sin(πt) × min(距離×<span class="n">0.
 
 <script type="module">
 import {
-  SPECIES, RARITY, RODS, LINES, BAITS, ACHIEVEMENTS, baitStrengths, TAG_LABEL,
+  SPECIES, RARITY, RODS, LINES, BAITS, ACHIEVEMENTS, RIG_LAYERS, baitStrengths, TAG_LABEL,
   FIGHT_PATTERNS, fightPattern, weightOf, valueOf, xpOf,
 } from './src/data.js';
 import { xpForLevel } from './src/save.js';
@@ -1145,12 +1150,13 @@ function baitAffinity(sp, bait) {
   for (const t of sp.tags) if (bait.aff[t] !== undefined) { sum += bait.aff[t]; n++; }
   return n ? sum / n : 1;
 }
-function biteWeights({ depth, hour, weather, baitId, rodId, level, rig }) {
+function biteWeights({ depth, hour, weather, baitId, rodId, level, layer }) {
   const band = timeBand(hour);
   const bait = BAITS.find((b) => b.id === baitId);
   const rod = RODS.find((r) => r.id === rodId);
-  // タナ（プレイヤー設定）は水深で頭を打つ＝底べた
-  const baitDepth = Math.min(rig, Math.max(0.35, depth - 0.35));
+  // タナの深さ＝水深 × 層の比率（底に埋まらないよう余裕を残す）
+  const L = RIG_LAYERS.find((x) => x.id === layer) || RIG_LAYERS[1];
+  const baitDepth = clamp(depth * L.ratio, 0.35, Math.max(0.35, depth - 0.35));
   const rows = FISH.map((sp) => {
     let w = sp.spawn;
     const parts = {};
@@ -1166,10 +1172,10 @@ function biteWeights({ depth, hour, weather, baitId, rodId, level, rig }) {
     parts.layer = 0.08 + 1.6 * Math.exp(-((baitDepth - mid) ** 2) / (2 * spread * spread));
     parts.rare = sp.rarity >= 3 ? bait.rare : 1;
     parts.attract = rod.attract;
-    // レベル解禁：伝説タグ以外は解禁前も 0.022 の重みで残る（ゲーム本体の LV_FLOOR）
+    // レベル解禁：伝説タグ以外は解禁前も 0.013 の重みで残る（ゲーム本体の LV_FLOOR）
     const gate = (from, span) => {
       const g = clamp01((level - from) / span);
-      return sp.tags.includes('legend') ? g : Math.max(0.022, g);
+      return sp.tags.includes('legend') ? g : Math.max(0.013, g);
     };
     parts.lv = sp.rarity === 4 ? gate(2, 5) : sp.rarity === 5 ? gate(5, 6) : 1;
     w = sp.spawn * fit * parts.time * parts.weather * parts.aff * parts.layer * parts.rare * parts.attract * parts.lv;
@@ -1178,12 +1184,12 @@ function biteWeights({ depth, hour, weather, baitId, rodId, level, rig }) {
   return { rows, bait, rod, baitDepth, band };
 }
 
-const rollState = { depth: 18, hour: 6, weather: 'clear', bait: 'worm', rod: 'bamboo', level: 1, caught: 10, rig: 6 };
+const rollState = { depth: 18, hour: 6, weather: 'clear', bait: 'worm', rod: 'bamboo', level: 1, caught: 10, layer: 'mid' };
 function renderRollCtl() {
   const c = document.getElementById('rollCtl');
   c.innerHTML = '';
   c.appendChild(ctlRange('水深（m）', 'rd', 0.5, 34, 0.5, rollState.depth, (v) => f1(v) + 'm', (v) => { rollState.depth = v; runRoll(); }));
-  c.appendChild(ctlRange('タナ（狙う層 m）', 'rt', 0.5, 30, 0.25, rollState.rig, (v) => f1(v) + 'm', (v) => { rollState.rig = v; runRoll(); }));
+  c.appendChild(ctlSelect('タナ（狙う層）', 'rt', RIG_LAYERS.map((l) => [l.id, `${l.name}（水深の ${Math.round(l.ratio * 100)}%）`]), rollState.layer, (v) => { rollState.layer = v; runRoll(); }));
   c.appendChild(ctlRange('時刻', 'rh', 0, 23.5, 0.5, rollState.hour, (v) => String(Math.floor(v)).padStart(2, '0') + ':' + (v % 1 ? '30' : '00'), (v) => { rollState.hour = v; runRoll(); }));
   c.appendChild(ctlSelect('天候', 'rw', Object.entries(WEATHERS).map(([k, w]) => [k, w.name]), rollState.weather, (v) => { rollState.weather = v; runRoll(); }));
   c.appendChild(ctlSelect('エサ', 'rb', BAITS.map((b) => [b.id, `${b.icon} ${b.name}（得意 ${baitStrengths(b, 2).join('・')}）`]), rollState.bait, (v) => { rollState.bait = v; runRoll(); }));
@@ -1193,10 +1199,11 @@ function renderRollCtl() {
 function runRoll() {
   const { rows, bait, rod, baitDepth, band } = biteWeights({
     depth: rollState.depth, hour: rollState.hour, weather: rollState.weather,
-    baitId: rollState.bait, rodId: rollState.rod, level: rollState.level, rig: rollState.rig,
+    baitId: rollState.bait, rodId: rollState.rod, level: rollState.level, layer: rollState.layer,
   });
   const total = rows.reduce((a, r) => a + r.w, 0);
-  const junkP = 0.085 * bait.junk * (rollState.depth < 1.4 ? 1.8 : 1) * (rollState.caught < 3 ? 0.3 : 1);
+  const junkP = 0.085 * bait.junk * (rollState.depth < 1.4 ? 1.8 : 1)
+    * (rollState.layer === 'bottom' ? 1.5 : 0.55) * (rollState.caught < 3 ? 0.3 : 1);
   const bandName = { dawn: '朝', day: '昼', dusk: '夕', night: '夜' }[band];
   const attract = bait.attract * rod.attract * WEATHERS[rollState.weather].bite;
   const waitLo = 2.2 / attract * (rollState.depth < 0.9 ? 1.7 : 1);
@@ -1204,7 +1211,7 @@ function runRoll() {
 
   document.getElementById('rollInfo').innerHTML =
     `時間帯タグ <b style="color:var(--gold)">${band}（${bandName}）</b>　/
-     エサが実際にいる層 <b style="color:var(--gold)">${f1(baitDepth)} m</b>${baitDepth < rollState.rig - 0.05 ? '（底に着いている）' : ''}（水深 ${f1(rollState.depth)} m）　/
+     タナ <b style="color:var(--gold)">${RIG_LAYERS.find((x) => x.id === rollState.layer).name} ${f1(baitDepth)} m</b>（水深 ${f1(rollState.depth)} m の ${Math.round(RIG_LAYERS.find((x) => x.id === rollState.layer).ratio * 100)}%）　/
      アタリまで <b style="color:var(--gold)">${f1(waitLo)}〜${f1(waitHi)} 秒</b>（+接近 3〜9 秒）　/
      ゴミ率 <b style="color:var(--gold)">${(junkP * 100).toFixed(1)}%</b>`;
 
@@ -1329,7 +1336,7 @@ function runRoll() {
       ${cell(sp.weather.clear)}${cell(sp.weather.cloudy)}${cell(sp.weather.rain)}
       <td class="num">${sp.rarity >= 4
         ? (sp.rarity === 4 ? 'Lv3〜7' : 'Lv6〜11')
-          + (sp.tags.includes('legend') ? '' : '<br><span style="opacity:.55;font-size:10px">前も 0.022</span>')
+          + (sp.tags.includes('legend') ? '' : '<br><span style="opacity:.55;font-size:10px">前も 0.013</span>')
         : '—'}</td>
     </tr>`).join('');
   document.getElementById('spTable2').innerHTML = `<table><thead><tr>

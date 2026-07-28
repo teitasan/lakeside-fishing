@@ -490,6 +490,16 @@ export const BAITS = [
   },
 ];
 
+/* ===========================================================
+   タナ（狙う層）— 3 択。実際の深さは着水地点の水深に対する比率で決まる
+   =========================================================== */
+export const RIG_LAYERS = [
+  { id: 'top', name: '表層', ratio: 0.15, desc: '水面直下。小物と、水面を意識する魚' },
+  { id: 'mid', name: '中層', ratio: 0.5, desc: '真ん中。回遊してくる魚に広く当たる' },
+  { id: 'bottom', name: '底層', ratio: 0.88, desc: '底べた。大物と底モノ。ゴミも増える' },
+];
+export const rigLayerOf = (id) => RIG_LAYERS.find((l) => l.id === id) || RIG_LAYERS[1];
+
 /** 旧セーブ（ルアー）からの読み替え */
 export const BAIT_ALIAS = { spoon: 'roe', frog: 'shrimp', crank: 'minnow' };
 

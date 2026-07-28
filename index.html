@@ -102,7 +102,7 @@
       <div class="title-keys">
         <div><kbd>マウス</kbd>で狙う（<b>見下ろすと近く／水平で遠く</b>）。水面の輪が狙い点</div>
         <div><kbd>クリック</kbd>長押し → メーターの<b>緑の帯</b>で離すと狙い通りに落ちる</div>
-        <div><kbd>E</kbd>で<b>タナ（狙う層）</b>を決める。エサとタナの組み合わせで釣れる魚が変わる</div>
+        <div><kbd>E</kbd>で<b>タナ</b>を<b>表層／中層／底層</b>から選ぶ。エサ × 層で釣れる魚が変わる</div>
         <div><kbd>WASD</kbd> で岸を歩いてポイントを探す（<kbd>ホイール</kbd>を手前まで回すと<b>一人称</b>）</div>
         <div>ウキが沈んだら すぐに<kbd>クリック</kbd>で アワセ！</div>
         <div>ヒット後は <kbd>押し続けて巻く</kbd> / <kbd>離してテンションを抜く</kbd></div>
@@ -149,7 +149,7 @@
         <button class="tab" data-tab="bait">エサ</button>
       </nav>
       <div class="shop-list" id="shop-list"></div>
-      <footer class="shop-foot">上位ロッドは<b>レベル</b>で解禁されます。エサは<b>どの魚が食いつくか</b>を変えます（狙う層＝<b>タナ</b>は <b>E</b> キーの仕掛けウインドウで別に決めます）。</footer>
+      <footer class="shop-foot">上位ロッドは<b>レベル</b>で解禁されます。エサは<b>どの魚が食いつくか</b>を変えます（狙う層＝<b>タナ</b>は <b>E</b> キーのウインドウで 表層／中層／底層 から選びます）。</footer>
     </div>
   </div>
 
@@ -170,24 +170,16 @@
   <div id="rig-window" class="modal">
     <div class="card small">
       <h2>🎣 仕掛け</h2>
-      <p class="rig-lead">エサを沈める深さ（<b>タナ</b>）を決めます。水の柱を<b>クリック／ドラッグ</b>。</p>
+      <p class="rig-lead">どの層にエサを入れるかを選びます。深さは<b>着水地点の水深から自動</b>で決まります。</p>
       <div class="rig-main">
-        <div class="rig-col" id="rig-col">
-          <div class="rig-bed" id="rig-bed"><span>底</span></div>
-          <div class="rig-hand" id="rig-hand"><i></i><b id="rig-val">2.0 m</b></div>
-          <div class="rig-ticks" id="rig-ticks"></div>
-        </div>
+        <div class="rig-col" id="rig-col"></div>
         <div class="rig-side">
           <div class="rig-row"><span>いまの水深</span><b id="rig-depth">-- m</b></div>
-          <div class="rig-row"><span>タナ</span><b id="rig-eff">-- m</b></div>
+          <div class="rig-row"><span>エサが入る深さ</span><b id="rig-eff">-- m</b></div>
           <div class="rig-note" id="rig-note"></div>
           <div class="rig-fishhead">この層にいる魚</div>
           <div class="rig-fish" id="rig-fish"></div>
         </div>
-      </div>
-      <div class="rig-btns">
-        <button class="btn ghost" id="rig-minus">▲ 浅く</button>
-        <button class="btn ghost" id="rig-plus">▼ 深く</button>
       </div>
       <button id="btn-rig-close" class="btn">これで釣る <small>(E / Esc)</small></button>
     </div>

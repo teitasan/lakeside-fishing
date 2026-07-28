@@ -396,7 +396,7 @@ ${kv('dock local', (() => { const p = t._dockLocal(g.pos.x, g.pos.z); return `${
 ${kv('yaw/pitch', `${g.yaw.toFixed(2)} / ${g.pitch.toFixed(2)}`)}${kv('move', fmt2(g.moveAmt))}
 <hr>${kv('state', `<b class="hl">${g.fs}</b>`)}${kv('t', fmt1(g.stateTime) + 's')}
 ${kv('bite in', g.fs === 'wait' ? fmt1(Math.max(0, g.biteTimer)) + 's' : '—')}${kv('approach', g.hookFish ? fmt1(g.approachT) + 's' : '—')}
-${kv('depth', fmt1(g.hudDepth) + ' m')}${kv('タナ 設定/実効', fmt1(g.rigDepth) + ' / ' + fmt1(g.hudRig) + ' m')}
+${kv('depth', fmt1(g.hudDepth) + ' m')}${kv('タナ', g.rigLayer.name + ' ' + fmt1(g.hudRig) + ' m')}
 ${kv('charge', fmt2(g.charge))}${kv('cast dist', fmt1(g.castDist) + ' m')}
 ${kv('line hit', this.lineObstruct ? `<span class="bad">${this.lineObstruct}</span>` : 'clear')}${kv('cast warn', g.fs === 'charge' && g.castObstruction ? `<span class="bad">${g.castObstruction}</span>` : '—')}
 ${kv('hooked', g.hookFish ? `${g.hookFish.species.name} ${fmt1(g.hookFish.length)}cm` : '—')}

@@ -13,7 +13,7 @@ import { Debug } from './debug.js';
 import { AudioEngine } from './audio.js';
 import * as Save from './save.js';
 import {
-  REAL_FISH, JUNK, GEAR, ACHIEVEMENTS,
+  REAL_FISH, JUNK, GEAR, ACHIEVEMENTS, RIG_LAYERS, rigLayerOf,
   weightOf, valueOf, xpOf, rollLength, fightPattern,
 } from './data.js';
 import {
@@ -32,11 +32,8 @@ const HOURS_PER_SEC = 24 / 720;   // 実時間12分で1日
 const MAX_LINE = 62;
 const EYE_H = 1.62;
 /* レベル解禁前でも残る重みの下限（伝説タグの魚は対象外＝完全に解禁待ち）
-   0.022 = Lv1・深い淵の夜で エピックが約 1%（100 回のアタリに 1 回） */
-const LV_FLOOR = 0.022;
-/* タナ（狙う層）の可変範囲 m。湖の最深部は 30m 前後 */
-const RIG_MIN = 0.5;
-const RIG_MAX = 30;
+   0.013 = Lv1・深い淵の底層・夜で エピックが約 1%（100 回のアタリに 1 回） */
+const LV_FLOOR = 0.013;
 /* カメラ距離（三人称）。CAM_MIN からさらに手前へ回すと一人称 */
 const CAM_MIN = 1.6;
 const CAM_MAX = 9;
@@ -261,12 +258,16 @@ export class Game {
 
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Space') e.preventDefault();
-      // 仕掛けウインドウを開いている間は上下キーで微調整（押しっぱなし可）
+      // 仕掛けウインドウ中は上下キーでも層を選べる
       if (this.ui.openModal === 'rig' && (e.code === 'ArrowUp' || e.code === 'ArrowDown')) {
         e.preventDefault();
-        this.nudgeRigDepth(e.code === 'ArrowDown' ? 1 : -1);
-        this.ui.renderRig();
-        this.audio.reelTick(0.35);
+        const i = RIG_LAYERS.findIndex((l) => l.id === this.rigLayer.id);
+        const next = RIG_LAYERS[clamp(i + (e.code === 'ArrowDown' ? 1 : -1), 0, RIG_LAYERS.length - 1)];
+        if (next.id !== this.rigLayer.id) {
+          this.setRigLayer(next.id);
+          this.ui.renderRig();
+          this.audio.reelTick(0.35);
+        }
         return;
       }
       if (e.repeat) return;
@@ -1074,21 +1075,27 @@ export class Game {
     return this.water.surfaceY(x, z);
   }
 
-  /* ---------------- タナ（狙う層） ---------------- */
-  /** 設定値。エサとは独立で、プレイヤーが上下キー / Shift+ホイールで決める */
-  get rigDepth() {
-    return clamp(this.state.rigDepth ?? 2, RIG_MIN, RIG_MAX);
+  /* ---------------- タナ（狙う層） ----------------
+     表層 / 中層 / 底層 の 3 択。実際の深さは着水地点の水深に対する比率で
+     自動的に決まるので、場所を移っても釣り分けの意味が変わらない */
+  get rigLayer() {
+    return rigLayerOf(this.state.rigLayer);
   }
 
-  /** その場所で実際にエサが届く層（水深で頭を打つ＝底べた） */
+  /** その場所でエサが実際に入る深さ（m） */
   rigDepthAt(x, z) {
-    const d = this.terrain.depthAt(x, z);
-    return clamp(Math.min(this.rigDepth, Math.max(0.35, d - 0.35)), 0.35, RIG_MAX);
+    return this.rigDepthFor(this.terrain.depthAt(x, z));
   }
 
-  /** 底に着いている（設定より浅い所にエサがある）か */
+  /** 水深 d の場所での深さ。底に埋まらないよう 0.35m の余裕を残す */
+  rigDepthFor(d, layer = this.rigLayer) {
+    if (!(d > 0)) return 0.35;
+    return clamp(d * layer.ratio, 0.35, Math.max(0.35, d - 0.35));
+  }
+
+  /** 底べた（ゴミが増える層）か */
   get rigOnBottom() {
-    return this.hudRig < this.rigDepth - 0.05;
+    return this.rigLayer.id === 'bottom';
   }
 
   /** 仕掛けウインドウ（E）。投げてしまったら結び直せないので、キャスト前だけ */
@@ -1104,19 +1111,10 @@ export class Game {
     this.audio.click();
   }
 
-  /** m 指定（ウインドウのクリック・ドラッグ用）。0.25m 刻みに丸める */
-  setRigDepth(v) {
-    const next = clamp(Math.round(v / 0.25) * 0.25, RIG_MIN, RIG_MAX);
-    if (next === this.state.rigDepth) return;
-    this.state.rigDepth = next;
+  setRigLayer(id) {
+    if (!RIG_LAYERS.some((l) => l.id === id) || this.state.rigLayer === id) return;
+    this.state.rigLayer = id;
     this.saveState();
-  }
-
-  /** dir: +1 で深く / −1 で浅く。浅い側は細かく、深い側は粗く動かす */
-  nudgeRigDepth(dir) {
-    const cur = this.rigDepth;
-    const step = cur < 3 ? 0.25 : cur < 8 ? 0.5 : 1;
-    this.setRigDepth(cur + dir * step);
   }
 
   get baitY() {
@@ -1157,7 +1155,7 @@ export class Game {
         this.marker.visible = false;
         ui.showPower(false);
         ui.showFight(false);
-        ui.setPrompt(`<b>水面の輪で狙い</b>、長押しして<b>目印で離す</b>　/　<b>E</b> でタナ ${fmt1(this.rigDepth)}m`);
+        ui.setPrompt(`<b>水面の輪で狙い</b>、長押しして<b>目印で離す</b>　/　<b>E</b> でタナ（いま ${this.rigLayer.name}）`);
         break;
       }
 
@@ -1412,8 +1410,7 @@ export class Game {
     }
     const d = this.terrain.depthAt(this.bobber.x, this.bobber.z);
     const bd = this.rigDepthAt(this.bobber.x, this.bobber.z);
-    const tana = bd < this.rigDepth - 0.05 ? `タナ ${fmt1(bd)}m（底）` : `タナ ${fmt1(bd)}m`;
-    return `アタリを待つ…（水深 ${fmt1(d)}m / ${tana}）　<b>クリック</b>で回収`;
+    return `アタリを待つ…（水深 ${fmt1(d)}m / ${this.rigLayer.name} ${fmt1(bd)}m）　<b>クリック</b>で回収`;
   }
 
   /* ---------------- 着水 ---------------- */
@@ -1457,11 +1454,10 @@ export class Game {
     const depth = this.terrain.depthAt(x, z);
     const baitDepth = -this.baitY;
 
-    /* ゴミ抽選：ゴミは底に沈んでいるものなので、タナを底べたにすると増え、
-       中層に浮かせると減る（タナを選ぶ意味をゴミ側にも持たせる） */
-    const onBottom = baitDepth >= depth - 0.5;
+    /* ゴミ抽選：ゴミは底に沈んでいるものなので、底層だと増え、
+       表層・中層では減る（タナを選ぶ意味をゴミ側にも持たせる） */
     const junkP = 0.085 * this.bait.junk * (depth < 1.4 ? 1.8 : 1)
-      * (onBottom ? 1.5 : 0.55) * (this.state.totalCaught < 3 ? 0.3 : 1);
+      * (this.rigOnBottom ? 1.5 : 0.55) * (this.state.totalCaught < 3 ? 0.3 : 1);
     let sp = null;
     if (Math.random() < junkP) {
       sp = pick(JUNK);
