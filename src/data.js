@@ -408,38 +408,38 @@ export const JUNK = SPECIES.filter((s) => s.rarity === 0);
 
 export const RODS = [
   {
-    id: 'bamboo', name: '竹の釣り竿', icon: '🎣', price: 0, level: 1,
+    id: 'bamboo', name: '竹の釣り竿', icon: 'rod-bamboo', price: 0, level: 1,
     reel: 0.85, power: 1.0, attract: 1.0,
     desc: '祖父から受け継いだ一本。しなやかだが力不足。',
   },
   {
-    id: 'glass', name: 'グラスファイバーロッド', icon: '🎣', price: 700, level: 2,
+    id: 'glass', name: 'グラスファイバーロッド', icon: 'rod-glass', price: 700, level: 2,
     reel: 1.0, power: 1.22, attract: 1.05,
     desc: '扱いやすい万能竿。巻き取りが少し速い。',
   },
   {
-    id: 'carbon', name: 'カーボンロッド', icon: '🎣', price: 3200, level: 5,
+    id: 'carbon', name: 'カーボンロッド', icon: 'rod-carbon', price: 3200, level: 5,
     reel: 1.16, power: 1.48, attract: 1.12,
     desc: '軽量高弾性。魚の引きをよく吸収してくれる。',
   },
   {
-    id: 'master', name: '名匠竿「渓月」', icon: '🎋', price: 11000, level: 9,
+    id: 'master', name: '名匠竿「渓月」', icon: 'rod-master', price: 11000, level: 9,
     reel: 1.32, power: 1.8, attract: 1.2,
     desc: '職人が一年かけて削り上げた逸品。大物に負けない。',
   },
   {
-    id: 'legend', name: '伝説の竿「湖鳴」', icon: '🌙', price: 38000, level: 14,
+    id: 'legend', name: '伝説の竿「湖鳴」', icon: 'rod-legend', price: 38000, level: 14,
     reel: 1.52, power: 2.2, attract: 1.32,
     desc: '湖の主を釣り上げるために鍛えられたという竿。',
   },
 ];
 
 export const LINES = [
-  { id: 'nylon', name: 'ナイロン 2号', icon: '🧵', price: 0, level: 1, cap: 1.0, desc: '標準的な糸。切れやすいので丁寧に。' },
-  { id: 'fluoro', name: 'フロロカーボン 4号', icon: '🧵', price: 600, level: 1, cap: 1.32, desc: '水中で見えにくく、強度も上がる。' },
-  { id: 'pe', name: 'PEライン 1.5号', icon: '🪢', price: 2600, level: 4, cap: 1.68, desc: '伸びない高強度編組ライン。' },
-  { id: 'spider', name: '特殊繊維「蜘蛛糸」', icon: '🕸️', price: 9500, level: 8, cap: 2.15, desc: '細いのに驚異的な強度を誇る。' },
-  { id: 'mithril', name: 'ミスリルライン', icon: '✨', price: 30000, level: 13, cap: 2.8, desc: '銀色に輝く不思議な糸。まず切れない。' },
+  { id: 'nylon', name: 'ナイロン 2号', icon: 'line-nylon', price: 0, level: 1, cap: 1.0, desc: '標準的な糸。切れやすいので丁寧に。' },
+  { id: 'fluoro', name: 'フロロカーボン 4号', icon: 'line-fluoro', price: 600, level: 1, cap: 1.32, desc: '水中で見えにくく、強度も上がる。' },
+  { id: 'pe', name: 'PEライン 1.5号', icon: 'line-pe', price: 2600, level: 4, cap: 1.68, desc: '伸びない高強度編組ライン。' },
+  { id: 'spider', name: '特殊繊維「蜘蛛糸」', icon: 'line-spider', price: 9500, level: 8, cap: 2.15, desc: '細いのに驚異的な強度を誇る。' },
+  { id: 'mithril', name: 'ミスリルライン', icon: 'line-mithril', price: 30000, level: 13, cap: 2.8, desc: '銀色に輝く不思議な糸。まず切れない。' },
 ];
 
 /**
@@ -454,43 +454,43 @@ export const LINES = [
    aff = タグ別の食いつき。タナ × エサの組み合わせで釣れる魚が変わる */
 export const BAITS = [
   {
-    id: 'worm', name: 'ミミズ', icon: '🪱', price: 0, level: 1,
+    id: 'worm', name: 'ミミズ', icon: 'bait-worm', price: 0, level: 1,
     attract: 1.0, rare: 1.0, junk: 1.0,
     aff: { bottom: 1.7, carp: 1.4, mid: 1.0, predator: 0.6, trout: 0.8, weed: 0.9, deep: 1.0 },
     desc: '万能の置き餌。底を突く魚に強い。',
   },
   {
-    id: 'akamushi', name: 'アカムシ', icon: '🧵', price: 180, level: 1,
+    id: 'akamushi', name: 'アカムシ', icon: 'bait-akamushi', price: 180, level: 1,
     attract: 1.14, rare: 0.88, junk: 0.9,
     aff: { mid: 1.6, bottom: 1.3, weed: 1.2, carp: 1.0, trout: 0.9, predator: 0.3, deep: 0.7 },
     desc: '極小の赤い虫。小物のアタリが速いが、大物は寄らない。',
   },
   {
-    id: 'dough', name: '練り餌', icon: '🍡', price: 250, level: 1,
+    id: 'dough', name: '練り餌', icon: 'bait-dough', price: 250, level: 1,
     attract: 1.08, rare: 1.05, junk: 0.8,
     aff: { carp: 1.9, bottom: 1.2, mid: 1.2, predator: 0.4, trout: 0.7, weed: 1.0, deep: 0.8 },
     desc: 'フナ・コイの大好物。練り込んで針に付ける。',
   },
   {
-    id: 'roe', name: 'イクラ', icon: '🍥', price: 900, level: 2,
+    id: 'roe', name: 'イクラ', icon: 'bait-roe', price: 900, level: 2,
     attract: 1.16, rare: 1.15, junk: 0.6,
     aff: { trout: 2.0, mid: 1.2, deep: 1.1, predator: 0.9, bottom: 0.8, weed: 0.8, carp: 0.6 },
     desc: '鱒が目の色を変える一粒。流れの中で映える。',
   },
   {
-    id: 'shrimp', name: '川エビ', icon: '🦐', price: 1600, level: 3,
+    id: 'shrimp', name: '川エビ', icon: 'bait-shrimp', price: 1600, level: 3,
     attract: 1.2, rare: 1.25, junk: 0.5,
     aff: { predator: 1.9, deep: 1.4, bottom: 1.3, trout: 1.2, weed: 1.2, mid: 1.0, carp: 0.6 },
     desc: '生きたまま付ける定番の生き餌。何にでも効く。',
   },
   {
-    id: 'minnow', name: '小魚（泳がせ）', icon: '🐟', price: 3800, level: 6,
+    id: 'minnow', name: '小魚（泳がせ）', icon: 'bait-minnow', price: 3800, level: 6,
     attract: 1.22, rare: 1.45, junk: 0.4,
     aff: { predator: 2.2, deep: 1.8, trout: 1.3, mid: 1.0, bottom: 0.9, weed: 1.0, carp: 0.4 },
     desc: '生きた小魚を泳がせる大物狙い。小物は寄りつかない。',
   },
   {
-    id: 'secret', name: '秘伝の撒き餌', icon: '🍶', price: 12000, level: 10,
+    id: 'secret', name: '秘伝の撒き餌', icon: 'bait-secret', price: 12000, level: 10,
     attract: 1.7, rare: 2.2, junk: 0.25,
     aff: { deep: 1.6, legend: 2.6, predator: 1.4, trout: 1.4, carp: 1.4, bottom: 1.4, mid: 1.4, weed: 1.2 },
     desc: '老人が「主を呼ぶ」と言って売ってくれた壺。何かがおかしい匂い。',

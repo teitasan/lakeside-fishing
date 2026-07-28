@@ -3,6 +3,7 @@
    =========================================================== */
 import { Game, AUTOSTART_KEY } from './game.js';
 import { hasSave } from './save.js';
+import { iconHtml } from './icons.js';
 
 const canvas = document.getElementById('scene');
 const loadingLabel = document.querySelector('#loading span');
@@ -50,7 +51,7 @@ async function boot() {
   } catch (e) { /* noop */ }
   if (autostart) {
     game.start(true);
-    game.ui.toast(`🗺️ 新しい湖に来た（シード ${game.state.seed}）`, 'gold');
+    game.ui.toast(`${iconHtml('ui-map')} 新しい湖に来た（シード ${game.state.seed}）`, 'gold');
   }
 
   let last = performance.now();

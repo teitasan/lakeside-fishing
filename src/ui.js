@@ -8,9 +8,15 @@ import {
 import { PROFILES, BODY, profileAt, CRUST_SHAPES } from './fish.js';
 import { fmtInt, fmt1, fmtWeight, fmtClock, timeBandLabel, clamp01 } from './util.js';
 import { xpForLevel } from './save.js';
+import { iconHtml, iconLabel, loadIcon, preloadIcons, JUNK_ICONS } from './icons.js';
 
 const $ = (id) => document.getElementById(id);
-const JUNK_EMOJI = { boot: '🥾', can: '🥫', weeds: '🌿', driftwood: '🪵' };
+
+preloadIcons([
+  ...Object.values(JUNK_ICONS),
+  'ui-medal', 'ui-empty', 'ui-coin', 'ui-sparkle', 'ui-trophy',
+  'weather-clear', 'weather-cloudy', 'weather-rain',
+]);
 
 /* ---------------- 魚のシルエット描画 ---------------- */
 export function drawFishIcon(canvas, sp, opts = {}) {
@@ -29,10 +35,13 @@ export function drawFishIcon(canvas, sp, opts = {}) {
   }
 
   if (sp.rarity === 0) {
-    ctx.font = `${Math.floor(H * 0.62)}px "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(JUNK_EMOJI[sp.id] || '🗑️', W / 2, H * 0.54);
+    const img = loadIcon(JUNK_ICONS[sp.id] || 'junk-driftwood');
+    const draw = () => {
+      const s = Math.min(W, H) * 0.72;
+      ctx.drawImage(img, (W - s) / 2, (H - s) / 2, s, s);
+    };
+    if (img.complete && img.naturalWidth) draw();
+    else img.addEventListener('load', () => { ctx.clearRect(0, 0, W, H); draw(); }, { once: true });
     return;
   }
 
@@ -450,7 +459,7 @@ export class UI {
       this._last.fightName = d.name;
     }
     if (d.sub !== this._last.fightSub) {
-      this.el.fightSub.textContent = d.sub || '';
+      this.el.fightSub.innerHTML = d.sub || '';
       this._last.fightSub = d.sub;
     }
     this.el.tension.style.width = (clamp01(d.tension) * 100).toFixed(1) + '%';
@@ -491,7 +500,7 @@ export class UI {
     }
     const w = g.env.weather;
     if (this._last.weather !== w.key) {
-      this.el.weatherIcon.textContent = w.icon;
+      this.el.weatherIcon.innerHTML = iconHtml(w.icon, 'ico weather');
       this.el.weatherName.textContent = w.name;
       this._last.weather = w.key;
     }
@@ -518,14 +527,14 @@ export class UI {
     }
     const rod = GEAR.rod.find((r) => r.id === s.gear.rod);
     const bait = GEAR.bait.find((b) => b.id === s.gear.bait);
-    const rodTxt = `${rod.icon} ${rod.name}`;
+    const rodTxt = `${rod.icon}|${rod.name}`;
     if (this._last.rod !== rodTxt) {
-      this.el.gearRod.textContent = rodTxt;
+      this.el.gearRod.innerHTML = iconLabel(rod.icon, rod.name, 'ico gear');
       this._last.rod = rodTxt;
     }
-    const baitTxt = `${bait.icon} ${bait.name}`;
+    const baitTxt = `${bait.icon}|${bait.name}`;
     if (this._last.bait !== baitTxt) {
-      this.el.gearBait.textContent = baitTxt;
+      this.el.gearBait.innerHTML = iconLabel(bait.icon, bait.name, 'ico gear');
       this._last.bait = baitTxt;
     }
   }
@@ -578,7 +587,7 @@ export class UI {
       // 内部数値はマスクし、言葉だけで示す（data.js gearStats）
       const stats = gearStats(kind, it).map(([k, v]) => `${k} <b>${v}</b>`);
       div.innerHTML = `
-        <div class="ic">${it.icon}</div>
+        <div class="ic">${iconHtml(it.icon, 'ico shop')}</div>
         <div class="body">
           <div class="nm">${it.name}${equipped ? ' <small style="opacity:.7">（装備中）</small>' : ''}</div>
           <div class="ds">${it.desc}</div>
@@ -655,7 +664,7 @@ export class UI {
       `<b>実績 ${got.length}/${ACHIEVEMENTS.length}</b> ` +
       ACHIEVEMENTS.map((a) => {
         const ok = s.achievements.includes(a.id);
-        return `<span style="margin-left:10px;opacity:${ok ? 1 : 0.4}">${ok ? '🏅' : '▫️'} ${a.name}<small style="opacity:.6">（${a.desc}）</small></span>`;
+        return `<span style="margin-left:10px;opacity:${ok ? 1 : 0.4};display:inline-flex;align-items:center;gap:4px">${iconHtml(ok ? 'ui-medal' : 'ui-empty', 'ico tiny')} ${a.name}<small style="opacity:.6">（${a.desc}）</small></span>`;
       }).join('');
     this.el.journal.classList.add('open');
     this.openModal = 'journal';

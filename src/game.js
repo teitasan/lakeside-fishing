@@ -19,6 +19,7 @@ import {
 import {
   clamp, clamp01, lerp, damp, rand, pick, weightedPick, TAU, timeBand, fmt1,
 } from './util.js';
+import { iconHtml, iconLabel } from './icons.js';
 
 const GRAVITY = 9.8;
 const EXPOSURE = 0.78;
@@ -318,7 +319,7 @@ export class Game {
           this.audio.setBgm(s.bgm);
           document.getElementById('opt-volume').value = s.volume * 100;
           document.getElementById('opt-bgm').value = s.bgm * 100;
-          this.ui.toast(muted ? '🔊 音を戻した' : '🔇 ミュート');
+          this.ui.toast(muted ? `${iconHtml('ui-sound')} 音を戻した` : `${iconHtml('ui-mute')} ミュート`);
           this.saveState();
           break;
         }
@@ -441,7 +442,7 @@ export class Game {
     this.state.clock = (this.state.clock + 1) % 24;
     this.env.tickWeather(1.2);
     this.audio.click();
-    this.ui.toast(`🍵 ひと休み… ${Math.floor(this.state.clock)}時になった`, 'good');
+    this.ui.toast(`${iconHtml('ui-tea')} ひと休み… ${Math.floor(this.state.clock)}時になった`, 'good');
     this.saveState();
   }
 
@@ -474,7 +475,7 @@ export class Game {
     this.state.owned[kind].push(item.id);
     this.state.gear[kind] = item.id;
     this.audio.buy();
-    this.ui.toast(`${item.icon} <b>${item.name}</b> を購入しました！`, 'gold');
+    this.ui.toast(`${iconHtml(item.icon)} <b>${item.name}</b> を購入しました！`, 'gold');
     this.saveState();
     return true;
   }
@@ -484,7 +485,7 @@ export class Game {
     this.state.gear[kind] = id;
     this.audio.click();
     const item = GEAR[kind].find((x) => x.id === id);
-    this.ui.toast(`${item.icon} ${item.name} を装備`, 'good');
+    this.ui.toast(`${iconLabel(item.icon, item.name)} を装備`, 'good');
     this.saveState();
   }
 
@@ -717,7 +718,7 @@ export class Game {
     this.aimMarker.visible = false;
     this.ui.showPower(false);
     if (this.castPerfect) {
-      this.ui.toast(`✨ 狙い通り！ <small style="opacity:.75">${fmt1(this.aimDist)}m</small>`, 'good');
+      this.ui.toast(`${iconHtml('ui-sparkle')} 狙い通り！ <small style="opacity:.75">${fmt1(this.aimDist)}m</small>`, 'good');
     } else {
       const over = this.charge > (this.targetPower ?? 0.78);
       this.ui.toast(over ? '飛ばし過ぎた…' : '手前に落ちた…', '');
@@ -823,7 +824,7 @@ export class Game {
     if (this.playing && !paused) {
       this.state.clock = (this.state.clock + dt * HOURS_PER_SEC) % 24;
       const changed = this.env.tickWeather(dt * HOURS_PER_SEC);
-      if (changed) this.ui.toast(`${changed.icon} 天候が「${changed.name}」に変わった`);
+      if (changed) this.ui.toast(`${iconHtml(changed.icon)} 天候が「${changed.name}」に変わった`);
     }
 
     if (!paused) {
@@ -1042,7 +1043,7 @@ export class Game {
     this.saveState();
     if (quiet) return;
     this.audio.click();
-    this.ui.toast(on ? '👁 一人称視点（ホイールを奥へ回すと三人称）' : '三人称視点');
+    this.ui.toast(on ? `${iconHtml('ui-eye')} 一人称視点（ホイールを奥へ回すと三人称）` : '三人称視点');
   }
 
   _setUnderwaterFx(on) {
@@ -1062,7 +1063,7 @@ export class Game {
     }
     this.underwaterCam = !this.underwaterCam;
     this.audio.click();
-    this.ui.toast(this.underwaterCam ? '🌊 水中カメラ ON（Vで戻る）' : '水中カメラ OFF');
+    this.ui.toast(this.underwaterCam ? `${iconHtml('ui-wave')} 水中カメラ ON（Vで戻る）` : '水中カメラ OFF');
   }
 
   /* =========================================================
@@ -1206,7 +1207,7 @@ export class Game {
         this.markerMat.color.setHex(obstruct ? 0xff5a4a : d > 0.4 ? 0xfff0b0 : 0xff8a6a);
         if (obstruct) {
           const what = obstruct === 'dock' ? '桟橋' : obstruct === 'rock' ? '岩' : '陸';
-          ui.setPrompt(`⚠ <b>${what}が邪魔</b>：このままだと糸が掛かります`);
+          ui.setPrompt(`${iconHtml('ui-warn')} <b>${what}が邪魔</b>：このままだと糸が掛かります`);
         }
         bob.visible = false;
         this.angler.hideLine();
@@ -1705,9 +1706,9 @@ export class Game {
     this.hudDepth = depth;
     this.ui.showFight(true, {
       name: pullLabel(F.pull0),
-      sub: jumping ? '⚠ 跳ねた！'
-        : F.shakeOn ? '⚠ 首を振っている'
-          : F.running ? '⚠ 走っている'
+      sub: jumping ? `${iconHtml('ui-warn')} 跳ねた！`
+        : F.shakeOn ? `${iconHtml('ui-warn')} 首を振っている`
+          : F.running ? `${iconHtml('ui-warn')} 走っている`
             : `${P.name}｜${reeling ? '巻いている' : '待機'}`,
       tension: tRatio,
       dist: t,
@@ -1730,7 +1731,7 @@ export class Game {
 
   _lineSnap() {
     this.audio.snap();
-    this.ui.toast('💥 <b>ラインが切れた…！</b>', 'bad');
+    this.ui.toast(`${iconHtml('ui-boom')} <b>ラインが切れた…！</b>`, 'bad');
     if (this.fight && this.fight.pull0 > this.line.cap * 1.35) {
       setTimeout(() => this.ui.toast('この魚には道具が足りない。<b>Bキー</b>でラインとロッドを強化しよう', 'gold'), 1200);
     }
@@ -1845,7 +1846,7 @@ export class Game {
     if (leveled) {
       this.audio.levelUp();
       setTimeout(() => {
-        this.ui.toast(`⬆️ <b>レベル ${s.level}</b> になった！新しい道具が解禁されるかも`, 'gold');
+        this.ui.toast(`${iconHtml('ui-levelup')} <b>レベル ${s.level}</b> になった！新しい道具が解禁されるかも`, 'gold');
       }, 500);
     }
   }
@@ -1863,7 +1864,7 @@ export class Game {
       if (s.achievements.includes(a.id)) continue;
       if (a.test(stats)) {
         s.achievements.push(a.id);
-        setTimeout(() => this.ui.toast(`🏅 実績解除: <b>${a.name}</b>`, 'gold'), 900);
+        setTimeout(() => this.ui.toast(`${iconHtml('ui-medal')} 実績解除: <b>${a.name}</b>`, 'gold'), 900);
       }
     }
   }

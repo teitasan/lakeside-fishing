@@ -69,8 +69,36 @@ body.playing .panel { opacity: 1; transform: none; }
 .hud-top-right { top: 16px; right: 16px; min-width: 168px; }
 
 .money-row { display: flex; align-items: baseline; gap: 6px; font-size: 22px; font-weight: 700; color: var(--gold); }
-.money-row .coin { font-size: 15px; opacity: .85; }
+.money-row .coin { font-size: 15px; opacity: .85; display: inline-flex; align-items: center; }
 .money-row .unit { font-size: 12px; opacity: .7; margin-left: 1px; }
+
+/* 生成アイコン（絵文字置換） */
+img.ico {
+  display: inline-block;
+  vertical-align: -3px;
+  width: 20px;
+  height: 20px;
+  object-fit: cover;
+  border-radius: 4px;
+  image-rendering: auto;
+  flex-shrink: 0;
+}
+img.ico.inline { width: 14px; height: 14px; vertical-align: -2px; border-radius: 3px; }
+img.ico.tiny { width: 14px; height: 14px; vertical-align: -2px; }
+img.ico.gear { width: 16px; height: 16px; vertical-align: -3px; }
+img.ico.weather { width: 18px; height: 18px; vertical-align: -3px; }
+img.ico.shop { width: 32px; height: 32px; border-radius: 6px; }
+img.ico.title { width: 22px; height: 22px; vertical-align: -4px; margin-right: 4px; }
+.toast img.ico { width: 16px; height: 16px; vertical-align: -3px; margin-right: 2px; }
+#prompt img.ico { width: 16px; height: 16px; vertical-align: -3px; }
+#fight-sub img.ico { width: 14px; height: 14px; vertical-align: -2px; }
+.record, .newfish { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.gear-row span { display: inline-flex; align-items: center; gap: 4px; }
+.clock-row #weather-icon { display: inline-flex; align-items: center; }
+.item .ic { display: flex; align-items: center; justify-content: center; }
+.lake-head { display: flex; align-items: center; gap: 6px; }
+.btn img.ico { margin-right: 2px; }
+h2 { display: flex; align-items: center; gap: 2px; }
 
 .level-row { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
 .level-row .lv { font-size: 12px; opacity: .85; }
@@ -338,7 +366,7 @@ kbd {
 }
 .item.owned { border-color: rgba(109, 224, 138, .3); }
 .item.equipped { border-color: rgba(245, 207, 107, .55); background: rgba(245, 207, 107, .08); }
-.item .ic { font-size: 26px; width: 34px; text-align: center; }
+.item .ic { font-size: 26px; width: 34px; text-align: center; display: flex; align-items: center; justify-content: center; }
 .item .body { flex: 1; }
 .item .nm { font-size: 14px; font-weight: 700; }
 .item .ds { font-size: 11px; opacity: .6; margin-top: 2px; line-height: 1.5; }

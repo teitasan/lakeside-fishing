@@ -4,6 +4,7 @@
    =========================================================== */
 import * as THREE from 'three';
 import { TAU, clamp01, fmt1, fmt2, fmtClock } from './util.js';
+import { iconHtml } from './icons.js';
 
 /* 音の種類ごとの色分け */
 const SOUND_COLORS = {
@@ -301,7 +302,7 @@ export class Debug {
     g.state.settings.debug = this.enabled;
     g.saveState();
     if (g.ui) {
-      g.ui.toast(this.enabled ? '🔧 デバッグ表示 ON（F3 で切替）' : '🔧 デバッグ表示 OFF', 'good');
+      g.ui.toast(this.enabled ? `${iconHtml('ui-debug')} デバッグ表示 ON（F3 で切替）` : `${iconHtml('ui-debug')} デバッグ表示 OFF`, 'good');
       const cb = document.getElementById('opt-debug');
       if (cb) cb.checked = this.enabled;
     }
@@ -422,7 +423,7 @@ ${kv('fog', `${env.scene.fog.near.toFixed(0)}–${env.scene.fog.far.toFixed(0)}`
     const now = performance.now();
     const a = g.audio;
     const list = [...this.sounds.entries()].sort((x, y) => y[1].last - x[1].last).slice(0, 10);
-    B.sound.innerHTML = `<b>🔊 AUDIO</b>
+    B.sound.innerHTML = `<b>${iconHtml('ui-sound')} AUDIO</b>
 ${kv('ctx', a.ctx ? a.ctx.state : 'none')}${kv('se / bgm', `${fmt2(a.volume)} / ${fmt2(a.bgm)}`)}
 ${kv('muffle', a.ready ? a.muffle.frequency.value.toFixed(0) + ' Hz' : '—')}${kv('rain g', a.ready ? fmt2(a.rainGain.gain.value) : '—')}
 ${kv('night g', a.ready ? fmt2(a.nightGain.gain.value) : '—')}${kv('events', this.recent.length ? this.recent[0].name : '—')}
@@ -451,7 +452,7 @@ ${kv('night g', a.ready ? fmt2(a.nightGain.gain.value) : '—')}${kv('events', t
       .filter((f) => f.active)
       .map((f) => ({ f, d: Math.hypot(f.pos.x - g.pos.x, f.pos.z - g.pos.z) }))
       .sort((x, y) => x.d - y.d).slice(0, 6);
-    B.fish.innerHTML = `<b>🐟 FISH (${active}/${g.school.count})</b>
+    B.fish.innerHTML = `<b>${iconHtml('ui-fish')} FISH (${active}/${g.school.count})</b>
 ${Object.entries(counts).map(([s, n]) => `<span class="dbg-tag" style="border-color:${stateHex(s)};color:${stateHex(s)}">${s} ${n}</span>`).join(' ')}
 <div class="dbg-snd">${near.map(({ f, d }) => `<div class="dbg-s">
       <i style="background:${stateHex(f.state)}"></i>

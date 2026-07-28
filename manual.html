@@ -822,6 +822,8 @@ import { xpForLevel } from './src/save.js';
 import { timeBand } from './src/util.js';
 import { makeLake, validateLake, randomSeed } from './src/lakefield.js';
 
+const ico = (id) => `<img src="./assets/icons/${id}.webp" alt="" width="18" height="18" style="vertical-align:-3px;border-radius:3px;margin-right:4px">`;
+
 document.getElementById('jsWarn')?.remove();
 
 /* ---------- 共通 ---------- */
@@ -1211,7 +1213,7 @@ function renderRollCtl() {
   c.appendChild(ctlSelect('タナ（狙う層）', 'rt', RIG_LAYERS.map((l) => [l.id, `${l.name}（水深の ${Math.round(l.ratio * 100)}%）`]), rollState.layer, (v) => { rollState.layer = v; runRoll(); }));
   c.appendChild(ctlRange('時刻', 'rh', 0, 23.5, 0.5, rollState.hour, (v) => String(Math.floor(v)).padStart(2, '0') + ':' + (v % 1 ? '30' : '00'), (v) => { rollState.hour = v; runRoll(); }));
   c.appendChild(ctlSelect('天候', 'rw', Object.entries(WEATHERS).map(([k, w]) => [k, w.name]), rollState.weather, (v) => { rollState.weather = v; runRoll(); }));
-  c.appendChild(ctlSelect('エサ', 'rb', BAITS.map((b) => [b.id, `${b.icon} ${b.name}（得意 ${baitStrengths(b, 2).join('・')}）`]), rollState.bait, (v) => { rollState.bait = v; runRoll(); }));
+  c.appendChild(ctlSelect('エサ', 'rb', BAITS.map((b) => [b.id, `${b.name}（得意 ${baitStrengths(b, 2).join('・')}）`]), rollState.bait, (v) => { rollState.bait = v; runRoll(); }));
   c.appendChild(ctlSelect('ロッド', 'rr', RODS.map((r) => [r.id, r.name]), rollState.rod, (v) => { rollState.rod = v; runRoll(); }));
   c.appendChild(ctlRange('プレイヤーレベル', 'rl', 1, 20, 1, rollState.level, (v) => 'Lv' + v, (v) => { rollState.level = v; runRoll(); }));
 }
@@ -1392,7 +1394,7 @@ function runRoll() {
     <th class="num">reel<br><span style="opacity:.6">巻取</span></th><th class="num">power<br><span style="opacity:.6">竿の力</span></th>
     <th class="num">attract<br><span style="opacity:.6">集魚</span></th><th class="num">巻取速度<br>/秒(最大)</th><th class="l">説明</th>
     </tr></thead><tbody>${RODS.map((r) => `<tr>
-      <td class="l name">${r.icon} ${r.name}</td><td class="num">${r.price.toLocaleString()}</td><td class="num">${r.level}</td>
+      <td class="l name">${ico(r.icon)}${r.name}</td><td class="num">${r.price.toLocaleString()}</td><td class="num">${r.level}</td>
       <td class="num" style="color:var(--cyan)">${r.reel}</td><td class="num" style="color:var(--good)">${r.power}</td>
       <td class="num">${r.attract}</td><td class="num">${f2(r.reel * 0.28 * 1.6)}</td>
       <td class="l" style="white-space:normal;color:var(--fg-dim)">${r.desc}</td></tr>`).join('')}</tbody>
@@ -1402,7 +1404,7 @@ function runRoll() {
     <th class="l">ライン</th><th class="num">価格 G</th><th class="num">解禁 Lv</th><th class="num">cap<br><span style="opacity:.6">強度</span></th>
     <th class="num">pull0=1.0 の魚を<br>巻き続けて切れるまで</th><th class="l">説明</th>
     </tr></thead><tbody>${LINES.map((l) => `<tr>
-      <td class="l name">${l.icon} ${l.name}</td><td class="num">${l.price.toLocaleString()}</td><td class="num">${l.level}</td>
+      <td class="l name">${ico(l.icon)}${l.name}</td><td class="num">${l.price.toLocaleString()}</td><td class="num">${l.level}</td>
       <td class="num" style="color:var(--warn)">${l.cap}</td>
       <td class="num">${f1(l.cap / ((0.08 + 1.0 * 0.55) / 1.0))} 秒</td>
       <td class="l" style="white-space:normal;color:var(--fg-dim)">${l.desc}</td></tr>`).join('')}</tbody>
@@ -1413,7 +1415,7 @@ function runRoll() {
     <th class="num">attract<br><span style="opacity:.6">アタリ速さ</span></th><th class="num">rare<br><span style="opacity:.6">レア補正</span></th>
     <th class="num">junk<br><span style="opacity:.6">ゴミ率</span></th><th class="num">ゴミ率<br>(深場)</th><th class="l">説明</th>
     </tr></thead><tbody>${BAITS.map((b) => `<tr>
-      <td class="l name">${b.icon} ${b.name}</td><td class="num">${b.price.toLocaleString()}</td><td class="num">${b.level}</td>
+      <td class="l name">${ico(b.icon)}${b.name}</td><td class="num">${b.price.toLocaleString()}</td><td class="num">${b.level}</td>
       <td class="l">${baitStrengths(b, 3).join('・')}</td>
       <td class="num" style="color:var(--cyan)">${b.attract}</td><td class="num" style="color:var(--violet)">${b.rare}</td>
       <td class="num">${b.junk}</td><td class="num">${(0.085 * b.junk * 100).toFixed(1)}%</td>
@@ -1422,7 +1424,7 @@ function runRoll() {
   const tags = ['bottom', 'mid', 'predator', 'trout', 'carp', 'weed', 'deep', 'legend'];
   document.getElementById('affTable').innerHTML = `<table><thead><tr>
     <th class="l">エサ相性（aff）</th>${tags.map((t) => `<th class="num">${TAG_LABEL[t] || t}<br><span style="opacity:.5;font-size:9px">${t}</span></th>`).join('')}
-    </tr></thead><tbody>${BAITS.map((b) => `<tr><td class="l name">${b.icon} ${b.name}</td>
+    </tr></thead><tbody>${BAITS.map((b) => `<tr><td class="l name">${ico(b.icon)}${b.name}</td>
       ${tags.map((t) => {
         const v = b.aff[t];
         return `<td class="num" style="color:${v === undefined ? 'var(--fg-mute)' : v >= 1.5 ? 'var(--good)' : v <= 0.5 ? 'var(--bad)' : 'inherit'}">${v === undefined ? '—' : f2(v)}</td>`;
@@ -1438,9 +1440,9 @@ function runRoll() {
   for (let lv = 1; lv <= 16; lv++) {
     const need = xpForLevel(lv);
     const prev = lv > 1 ? xpForLevel(lv - 1) : 0;
-    const unlocked = [...RODS.filter((r) => r.level === lv).map((r) => r.icon + ' ' + r.name),
-      ...LINES.filter((l) => l.level === lv).map((l) => l.icon + ' ' + l.name),
-      ...BAITS.filter((b) => b.level === lv).map((b) => b.icon + ' ' + b.name)];
+    const unlocked = [...RODS.filter((r) => r.level === lv).map((r) => ico(r.icon) + r.name),
+      ...LINES.filter((l) => l.level === lv).map((l) => ico(l.icon) + l.name),
+      ...BAITS.filter((b) => b.level === lv).map((b) => ico(b.icon) + b.name)];
     rows += `<tr><td class="l name">Lv ${lv} → ${lv + 1}</td>
       <td class="num">${need.toLocaleString()}</td><td class="num">${(need - prev).toLocaleString()}</td>
       <td class="l" style="white-space:normal;color:var(--fg-dim)">${unlocked.join('　/　') || '—'}</td>

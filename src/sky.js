@@ -21,9 +21,9 @@ const KEYS = [
 ];
 
 export const WEATHERS = {
-  clear: { key: 'clear', name: '晴れ', icon: '☀️', cloud: 0.14, rain: 0, bite: 1.0, weight: 44 },
-  cloudy: { key: 'cloudy', name: 'くもり', icon: '☁️', cloud: 0.72, rain: 0, bite: 1.12, weight: 34 },
-  rain: { key: 'rain', name: '雨', icon: '🌧️', cloud: 0.95, rain: 0.85, bite: 1.3, weight: 22 },
+  clear: { key: 'clear', name: '晴れ', icon: 'weather-clear', cloud: 0.14, rain: 0, bite: 1.0, weight: 44 },
+  cloudy: { key: 'cloudy', name: 'くもり', icon: 'weather-cloudy', cloud: 0.72, rain: 0, bite: 1.12, weight: 34 },
+  rain: { key: 'rain', name: '雨', icon: 'weather-rain', cloud: 0.95, rain: 0.85, bite: 1.3, weight: 22 },
 };
 
 const c1 = new THREE.Color();

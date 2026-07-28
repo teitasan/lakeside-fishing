@@ -23,7 +23,7 @@
   <div id="hud">
     <div class="hud-top-left panel">
       <div class="money-row">
-        <span class="coin">◉</span><span id="money">0</span><span class="unit">G</span>
+        <span class="coin"><img class="ico" src="./assets/icons/ui-coin.webp" alt="" width="16" height="16"></span><span id="money">0</span><span class="unit">G</span>
       </div>
       <div class="level-row">
         <span class="lv">Lv <b id="level">1</b></span>
@@ -31,13 +31,13 @@
         <span id="xp-text" class="xp-text">0 / 60</span>
       </div>
       <div class="gear-row">
-        <span id="gear-rod">🎣 竹の釣り竿</span>
-        <span id="gear-bait">🪱 ミミズ</span>
+        <span id="gear-rod"><img class="ico gear" src="./assets/icons/rod-bamboo.webp" alt="" width="16" height="16"> 竹の釣り竿</span>
+        <span id="gear-bait"><img class="ico gear" src="./assets/icons/bait-worm.webp" alt="" width="16" height="16"> ミミズ</span>
       </div>
     </div>
 
     <div class="hud-top-right panel">
-      <div class="clock-row"><span id="weather-icon">☀️</span><span id="clock">06:00</span><span id="daylabel">朝</span></div>
+      <div class="clock-row"><span id="weather-icon"><img class="ico weather" src="./assets/icons/weather-clear.webp" alt="" width="18" height="18"></span><span id="clock">06:00</span><span id="daylabel">朝</span></div>
       <div class="info-row"><span class="lbl">天候</span><span id="weather-name">晴れ</span></div>
       <div class="info-row"><span class="lbl">狙い</span><span id="aim">-- m</span></div>
       <div class="info-row"><span class="lbl">水深</span><span id="depth">-- m</span></div>
@@ -110,7 +110,7 @@
       <button id="btn-start" class="btn big">釣りをはじめる</button>
       <button id="btn-continue" class="btn ghost hidden">セーブデータから続ける</button>
       <div class="title-foot">
-        Three.js 製 / 音が出ます 🔊
+        Three.js 製 / 音が出ます <img class="ico inline" src="./assets/icons/ui-sound.webp" alt="" width="14" height="14">
         <a href="./manual.html" target="_blank" rel="noopener">パラメータ解説を見る ↗</a>
       </div>
     </div>
@@ -128,8 +128,8 @@
         <div><span>買値</span><b id="card-value">320 G</b></div>
         <div><span>経験値</span><b id="card-xp">+38</b></div>
       </div>
-      <div id="card-record" class="record hidden">🏆 自己最高記録！</div>
-      <div id="card-new" class="newfish hidden">✨ 図鑑に新規登録！</div>
+      <div id="card-record" class="record hidden"><img class="ico" src="./assets/icons/ui-trophy.webp" alt="" width="16" height="16"> 自己最高記録！</div>
+      <div id="card-new" class="newfish hidden"><img class="ico" src="./assets/icons/ui-sparkle.webp" alt="" width="16" height="16"> 図鑑に新規登録！</div>
       <p id="card-flavor" class="flavor"></p>
       <button id="btn-card-ok" class="btn">よし、次！ <small>(Space)</small></button>
     </div>
@@ -139,9 +139,9 @@
   <div id="shop" class="modal">
     <div class="sheet">
       <header>
-        <h2>🏪 釣具店「ひとやすみ」</h2>
+        <h2><img class="ico title" src="./assets/icons/ui-shop.webp" alt="" width="22" height="22"> 釣具店「ひとやすみ」</h2>
         <div class="wallet">所持金 <b id="shop-money">0</b> G</div>
-        <button class="close" data-close="shop">✕</button>
+        <button class="close" data-close="shop" aria-label="閉じる"><img class="ico" src="./assets/icons/ui-close.webp" alt="×" width="18" height="18"></button>
       </header>
       <nav class="tabs">
         <button class="tab active" data-tab="rod">ロッド</button>
@@ -157,9 +157,9 @@
   <div id="journal" class="modal">
     <div class="sheet">
       <header>
-        <h2>📖 さかな図鑑</h2>
+        <h2><img class="ico title" src="./assets/icons/ui-journal.webp" alt="" width="22" height="22"> さかな図鑑</h2>
         <div class="wallet"><b id="journal-progress">0 / 0</b></div>
-        <button class="close" data-close="journal">✕</button>
+        <button class="close" data-close="journal" aria-label="閉じる"><img class="ico" src="./assets/icons/ui-close.webp" alt="×" width="18" height="18"></button>
       </header>
       <div class="journal-grid" id="journal-grid"></div>
       <footer class="shop-foot" id="journal-ach"></footer>
@@ -169,7 +169,7 @@
   <!-- ============ 仕掛け（タナ） ============ -->
   <div id="rig-window" class="modal">
     <div class="card small">
-      <h2>🎣 仕掛け</h2>
+      <h2><img class="ico title" src="./assets/icons/ui-rig.webp" alt="" width="22" height="22"> 仕掛け</h2>
       <p class="rig-lead">どの層にエサを入れるかを選びます。実際の深さは<b>着水地点の水深に合わせて自動</b>で決まります。</p>
       <div class="rig-main">
         <div class="rig-col" id="rig-col"></div>
@@ -200,22 +200,22 @@
           </select>
         </label>
         <label class="row"><span>影</span><input id="opt-shadow" type="checkbox" checked /></label>
-        <label class="row"><span>🔧 デバッグ表示 <small style="opacity:.5">(F3)</small></span><input id="opt-debug" type="checkbox" /></label>
+        <label class="row"><span><img class="ico inline" src="./assets/icons/ui-debug.webp" alt="" width="14" height="14"> デバッグ表示 <small style="opacity:.5">(F3)</small></span><input id="opt-debug" type="checkbox" /></label>
       </div>
       <div class="lake-note">視点：マウスホイールでカメラ距離。一番手前まで回すと<b>一人称</b>、奥へ回すと三人称。</div>
 
       <div class="lake-box">
-        <div class="lake-head">🗺️ いまの湖</div>
+        <div class="lake-head"><img class="ico inline" src="./assets/icons/ui-map.webp" alt="" width="14" height="14"> いまの湖</div>
         <div class="lake-info" id="lake-info"></div>
         <div class="lake-seed">
           <input id="opt-seed" type="text" inputmode="numeric" spellcheck="false" aria-label="湖のシード" />
           <button id="btn-seed-apply" class="btn ghost">この湖へ</button>
-          <button id="btn-seed-random" class="btn ghost">🎲 新しい湖</button>
+          <button id="btn-seed-random" class="btn ghost"><img class="ico inline" src="./assets/icons/ui-dice.webp" alt="" width="14" height="14"> 新しい湖</button>
         </div>
         <label class="row small"><span>読み込むたびに湖を変える</span><input id="opt-randomlake" type="checkbox" /></label>
         <div class="lake-note">湖を変えると再読み込みします。お金・レベル・図鑑は引き継がれます。</div>
       </div>
-      <button id="btn-rest" class="btn ghost">🍵 ひと休み（1時間進める）</button>
+      <button id="btn-rest" class="btn ghost"><img class="ico inline" src="./assets/icons/ui-tea.webp" alt="" width="14" height="14"> ひと休み（1時間進める）</button>
       <button id="btn-resume" class="btn">釣りに戻る</button>
       <button id="btn-reset" class="btn danger ghost">セーブデータを消す</button>
     </div>
