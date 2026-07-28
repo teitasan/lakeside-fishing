@@ -575,11 +575,6 @@ export class Game {
   }
 
   /* ---------------- キャスト ---------------- */
-  /** 輪の拡大率：遠いと点になって見えなくなるので、画面上の大きさをほぼ一定に保つ */
-  _ringScale(dist) {
-    return clamp(dist / 13, 0.62, 3.8);
-  }
-
   _aimDir(out = new THREE.Vector3()) {
     const cp = Math.cos(this.pitch);
     return out.set(Math.sin(this.yaw) * cp, Math.sin(this.pitch), Math.cos(this.yaw) * cp);
@@ -1096,7 +1091,7 @@ export class Game {
           this.aimPoint.z
         );
         this.aimMat.color.setHex(ad > 0.4 ? 0x9ff0ff : 0xff9a80);
-        this.aimMarker.scale.setScalar(this._ringScale(this.aimDist));
+        this.aimMarker.scale.setScalar(1);
         bob.visible = false;
         this.angler.hideLine();
         this.marker.visible = false;
@@ -1127,7 +1122,7 @@ export class Game {
           this.aimPoint.z
         );
         this.aimMat.color.setHex(onTarget ? 0x9dffb4 : 0x9ff0ff);
-        this.aimMarker.scale.setScalar(this._ringScale(this.aimDist) * (onTarget ? 1.1 : 1));
+        this.aimMarker.scale.setScalar(onTarget ? 1.1 : 1);
 
         ui.setPrompt(onTarget
           ? '<b>今！</b> 離せば狙い通りに落ちる'
@@ -1145,8 +1140,7 @@ export class Game {
         this.hudDepth = d;
         this.marker.visible = true;
         this.marker.position.set(_v2.x, (d > 0 ? this.water.surfaceY(_v2.x, _v2.z) : this.terrain.heightAt(_v2.x, _v2.z)) + 0.06, _v2.z);
-        this.marker.scale.setScalar(this._ringScale(Math.hypot(_v2.x - this.pos.x, _v2.z - this.pos.z))
-          * (1 + (1 - this.charge) * 0.5));
+        this.marker.scale.setScalar(1 + (1 - this.charge) * 0.5);
         this.markerMat.color.setHex(obstruct ? 0xff5a4a : d > 0.4 ? 0xfff0b0 : 0xff8a6a);
         if (obstruct) {
           const what = obstruct === 'dock' ? '桟橋' : obstruct === 'rock' ? '岩' : '陸';
