@@ -3,7 +3,7 @@
    =========================================================== */
 import {
   SPECIES, RARITY, GEAR, GEAR_LABEL, ACHIEVEMENTS, RIG_LAYERS,
-  valueOf, baitStrengths, swimLayer, swimLayerLabel, depthFit,
+  valueOf, gearStats, swimLayer, swimLayerLabel, depthFit,
 } from './data.js';
 import { PROFILES, BODY, profileAt, CRUST_SHAPES } from './fish.js';
 import { fmtInt, fmt1, fmtWeight, fmtClock, timeBandLabel, clamp01 } from './util.js';
@@ -575,16 +575,8 @@ export class UI {
       const locked = s.level < it.level;
       const div = document.createElement('div');
       div.className = 'item' + (equipped ? ' equipped' : owned ? ' owned' : '');
-      const stats = [];
-      if (kind === 'rod') {
-        stats.push(`巻取 ×${it.reel.toFixed(2)}`, `竿の力 ×${it.power.toFixed(2)}`, `集魚 ×${it.attract.toFixed(2)}`);
-      } else if (kind === 'line') {
-        stats.push(`強度 ×${it.cap.toFixed(2)}`);
-      } else {
-        stats.push(`得意 ${baitStrengths(it).join('・')}`,
-          `アタリ ×${it.attract.toFixed(2)}`, `レア度 ×${it.rare.toFixed(2)}`,
-          `ゴミ ×${it.junk.toFixed(2)}`);
-      }
+      // 内部数値はマスクし、言葉だけで示す（data.js gearStats）
+      const stats = gearStats(kind, it).map(([k, v]) => `${k} <b>${v}</b>`);
       div.innerHTML = `
         <div class="ic">${it.icon}</div>
         <div class="body">

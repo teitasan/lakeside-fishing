@@ -572,6 +572,56 @@ export const TAG_LABEL = {
   trout: '鱒', predator: '肉食魚', deep: '深場', legend: '伝説',
 };
 
+/* ===========================================================
+   ショップの表示（内部数値は出さず、同じ種類の中での相対位置を言葉にする）
+   =========================================================== */
+const STAT_WORDS = {
+  reel: ['ゆっくり', 'やや遅い', 'ふつう', '速い', 'とても速い'],
+  power: ['弱い', 'やや弱い', 'ふつう', '強い', 'とても強い'],
+  attractRod: ['ふつう', 'やや高い', '高い', 'かなり高い', '抜群'],
+  cap: ['弱い', 'やや弱い', 'ふつう', '強い', 'とても強い'],
+  attractBait: ['ふつう', 'やや速い', '速い', 'かなり速い', '抜群'],
+  rare: ['出にくい', 'ふつう', 'やや出やすい', '出やすい', 'かなり出やすい'],
+  junk: ['多い', 'やや多い', 'ふつう', '少ない', 'とても少ない'],
+};
+
+/** 同種アイテム内での順位を言葉に（invert = 小さいほど良い） */
+function rankWord(items, get, it, words, invert = false) {
+  const vals = [...new Set(items.map(get))].sort((a, b) => a - b);
+  const i = vals.indexOf(get(it));
+  let t = vals.length > 1 ? i / (vals.length - 1) : 0.5;
+  if (invert) t = 1 - t;
+  return words[Math.round(t * (words.length - 1))];
+}
+
+/** しきい値で言葉を選ぶ（1.0 が基準の倍率パラメータ用） */
+function cutWord(v, cuts, words) {
+  for (let i = 0; i < cuts.length; i++) if (v < cuts[i]) return words[i];
+  return words[words.length - 1];
+}
+
+/** ショップに出す「ラベル＋言葉」の一覧。数値（内部パラメータ）は出さない */
+export function gearStats(kind, it) {
+  if (kind === 'rod') {
+    // ロッド・ラインは価格順の階段なので、同種の中での順位を言葉にする
+    return [
+      ['巻き取り', rankWord(RODS, (r) => r.reel, it, STAT_WORDS.reel)],
+      ['竿の力', rankWord(RODS, (r) => r.power, it, STAT_WORDS.power)],
+      ['集魚力', rankWord(RODS, (r) => r.attract, it, STAT_WORDS.attractRod)],
+    ];
+  }
+  if (kind === 'line') {
+    return [['強度', rankWord(LINES, (l) => l.cap, it, STAT_WORDS.cap)]];
+  }
+  // エサは 1.0 を基準にした倍率なので、しきい値で「ふつう」を基準に置く
+  return [
+    ['得意', baitStrengths(it).join('・')],
+    ['アタリ', cutWord(it.attract, [1.01, 1.12, 1.21, 1.4], STAT_WORDS.attractBait)],
+    ['大物', cutWord(it.rare, [0.95, 1.06, 1.2, 1.6], STAT_WORDS.rare)],
+    ['ゴミ', cutWord(it.junk, [0.3, 0.5, 0.75, 1.0], [...STAT_WORDS.junk].reverse())],
+  ];
+}
+
 /** エサが得意な魚（aff の上位）を短く並べる */
 export function baitStrengths(bait, n = 3) {
   return Object.entries(bait.aff)
