@@ -87,22 +87,7 @@ body.playing .panel { opacity: 1; transform: none; }
 .info-row { display: flex; justify-content: space-between; gap: 12px; margin-top: 4px; font-size: 12px; }
 .info-row .lbl { opacity: .55; }
 
-/* ---------- 照準 ---------- */
-#reticle {
-  position: absolute; left: 50%; top: 50%; width: 26px; height: 26px;
-  transform: translate(-50%, -50%); opacity: 0; transition: opacity .3s;
-}
-body.playing #reticle { opacity: .8; }
-body.aiming-off #reticle { opacity: 0 !important; }
-#reticle::before, #reticle::after {
-  content: ""; position: absolute; background: rgba(255, 255, 255, .8);
-}
-#reticle::before { left: 50%; top: 0; width: 1px; height: 100%; transform: translateX(-50%); }
-#reticle::after { top: 50%; left: 0; height: 1px; width: 100%; transform: translateY(-50%); }
-#reticle span {
-  position: absolute; inset: 8px; border: 1px solid rgba(255, 255, 255, .9);
-  border-radius: 50%; box-shadow: 0 0 6px rgba(0, 0, 0, .6);
-}
+/* 画面中央の照準（レティクル）は廃止。狙いは水面の輪で示す */
 
 /* ---------- アタリ ---------- */
 #bite-alert {

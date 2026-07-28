@@ -545,7 +545,7 @@ p    = <span class="n">2.1</span> − min(<span class="n">1.2</span>, bait.rare 
   <section id="s5">
     <h2><span class="num">5</span>キャストの物理</h2>
     <p>
-      キャストは<b>「狙った距離に当てる」</b>操作です。照準（十字）が水面と交わる点が<b>狙い点</b>で、
+      キャストは<b>「狙った距離に当てる」</b>操作です。視線が水面と交わる点が<b>狙い点</b>で、そこに<b>水色の輪</b>が出ます。
       メーターの<b>緑の帯</b>はその距離に必要なパワーの位置。帯の中で離すと狙い通りに落ちます。
     </p>
     <pre><span class="cm">// ① 狙い点：視線と水面(y=0)の交点。見下ろすほど近く、水平で遠く</span>
@@ -577,8 +577,10 @@ p    = <span class="n">2.1</span> − min(<span class="n">1.2</span>, bait.rare 
         最短キャストは初速 4.5 m/s の弾道で決まり、立ち位置とロッドの高さでわずかに変わります。</td></tr></tfoot>
     </table></div>
     <div class="grid c2">
-      <div class="card tight"><h4>2つのリング</h4><p><span style="color:#9ff0ff">水色の輪</span>＝狙い点、<span style="color:#fff0b0">黄色の輪</span>＝いまのパワーでの着水予測。
-        重なると<span style="color:#9dffb4">緑</span>になり、メーターも光ります。予測リングは実際の弾道を 0.055 秒刻みで積分した落下点です。</p></div>
+      <div class="card tight"><h4>2つのマーカー</h4><p><span style="color:#9ff0ff">水色</span>＝狙い点、<span style="color:#fff0b0">黄色</span>＝いまのパワーでの着水予測。
+        重なると<span style="color:#9dffb4">緑</span>になり、メーターも光ります。予測は実際の弾道を 0.055 秒刻みで積分した落下点です。
+        <b>画面中央の照準（レティクル）は置いていません</b>：狙いは水面のマーカーだけで示します。
+        遠いと輪が寝て潰れて見えないので、<b>中央に縦のピンを立て、距離に応じて拡大</b>して画面上の大きさを一定に保っています。</p></div>
       <div class="card tight"><h4>狙い通りの効果</h4><p>驚かす半径が 2.6+power×2.2 → <b>1.4 m</b> に縮小、アタリまでの時間が <b>÷1.18</b>。
         遠投でも足元でも同じ条件で成立するので、<b>浅場狙いが不利にならない</b>のが以前との違いです。</p></div>
     </div>
