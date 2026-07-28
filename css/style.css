@@ -276,6 +276,7 @@ body.playing #hint-bar { opacity: .5; }
 @keyframes rise { from { opacity: 0; transform: translateY(26px); } }
 .title-inner h1 {
   font-size: clamp(34px, 7vw, 62px); letter-spacing: .14em; font-weight: 800;
+  text-align: center; line-height: 1.25;
   background: linear-gradient(180deg, #fff 10%, var(--gold) 60%, var(--gold-dim));
   -webkit-background-clip: text; background-clip: text; color: transparent;
   text-shadow: 0 10px 40px rgba(245, 207, 107, .18);
