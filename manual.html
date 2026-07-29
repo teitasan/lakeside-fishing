@@ -200,7 +200,7 @@ footer { border-top: 1px solid var(--line); padding: 22px; text-align: center; c
     <div class="grid c3">
       <div class="card tight"><h4>長さ</h4><p>ワールド 1 単位 = <b>1 m</b>。魚の全長は cm。水深 m。</p></div>
       <div class="card tight"><h4>時間</h4><p>式の <code>dt</code> は実時間の秒。<b>実 1 秒 = ゲーム内 1 分</b>（1 時間 = 実 1 分、1 日 = 実 24 分）。</p></div>
-      <div class="card tight"><h4>0〜1 の量</h4><p>テンション比・残り距離・体力は 0〜1 の内部値。HUD のバーはそのまま％表示。</p></div>
+      <div class="card tight"><h4>0〜1 の量</h4><p>テンション比と体力は 0〜1 の内部値で、HUD のバーはそのまま％表示。残り距離だけは<b>実際のメートル</b>で、バーは「掛けた距離＋16m」を上限にした割合。</p></div>
     </div>
     <p>以下、<code>sp</code> は魚種データ、<code>rod</code>/<code>line</code>/<code>bait</code> は装備データ、<code>F</code> はファイト中の状態を指します。</p>
   </section>
@@ -221,8 +221,8 @@ footer { border-top: 1px solid var(--line); padding: 22px; text-align: center; c
       </div>
       <div class="card meter-card" style="--c:#7ee0ff">
         <h4>残り距離</h4>
-        <div class="sub">F.dist（1 = 着水点）</div>
-        <p>魚までの距離。ヒット時 <b>0.88</b> から始まり、巻けば減り、放せば魚に引かれて増える。<b>1.0 で逃走／0.03 で取り込み</b>。</p>
+        <div class="sub">F.dist（実際のメートル）</div>
+        <p>魚までの距離（m）。ヒット時は<b>掛けた距離そのまま</b>で始まり、巻けば減り、放せば魚に引かれて増える。<b>掛けた距離＋16m（糸の 62m 上限まで）で逃走／0.7m で取り込み</b>。近くに掛ければ寄せる距離も短い。</p>
       </div>
       <div class="card meter-card" style="--c:#ff8fa3">
         <h4>魚の体力</h4>
@@ -240,14 +240,17 @@ footer { border-top: 1px solid var(--line); padding: 22px; text-align: center; c
     <pre><span class="cm">// 引きの強さ。突進中は2倍、体力が尽きると半分になる</span>
 pull = F.pull0 * (F.running ? <span class="n">2.0</span> : <span class="n">1.0</span>) * (<span class="n">0.5</span> + <span class="n">0.5</span> * F.stamina)
 
+<span class="cm">// 糸が短いほど衝撃を吸収できない＝テンションが跳ねやすい（14m 以上で 1.0）</span>
+shortLine = clamp(<span class="n">1.35</span> - F.dist * <span class="n">0.025</span>, <span class="n">1.0</span>, <span class="n">1.35</span>)
+
 <span class="k">if</span> (巻いている) {
   resist  = clamp(<span class="n">1.70</span> - pull * <span class="n">0.75</span>, <span class="n">0.35</span>, <span class="n">1.60</span>)   <span class="cm">// 強い魚ほど巻けない</span>
-  F.dist    -= rod.reel * <span class="n">0.28</span> * resist * dt
-  F.tension += (<span class="n">0.08</span> + pull * <span class="n">0.55</span>) * dt / rod.power
+  F.dist    -= rod.reel * <span class="n">4.2</span> * resist * (<span class="n">1</span> + F.dist * <span class="n">0.012</span>) * dt   <span class="cm">// m/s。遠いうちは速い</span>
+  F.tension += (<span class="n">0.08</span> + pull * <span class="n">0.55</span>) * shortLine * dt / rod.power
 } <span class="k">else</span> {
-  F.dist    += pull * <span class="n">0.032</span> * dt                    <span class="cm">// 糸を出す=魚が遠ざかる</span>
+  F.dist    += pull * <span class="n">0.70</span> * dt                     <span class="cm">// 出る糸は距離に関係なく m/s</span>
   F.tension -= (<span class="n">1.30</span> + pull * <span class="n">0.30</span>) * dt
-  <span class="k">if</span> (F.running) F.tension += pull * <span class="n">0.30</span> * dt   <span class="cm">// 走られると放しても張る</span>
+  <span class="k">if</span> (F.running) F.tension += pull * <span class="n">0.30</span> * shortLine * dt   <span class="cm">// 走られると放しても張る</span>
 }
 F.tension = clamp(F.tension, <span class="n">0</span>, line.cap * <span class="n">1.2</span>)
 
@@ -257,15 +260,22 @@ F.stamina -= (<span class="n">0.022</span> + tRatio * <span class="n">0.17</span
 
 <span class="cm">// 決着</span>
 <span class="k">if</span> (F.tension &gt;= line.cap) → ラインブレイク
-<span class="k">if</span> (F.dist &gt;= <span class="n">1.0</span>)          → 逃走
-<span class="k">if</span> (F.dist &lt;= <span class="n">0.03</span>)         → 取り込み</pre>
+<span class="k">if</span> (F.dist &gt;= F.span)     → 逃走（F.span = 掛けた距離 + <span class="n">16</span>m）
+<span class="k">if</span> (F.dist &lt;= <span class="n">0.7</span>)          → 取り込み</pre>
     <p class="src">src/game.js — _updateFight()</p>
 
     <h4>ヒット時の初期値</h4>
     <pre>sizeF   = <span class="n">0.55</span> + (この個体の全長 / sp.len[1]) * <span class="n">0.75</span>   <span class="cm">// 0.55〜1.30</span>
 F.pull0 = sp.str * sizeF                              <span class="cm">// この個体の基礎引き</span>
-F.dist    = <span class="n">0.88</span>   F.tension = <span class="n">0</span>   F.stamina = <span class="n">1</span>
-F.runTimer = rand(<span class="n">1.4</span>, <span class="n">3.2</span>)                           <span class="cm">// 最初の突進までの秒数</span></pre>
+F.len0  = 掛けた地点までの距離（m）                     <span class="cm">// プレイヤー基準の水平距離</span>
+F.span  = min(F.len0 + <span class="n">16</span>, <span class="n">62</span>)                        <span class="cm">// ここまで走られたら逃走＝バーの上限</span>
+                                                      <span class="cm">// （62m = 糸の長さ。遠投時は余裕が縮む）</span>
+F.dist    = F.len0   F.tension = <span class="n">0</span>   F.stamina = <span class="n">1</span>
+F.runTimer = rand(<span class="n">1.4</span>, <span class="n">3.2</span>)                           <span class="cm">// 最初の突進までの秒数</span>
+
+<span class="cm">// 引きが強い魚（F.pull0 ≧ 1.2）は掛かった瞬間から走っている</span>
+F.running = F.pull0 &gt;= <span class="n">1.2</span>
+F.runDur  = rand(<span class="n">0.6</span>, <span class="n">1.2</span>) * P.runDur</pre>
     <p class="src">src/game.js — _setHook()</p>
 
     <h4>突進（ラン）の周期</h4>
@@ -336,15 +346,15 @@ F.runTimer = rand(<span class="n">1.4</span>, <span class="n">3.2</span>)       
     <div class="note q">
       <span class="qh">Q. ロッドの「竿の力（power）」「巻取（reel）」の違い？</span>
       <b>power はテンションの増加を割り算で抑える</b>値（＝竿が引きを吸収する）で、<code>tension += … / rod.power</code>。
-      <b>reel は巻き取り速度の倍率</b>で、<code>dist -= rod.reel × 0.28 × resist × dt</code>。
+      <b>reel は巻き取り速度の倍率</b>で、<code>dist -= rod.reel × 4.2 × resist × (1+dist×0.012) × dt</code>（m/s）。
       power は「切れにくさ」、reel は「早さ」に効きます。ラインブレイクを減らしたいなら <b>line.cap と rod.power</b>、
       ファイトを短くしたいなら <b>rod.reel</b> です。<code>attract</code> はファイトには無関係（アタリの速さと抽選）。
     </div>
 
     <div class="note warn">
-      <b>逃走（残り距離 1.0）は「巻けない」ことで起きます。</b>
-      放している間、距離は <code>pull × 0.032</code> /秒で増えます。強い魚の突進中（pull が 2 倍）は
-      <b>放すだけで 0.2/秒以上</b>取られることもあり、巻き取り（<code>rod.reel×0.28×resist</code>）が
+      <b>逃走は「掛けた地点より 16m 走られる」ことで起きます。</b>
+      放している間、距離は <code>pull × 0.70</code> m/秒で増えます。強い魚の突進中（pull が 2 倍）は
+      <b>放すだけで毎秒 4m 以上</b>取られることもあり、巻き取り（<code>rod.reel×4.2×resist</code>）が
       それを下回る装備だと<b>どう操作しても逃げられます</b>。これが装備の壁です。
     </div>
 
@@ -628,7 +638,7 @@ p    = <span class="n">2.1</span> − min(<span class="n">1.2</span>, bait.rare 
       ロッド・ラインは価格順の階段なので同種内の順位、エサは 1.0 を基準にしたしきい値で言葉に変換しています。
     </p>
     <h3>ロッド</h3>
-    <p><b>reel</b>＝巻き取り速度倍率（<code>dist -= reel×0.28×resist×dt</code>）、<b>power</b>＝テンション増加の割り算（大きいほど切れにくい）、<b>attract</b>＝アタリの速さと抽選重み。</p>
+    <p><b>reel</b>＝巻き取り速度倍率（<code>dist -= reel×4.2×resist×dt</code> m/s）、<b>power</b>＝テンション増加の割り算（大きいほど切れにくい）、<b>attract</b>＝アタリの速さと抽選重み。</p>
     <div class="tw" id="rodTable"></div>
 
     <h3>ライン</h3>
@@ -1005,13 +1015,16 @@ const avgLen = (sp, p = 2.1) => sp.len[0] + (sp.len[1] - sp.len[0]) * (1 / (p + 
 /* ============================================================
    1. ファイト・シミュレータ
    ============================================================ */
-function simulate(sp, len, rod, line, policy, delay, dt = 1 / 60, record = null) {
+function simulate(sp, len, rod, line, policy, delay, len0 = 22, dt = 1 / 60, record = null) {
   const cap = line.cap;
   const sizeF = 0.55 + (len / sp.len[1]) * 0.75;
   const pull0 = sp.str * sizeF;
   const P = fightPattern(sp);
-  let dist = 0.88, tension = 0, stamina = 1, t = 0;
-  let running = false, runTimer = rand(1.4, 3.2) * P.runGap, runDur = 0;
+  const span = Math.max(len0 + 4, Math.min(len0 + 16, 62));   // ここまで走られたら逃走
+  let dist = len0, tension = 0, stamina = 1, t = 0;
+  // 引きの強い魚は掛かった瞬間から走っている
+  const surge = pull0 >= 1.2 && P.runGap < 50;
+  let running = surge, runTimer = rand(1.4, 3.2) * P.runGap, runDur = surge ? rand(0.6, 1.2) * P.runDur : 0;
   let jumpQueued = 0, jumpT = 0, jumps = 0;
   let shakeT = rand(0.6, 1.3), shakeOn = false, shakeAge = 0;
   let reeling = true, wish = true, lastSwitch = -99;
@@ -1036,8 +1049,8 @@ function simulate(sp, len, rod, line, policy, delay, dt = 1 / 60, record = null)
       if (shakeOn) shakeAge += dt;
       if (shakeT <= 0) {
         shakeOn = !shakeOn; shakeAge = 0;
-        const span = shakeOn ? (P.shakeOn || [0.34, 0.62]) : (P.shakeOff || [0.65, 1.35]);
-        shakeT = rand(span[0], span[1]);
+        const sr = shakeOn ? (P.shakeOn || [0.34, 0.62]) : (P.shakeOff || [0.65, 1.35]);
+        shakeT = rand(sr[0], sr[1]);
       }
     } else shakeOn = false;
     const shakeBite = shakeOn && shakeAge > (P.shakeGrace || 0);
@@ -1054,17 +1067,18 @@ function simulate(sp, len, rod, line, policy, delay, dt = 1 / 60, record = null)
     if (want !== wish) { wish = want; lastSwitch = t; }
     if (t - lastSwitch >= delay) reeling = wish;
 
+    const shortLine = clamp(1.35 - dist * 0.025, 1.0, 1.35);
     if (reeling) {
       const resist = clamp(1.70 - pull * 0.75, 0.35, 1.60) * (shakeBite ? P.shakeReel : 1);
-      dist -= rod.reel * 0.28 * resist * dt;
-      let gain = (0.08 + pull * 0.55) * P.tensionGain;
+      dist -= rod.reel * 4.2 * resist * (1 + dist * 0.012) * dt;
+      let gain = (0.08 + pull * 0.55) * P.tensionGain * shortLine;
       if (shakeBite) gain *= P.shakeGain;
       if (jumpBite) gain *= P.jumpTension;
       tension += (gain * dt) / rod.power;
     } else {
-      dist += pull * 0.032 * P.lineOut * dt;
+      dist += pull * 0.70 * P.lineOut * dt;
       tension -= (1.30 + pull * 0.30) * P.tensionDecay * dt;
-      if (running) tension += pull * 0.30 * dt;
+      if (running) tension += pull * 0.30 * shortLine * dt;
       if (jumping) stamina -= (P.jumpDrain || 0) * dt;
     }
     tension = clamp(tension, 0, cap * 1.2);
@@ -1072,21 +1086,21 @@ function simulate(sp, len, rod, line, policy, delay, dt = 1 / 60, record = null)
     stamina = clamp01(stamina - ((0.022 + tRatio * 0.17 + (reeling ? 0.02 : 0)) * P.staminaDrain * dt) / Math.max(0.4, sp.sta));
 
     if (record && record.length < 4000) {
-      record.push({ t, tr: tRatio, d: clamp01(dist), s: stamina, run: running, shake: shakeOn, jump: jumping });
+      record.push({ t, tr: tRatio, d: clamp01(dist / span), s: stamina, run: running, shake: shakeOn, jump: jumping });
     }
 
     if (tension >= cap) return { r: 'snap', t };
-    if (dist >= 1.0) return { r: 'escape', t };
-    if (dist <= 0.03) return { r: 'land', t };
+    if (dist >= span) return { r: 'escape', t };
+    if (dist <= 0.7) return { r: 'land', t };
   }
   return { r: 'timeout', t };
 }
 
-function evaluate(sp, len, rod, line, policy, delay, n) {
+function evaluate(sp, len, rod, line, policy, delay, n, len0 = 22) {
   let land = 0, snap = 0, escape = 0;
   const times = [];
   for (let i = 0; i < n; i++) {
-    const r = simulate(sp, len, rod, line, policy, delay);
+    const r = simulate(sp, len, rod, line, policy, delay, len0);
     if (r.r === 'land') { land++; times.push(r.t); }
     else if (r.r === 'snap') snap++;
     else escape++;
@@ -1099,7 +1113,7 @@ function evaluate(sp, len, rod, line, policy, delay, n) {
 }
 
 /* --- 単体シミュレータ UI --- */
-const simState = { sp: 'koi', size: 'avg', rod: 'bamboo', line: 'nylon', policy: 0.7, delay: 0.2 };
+const simState = { sp: 'koi', size: 'avg', rod: 'bamboo', line: 'nylon', policy: 0.7, delay: 0.2, len0: 22 };
 
 function ctlSelect(label, id, options, value, onChange) {
   const d = el('div', 'ctl');
@@ -1136,6 +1150,7 @@ function renderSimCtl() {
   c.appendChild(ctlSelect('個体サイズ', 'size', [['avg', '平均サイズ（範囲の32%）'], ['big', '大型（80%）'], ['max', '最大サイズ']], simState.size, (v) => { simState.size = v; runSim(); }));
   c.appendChild(ctlSelect('ロッド', 'rod', RODS.map((r) => [r.id, r.name]), simState.rod, (v) => { simState.rod = v; runSim(); }));
   c.appendChild(ctlSelect('ライン', 'line', LINES.map((l) => [l.id, `${l.name}（cap ${l.cap}）`]), simState.line, (v) => { simState.line = v; runSim(); }));
+  c.appendChild(ctlRange('掛けた距離（m）', 'len0', 5, 50, 1, simState.len0, (v) => v.toFixed(0) + 'm', (v) => { simState.len0 = v; runSim(); }));
   c.appendChild(ctlRange('巻くのをやめるテンション比', 'pol', 0.3, 0.99, 0.01, simState.policy, (v) => pct(v), (v) => { simState.policy = v; runSim(); }));
   c.appendChild(ctlRange('反応遅れ（秒）', 'del', 0, 0.6, 0.05, simState.delay, (v) => v.toFixed(2) + 's', (v) => { simState.delay = v; runSim(); }));
 }
@@ -1151,15 +1166,15 @@ function runSim() {
   const rod = RODS.find((r) => r.id === simState.rod);
   const line = LINES.find((l) => l.id === simState.line);
   const len = lenFor(sp);
-  const e = evaluate(sp, len, rod, line, simState.policy, simState.delay, 200);
+  const e = evaluate(sp, len, rod, line, simState.policy, simState.delay, 200, simState.len0);
   const sizeF = 0.55 + (len / sp.len[1]) * 0.75;
   const pull0 = sp.str * sizeF;
   const gain = (0.08 + pull0 * 0.55) / rod.power;
   const gainRun = (0.08 + pull0 * 2 * 0.55) / rod.power;
   const snapT = line.cap / gain;
   const resist = clamp(1.70 - pull0 * 0.75, 0.35, 1.60);
-  const reelRate = rod.reel * 0.28 * resist;
-  const lossRate = pull0 * 2 * 0.032;
+  const reelRate = rod.reel * 4.2 * resist * (1 + simState.len0 * 0.012);
+  const lossRate = pull0 * 2 * 0.70;
 
   const out = document.getElementById('simOut');
   const clr = (v, g, b) => (v >= g ? 'var(--good)' : v >= b ? 'var(--warn)' : 'var(--bad)');
@@ -1171,7 +1186,8 @@ function runSim() {
     <div class="stat"><div class="k">全長 / 基礎引き pull0</div><div class="v" style="font-size:15px">${f1(len)}cm<br>${f2(pull0)}</div></div>
     <div class="stat"><div class="k">張力↑（通常/突進）</div><div class="v" style="font-size:15px">${f2(gain)}<br>${f2(gainRun)} /s</div></div>
     <div class="stat"><div class="k">全力で巻き続けて<br>切れるまで</div><div class="v" style="font-size:15px">${snapT.toFixed(1)}s</div></div>
-    <div class="stat"><div class="k">巻取 vs 突進で出る糸</div><div class="v" style="font-size:15px;color:${reelRate > lossRate ? 'var(--good)' : 'var(--bad)'}">${f2(reelRate)}<br>${f2(lossRate)} /s</div></div>`;
+    <div class="stat"><div class="k">巻取 vs 突進で出る糸</div><div class="v" style="font-size:15px;color:${reelRate > lossRate ? 'var(--good)' : 'var(--bad)'}">${f2(reelRate)}<br>${f2(lossRate)} m/s</div></div>
+    <div class="stat"><div class="k">寄せる距離 / 逃走まで</div><div class="v" style="font-size:15px">${f1(simState.len0)}m<br>${f1(Math.min(simState.len0 + 16, 62))}m</div></div>`;
 
   let v = '', vc = 'var(--fg-mute)';
   if (e.land >= 0.95) { v = '✅ この装備なら安定して獲れます。'; vc = 'var(--good)'; }
@@ -1180,11 +1196,11 @@ function runSim() {
   else { v = '❌ 巻き負けて逃げられる。<b>reel の高いロッド</b>が必要（放している間に取られる糸が巻き取り量を上回っています）。'; vc = 'var(--bad)'; }
   const vd = document.getElementById('simVerdict');
   vd.style.borderLeftColor = vc;
-  vd.innerHTML = v + `　<span style="color:var(--fg-mute);font-size:12px">（${sp.name} ${f1(len)}cm / ${rod.name} / ${line.name} / 閾値 ${pct(simState.policy)} / 遅れ ${simState.delay.toFixed(2)}s・200回試行）</span>`;
+  vd.innerHTML = v + `　<span style="color:var(--fg-mute);font-size:12px">（${sp.name} ${f1(len)}cm / ${rod.name} / ${line.name} / ${f1(simState.len0)}m 先 / 閾値 ${pct(simState.policy)} / 遅れ ${simState.delay.toFixed(2)}s・200回試行）</span>`;
 
   // 代表的な1回を記録して描画
   const rec = [];
-  simulate(sp, len, rod, line, simState.policy, simState.delay, 1 / 60, rec);
+  simulate(sp, len, rod, line, simState.policy, simState.delay, simState.len0, 1 / 60, rec);
   drawChart(rec);
 }
 
@@ -1247,13 +1263,14 @@ function drawChart(rec) {
 }
 
 /* --- 一括シミュレータ --- */
-const tblState = { rod: 'bamboo', line: 'nylon', policy: 0.7, delay: 0.2, size: 'avg' };
+const tblState = { rod: 'bamboo', line: 'nylon', policy: 0.7, delay: 0.2, size: 'avg', len0: 22 };
 function renderTblCtl() {
   const c = document.getElementById('tblCtl');
   c.innerHTML = '';
   c.appendChild(ctlSelect('ロッド', 'trod', RODS.map((r) => [r.id, r.name]), tblState.rod, (v) => { tblState.rod = v; runTbl(); }));
   c.appendChild(ctlSelect('ライン', 'tline', LINES.map((l) => [l.id, `${l.name}（cap ${l.cap}）`]), tblState.line, (v) => { tblState.line = v; runTbl(); }));
   c.appendChild(ctlSelect('個体サイズ', 'tsize', [['avg', '平均サイズ（32%）'], ['big', '大型（80%）'], ['max', '最大サイズ']], tblState.size, (v) => { tblState.size = v; runTbl(); }));
+  c.appendChild(ctlRange('掛けた距離（m）', 'tlen0', 5, 50, 1, tblState.len0, (v) => v.toFixed(0) + 'm', (v) => { tblState.len0 = v; runTbl(); }));
   c.appendChild(ctlRange('やめるテンション比', 'tpol', 0.3, 0.99, 0.01, tblState.policy, (v) => pct(v), (v) => { tblState.policy = v; runTbl(); }));
   c.appendChild(ctlRange('反応遅れ（秒）', 'tdel', 0, 0.6, 0.05, tblState.delay, (v) => v.toFixed(2) + 's', (v) => { tblState.delay = v; runTbl(); }));
 }
@@ -1263,7 +1280,7 @@ function runTbl() {
   const rows = FISH.map((sp) => {
     const len = tblState.size === 'max' ? sp.len[1]
       : tblState.size === 'big' ? sp.len[0] + (sp.len[1] - sp.len[0]) * 0.8 : avgLen(sp);
-    const e = evaluate(sp, len, rod, line, tblState.policy, tblState.delay, 120);
+    const e = evaluate(sp, len, rod, line, tblState.policy, tblState.delay, 120, tblState.len0);
     const sizeF = 0.55 + (len / sp.len[1]) * 0.75;
     return { sp, len, e, pull0: sp.str * sizeF };
   });
@@ -1292,7 +1309,7 @@ function runTbl() {
   }).join('')}
   </tbody>
   <tfoot><tr><td colspan="13" class="l">${rod.name}（reel ${rod.reel} / power ${rod.power}）+ ${line.name}（cap ${line.cap}）／
-  テンション比 ${pct(tblState.policy)} で離す・反応遅れ ${tblState.delay.toFixed(2)}s・各 120 回試行</td></tr></tfoot></table>`;
+  ${f1(tblState.len0)}m 先に掛けた場合・テンション比 ${pct(tblState.policy)} で離す・反応遅れ ${tblState.delay.toFixed(2)}s・各 120 回試行</td></tr></tfoot></table>`;
 }
 
 /* ============================================================
@@ -1564,9 +1581,9 @@ function runRoll() {
     </tr></thead><tbody>${RODS.map((r) => `<tr>
       <td class="l name">${ico(r.icon)}${r.name}</td><td class="num">${r.price.toLocaleString()}</td><td class="num">${r.level}</td>
       <td class="num" style="color:var(--cyan)">${r.reel}</td><td class="num" style="color:var(--good)">${r.power}</td>
-      <td class="num">${r.attract}</td><td class="num">${f2(r.reel * 0.28 * 1.6)}</td>
+      <td class="num">${r.attract}</td><td class="num">${f2(r.reel * 4.2 * 1.6)}</td>
       <td class="l" style="white-space:normal;color:var(--fg-dim)">${r.desc}</td></tr>`).join('')}</tbody>
-      <tfoot><tr><td colspan="8" class="l">巻取速度は resist が最大（1.60・ごく弱い魚）のときの <code>dist</code> 減少量。実際は魚の引きに応じて 0.35〜1.60 倍。</td></tr></tfoot></table>`;
+      <tfoot><tr><td colspan="8" class="l">巻取速度は resist が最大（1.60・ごく弱い魚）のときの寄せ速度（m/s）。実際は魚の引きに応じて 0.35〜1.60 倍で、遠いうちは <code>(1+dist×0.012)</code> ぶん速い。</td></tr></tfoot></table>`;
 
   document.getElementById('lineTable').innerHTML = `<table><thead><tr>
     <th class="l">ライン</th><th class="num">価格 G</th><th class="num">解禁 Lv</th><th class="num">cap<br><span style="opacity:.6">強度</span></th>

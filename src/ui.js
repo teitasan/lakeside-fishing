@@ -282,6 +282,7 @@ export class UI {
       powerTrack: document.querySelector('.pm-track'), aim: $('aim'),
       fight: $('fight-panel'), fightName: $('fight-name'), fightSub: $('fight-sub'),
       tension: $('tension-fill'), dist: $('dist-fill'), stam: $('stam-fill'),
+      distNum: $('dist-num'), distMark: $('dist-mark'),
       danger: $('danger-flash'), biteAlert: $('bite-alert'), toasts: $('toasts'),
       loading: $('loading'), title: $('title-screen'),
       catchCard: $('catch-card'), shop: $('shop'), journal: $('journal'), pause: $('pause'),
@@ -464,6 +465,17 @@ export class UI {
     }
     this.el.tension.style.width = (clamp01(d.tension) * 100).toFixed(1) + '%';
     this.el.dist.style.width = (clamp01(d.dist) * 100).toFixed(1) + '%';
+    // 残りメートルと「掛けた地点」の目印（バーの上限は掛けた距離＋余裕）
+    const dm = Math.max(0, Math.round(d.distM ?? 0));
+    if (dm !== this._last.distM) {
+      this.el.distNum.textContent = `${dm} m`;
+      this._last.distM = dm;
+    }
+    const hk = (clamp01(d.hookAt ?? 1) * 100).toFixed(1) + '%';
+    if (hk !== this._last.hookAt) {
+      this.el.distMark.style.left = hk;
+      this._last.hookAt = hk;
+    }
     this.el.stam.style.width = (clamp01(d.stam) * 100).toFixed(1) + '%';
     const danger = d.tension > 0.82;
     if (danger !== this._last.danger) {

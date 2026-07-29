@@ -32,6 +32,16 @@ const AIM_MAX = 50;            // 照準が届く最大距離
 const CAST_TOL = 0.06;         // 目印に合っていると見なすパワーの許容差
 const HOURS_PER_SEC = 1 / 60;   // 実 1 秒 = ゲーム内 1 分（1 日 = 実 24 分）
 const MAX_LINE = 62;
+/* ファイト（残り距離は実際のメートル）
+   REEL_MPS  巻き取り速度の基準（m/s）。ロッドの reel と魚の抵抗で増減する
+   LINEOUT_MPS 糸を送っているときに出ていく速さ（m/s・引きの強さ 1 あたり）
+   RUN_MARGIN 掛けた地点よりどれだけ走られたら逃走か（m）。距離に関係なく一定に
+              しているので、バーの「目印から右端まで」はいつでも同じ 16m ぶん
+   LAND_M    ここまで寄せたら取り込み */
+const REEL_MPS = 4.2;
+const LINEOUT_MPS = 0.70;
+const RUN_MARGIN = 16;
+const LAND_M = 0.7;
 const EYE_H = 1.62;
 /* レベル解禁前でも残る重みの下限（伝説タグの魚は対象外＝完全に解禁待ち）
    0.008 = Lv1・深い淵の底層・夜で エピックが約 1%（100 回のアタリに 1 回）。
@@ -789,13 +799,25 @@ export class Game {
     f.state = 'hooked';
     const sizeF = 0.55 + (f.length / sp.len[1]) * 0.75;
     const pattern = fightPattern(sp);
+    /* 残り距離は実際のメートルで持つ（近くに掛けたら早く寄る）。
+       バーの上限は「掛けた距離 + 走られてよい余裕（一定）」 */
+    this.bobberFar = this.bobber.clone();
+    const len0 = Math.max(2.5, Math.hypot(
+      this.bobber.x - (this.pos.x + Math.sin(this.yaw) * 1.6),
+      this.bobber.z - (this.pos.z + Math.cos(this.yaw) * 1.6)
+    ));
+    const surge = sp.str * sizeF >= 1.2 && pattern.runGap < 50;
     this.fight = {
-      dist: 0.88,
+      len0,
+      // 糸は MAX_LINE ぶんしか無いので、遠投したときの余裕はそこで打ち止め
+      span: Math.max(len0 + 4, Math.min(len0 + RUN_MARGIN, MAX_LINE)),
+      dist: len0,
       tension: 0,
       stamina: 1,
       runTimer: rand(1.4, 3.2) * pattern.runGap,
-      running: false,
-      runDur: 0,
+      // 重い魚は掛かった瞬間に走る（近くに掛けても一方的にならないように）
+      running: surge,
+      runDur: surge ? rand(0.6, 1.2) * pattern.runDur : 0,
       lateral: 0,
       sizeF,
       pull0: sp.str * sizeF,
@@ -812,6 +834,7 @@ export class Game {
     this.stateTime = 0;
     this.water.addSplash(this.bobber.x, this.water.surfaceY(this.bobber.x, this.bobber.z), this.bobber.z, 14, 1.0);
     this.water.addRipple(this.bobber.x, this.bobber.z, 1.1, 1.4);
+    if (surge) this.audio.drag();
     // レア度ではなく「手応え」と「ファイトの型」で知らせる（種は取り込むまで伏せる）
     const heavy = this.fight.pull0;
     this.ui.toast(
@@ -1629,21 +1652,24 @@ export class Game {
     const jumpBite = jumping && F.jumpT < jumpDur - (P.jumpGrace || 0);
 
     const reeling = this.actionHeld;
+    // 糸が短いほど衝撃を吸収できない＝テンションが跳ねやすい
+    const shortLine = clamp(1.35 - F.dist * 0.025, 1.0, 1.35);
     const pull = F.pull0 * P.pull * (F.running ? 2.0 * P.runPull : 1.0) * (0.5 + 0.5 * F.stamina);
 
     if (reeling) {
       const resist = clamp(1.70 - pull * 0.75, 0.35, 1.60) * (shakeBite ? P.shakeReel : 1);
-      const rate = this.rod.reel * 0.28 * resist;
+      // m/s。遠いうちは糸を送り込むだけなので速く、寄せるほど重くなる
+      const rate = this.rod.reel * REEL_MPS * resist * (1 + F.dist * 0.012);
       F.dist -= rate * dt;
-      let gain = (0.08 + pull * 0.55) * P.tensionGain;
+      let gain = (0.08 + pull * 0.55) * P.tensionGain * shortLine;
       if (shakeBite) gain *= P.shakeGain;
       if (jumpBite) gain *= P.jumpTension;
       F.tension += gain * dt / this.rod.power;
       this.audio.reelTick(0.7 + resist);
     } else {
-      F.dist += pull * 0.032 * P.lineOut * dt;
+      F.dist += pull * LINEOUT_MPS * P.lineOut * dt;   // 出される糸は距離に関係なく m/s
       F.tension -= (1.30 + pull * 0.30) * P.tensionDecay * dt;
-      if (F.running) F.tension += pull * 0.30 * dt;
+      if (F.running) F.tension += pull * 0.30 * shortLine * dt;
       // 跳ねている間に糸を送れていれば、魚が余計に消耗する
       if (jumping) F.stamina -= (P.jumpDrain || 0) * dt;
     }
@@ -1662,15 +1688,21 @@ export class Game {
     const far = _v3.copy(this.bobberFar);
 
     F.lateral = damp(F.lateral, (F.running ? Math.sin(F.time * 1.7) * 1.9 : Math.sin(F.time * 0.9) * 0.7), 3, dt);
-    const t = clamp01(F.dist);
-    const fx = lerp(near.x, far.x, t);
-    const fz = lerp(near.z, far.z, t);
-    // 横ずれ（線と直交方向）
-    const dx = far.x - near.x, dz = far.z - near.z;
+    const t = clamp01(F.dist / F.span);
+    // 着水点の方向へ、残り距離ぶん離した所に魚を置く（メートルそのまま）
+    let dx = far.x - near.x, dz = far.z - near.z;
     const dl = Math.hypot(dx, dz) || 1;
-    const px = -dz / dl, pz = dx / dl;
-    const wx = fx + px * F.lateral;
-    const wz = fz + pz * F.lateral;
+    dx /= dl; dz /= dl;
+    const px = -dz, pz = dx;
+    // 着水点より外へ出るときは、陸に乗らない所までにする
+    let reach = F.dist;
+    for (let i = 0; i < 4 && reach > dl; i++) {
+      if (this.terrain.depthAt(near.x + dx * reach + px * F.lateral,
+        near.z + dz * reach + pz * F.lateral) > 0.35) break;
+      reach = dl + (reach - dl) * 0.5;
+    }
+    const wx = near.x + dx * reach + px * F.lateral;
+    const wz = near.z + dz * reach + pz * F.lateral;
     const depth = this.terrain.depthAt(wx, wz);
     const surf = this.water.surfaceY(wx, wz);
     // 疲れると浮いてくる
@@ -1732,6 +1764,8 @@ export class Game {
             : `${P.name}｜${reeling ? '巻いている' : '待機'}`,
       tension: tRatio,
       dist: t,
+      distM: F.dist,
+      hookAt: F.len0 / F.span,
       stam: F.stamina,
       reeling,
     });
@@ -1745,8 +1779,8 @@ export class Game {
 
     /* --- 決着 --- */
     if (F.tension >= cap) return this._lineSnap();
-    if (F.dist >= 1.0) return this._fishEscaped();
-    if (F.dist <= 0.03) return this._land();
+    if (F.dist >= F.span) return this._fishEscaped();
+    if (F.dist <= LAND_M) return this._land();
   }
 
   _lineSnap() {

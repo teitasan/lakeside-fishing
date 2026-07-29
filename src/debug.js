@@ -402,7 +402,7 @@ ${kv('水底', (() => { const a = ['wait','nibble','bite'].includes(g.fs) ? g.bo
 ${kv('charge', fmt2(g.charge))}${kv('cast dist', fmt1(g.castDist) + ' m')}
 ${kv('line hit', this.lineObstruct ? `<span class="bad">${this.lineObstruct}</span>` : 'clear')}${kv('cast warn', g.fs === 'charge' && g.castObstruction ? `<span class="bad">${g.castObstruction}</span>` : '—')}
 ${kv('hooked', g.hookFish ? `${g.hookFish.species.name} ${fmt1(g.hookFish.length)}cm` : '—')}
-${F ? `${kv('dist', fmt2(F.dist))}${kv('tension', `${fmt2(F.tension)} / ${g.line.cap} (${(F.tension / g.line.cap * 100).toFixed(0)}%)`)}
+${F ? `${kv('dist', `${fmt1(F.dist)} / ${fmt1(F.span)} m（掛 ${fmt1(F.len0)}）`)}${kv('tension', `${fmt2(F.tension)} / ${g.line.cap} (${(F.tension / g.line.cap * 100).toFixed(0)}%)`)}
 ${kv('stamina', fmt2(F.stamina))}${kv('pull0', fmt2(F.pull0))}
 ${kv('pattern', `<b class="hl">${F.pattern.id}</b>`)}${kv('sizeF', fmt2(F.sizeF))}
 ${kv('running', F.running ? '<span class="bad">RUN</span>' : 'no')}${kv('shake/jump', `${F.shakeOn ? '<span class="bad">SHAKE</span>' : '-'} / ${F.jumpT > 0 ? '<span class="bad">JUMP</span>' : F.jumpQueued > 0 ? fmt1(F.jumpQueued) : '-'}`)}` : ''}`;
