@@ -136,12 +136,38 @@ export class Water {
       fragmentShader: /* glsl */ `
         ${COMMON_GLSL}
         uniform vec3 uSunDir, uSunColor, uZenith, uHorizon, uFogColor, uShallow, uDeep, uCamPos;
-        uniform float uTime, uNight, uRain, uFogNear, uFogFar, uExposure, uWind;
+        uniform float uTime, uNight, uRain, uFogNear, uFogFar, uExposure, uWind, uRegion;
+        uniform sampler2D uHeightTex;
         varying vec3 vWorld;
         varying vec2 vWaveD;
         varying float vDepth;
         varying float vFogDepth;
         varying float vWaveH;
+
+        /** その位置の湖底の深さ（m。陸なら 0） */
+        float bedDepth(vec2 xz) {
+          float g = texture2D(uHeightTex, clamp(xz / uRegion + 0.5, vec2(0.0005), vec2(0.9995))).r;
+          return max(0.0, -g);
+        }
+
+        /**
+         * 視線が水中を通る距離。
+         * 水面のその点の水深ではなく「そこから湖底に当たるまで実際に水を通る長さ」を使うと、
+         * 浅瀬越しに深場を覗いても濁って見えなくなる（現実と同じ）。
+         * 湖底は高さフィールドなので t = 深さ/下向き成分 の不動点反復で近似する。
+         * 湖底が視線より速く落ちていく（＝奥が深場）ときは収束せず t が伸び、
+         * それがそのまま「水を長く通る＝見えない」になる。
+         */
+        float waterPath(vec3 pos, vec3 dir, float depth0) {
+          float dy = max(-dir.y, 0.015);
+          float t = depth0 / dy;
+          for (int i = 0; i < 3; i++) {
+            vec2 q = pos.xz + dir.xz * t;
+            t = bedDepth(q) / dy;
+            if (t > 90.0) break;
+          }
+          return clamp(t, 0.0, 90.0);
+        }
 
         vec3 skyAt(vec3 dir) {
           float g = pow(clamp(dir.y, 0.0, 1.0), 0.62);
@@ -179,8 +205,9 @@ export class Water {
           R.y = abs(R.y);
           vec3 refl = skyAt(R);
 
-          // --- 水中の色 ---
-          float dn = smoothstep(0.1, 9.0, vDepth);
+          // --- 水中の色（視線が通る水の長さで濃くする） ---
+          float path = waterPath(vWorld, -V, vDepth);
+          float dn = smoothstep(0.15, 11.0, path);
           vec3 body = mix(uShallow, uDeep, dn);
           body *= mix(0.22, 1.0, 1.0 - uNight * 0.82);
 
@@ -219,8 +246,10 @@ export class Water {
             col += vec3(0.5) * drop * uRain;
           }
 
-          // --- アルファ（浅場は湖底が見える） ---
-          float alpha = mix(0.30, 0.965, smoothstep(0.05, 5.5, vDepth));
+          /* --- アルファ ---
+             覗き込んだ浅瀬は底が見え、浅瀬越しに深場を見たときは
+             水を長く通るので見えなくなる */
+          float alpha = mix(0.30, 0.965, smoothstep(0.08, 6.5, path));
           alpha = max(alpha, fres * 0.9);
           alpha = max(alpha, foam * 0.95);
           if (under) alpha = 0.86;
