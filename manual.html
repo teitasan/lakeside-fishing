@@ -738,32 +738,33 @@ y(t) = lerp(先端, 着水点, t) − sin(πt) × min(距離×<span class="n">0.
       <tfoot><tr><td colspan="6" class="l">波の大きさ <code>1 + 雨×1.15 + 雲量×0.18</code>。雨は魚の <code>weather</code> 倍率にも効く（ウグイ・ドジョウ・ナマズ・イワナ・湖の主 = 1.8）。</td></tr></tfoot>
     </table></div>
 
-    <h3>水の透明度</h3>
+    <h3>水中の見え方（描画）</h3>
     <p>
-      屈折は実装していませんが、<b>視線が水中を通る長さ（光学的厚み）</b>と<b>濁り</b>で不透明度を決めています。
-      水面のその点の水深で決めると<b>浅瀬越しに奥の深場まで透けて見えてしまい</b>、
-      湖底に当たるまでの距離を逆算する方式だと<b>透ける／透けないが急に切り替わって</b>境目が出てしまったため、
-      視線に沿って積む方式にしています。
+      水面を<b>半透明で被せる</b>方式をやめ、<b>シーンを一度テクスチャに描いてから水中の減衰で合成する</b>方式にしています。
+      半透明だと「湖底の明るい砂」と「水の濃紺」の差が大きく、不透明度をどれだけ滑らかに変えても
+      <b>見える所と見えない所の境目が線として出て</b>しまうためです。
     </p>
-    <pre><span class="cm">// 視線を 1.7m ずつ 10 回進めて「水中にある区間」を積む（境目は smoothstep でぼかす）</span>
-acc = Σ smoothstep(<span class="n">0.3</span>, −<span class="n">0.3</span>, q.y)               <span class="cm">// 水面より下</span>
-        × smoothstep(湖底−<span class="n">0.55</span>, 湖底+<span class="n">0.55</span>, q.y)    <span class="cm">// 湖底より上</span>
-        × <span class="n">1.7</span>
+    <pre><span class="cm">// 1) 毎フレーム、水面（と波紋・しぶき）を隠してシーンを RT に描く</span>
+<span class="cm">//    空・雨・陸の木や岩は水越しに写らないので除外。解像度は 0.4〜0.7 倍</span>
+water.capture(renderer, scene, camera)     <span class="cm">// 影はこのパスで更新し本描画では再利用</span>
 
-不透明度 = mix(<span class="n">0.26</span>, <span class="n">0.965</span>, smoothstep(<span class="n">0.35</span>, <span class="n">8.0</span>, acc))   <span class="cm">// 厚み</span>
-         を max(濁り, フレネル) で上書き
-濁り     = smoothstep(<span class="n">5</span>, <span class="n">22</span>, カメラからの距離) × <span class="n">0.92</span>      <span class="cm">// 湖水はそこまで澄んでいない</span>
-フレネル = (pow(1−N·V, <span class="n">5</span>)×<span class="n">0.94</span> + <span class="n">0.045</span>) × <span class="n">0.9</span>
-水の色   = mix(浅い色, 深い色, smoothstep(<span class="n">0.4</span>, <span class="n">13</span>, acc))</pre>
-    <p class="src">src/water.js — opticalDepth()</p>
+<span class="cm">// 2) 水面シェーダで、深度テクスチャから「水面の奥にある物までの距離」を出す</span>
+path = min(奥の物までの距離, 視線が水中を通る長さ + <span class="n">1.5</span>)
+
+<span class="cm">// 3) 下から来る光と、水面の反射をフレネルで混ぜる</span>
+透過率 = exp(−吸収 × path)                 <span class="cm">// 吸収 = (0.46, 0.20, 0.13)/m ＝ 赤から消える</span>
+濁り   = smoothstep(<span class="n">7</span>, <span class="n">30</span>, カメラからの距離)
+下     = mix(mix(水の色, シーン色, 透過率), 水の色, 濁り)
+出力   = mix(下, 反射＋太陽のきらめき, フレネル) を 泡で上書き</pre>
+    <p class="src">src/water.js — capture() / opticalDepth() / src/game.js — update()</p>
     <div class="note">
-      積む方式にしたので、<b>湖底が視線から離れていくほど厚みが増え</b>、浅瀬越しの深場は自然に見えなくなります。
-      さらに距離による濁りを重ねてあるので、<b>足元を覗き込めば底が見え、10 m 以上先は閉じる</b>という見え方になります。
-      実測（桟橋の先端から岸の浅瀬を見る）：<br>
-      見下ろし 22°（7.4 m 先・水深 8.1 m）不透明度 <b>0.96</b> →
-      16°（10 m 先・7.0 m）<b>0.95</b> →
-      12°（13.3 m 先・4.9 m）<b>0.74</b> →
-      9°（17.7 m 先・1.7 m）<b>0.77</b> と、段差なく変わります。
+      湖底は<b>「水の色に溶けていく」</b>ので境目が出ません。赤から先に吸収されるため、
+      深くなるにつれて自然に青緑へ沈みます。魚や仕掛けも同じ減衰を受けるので、
+      深い所の魚はぼんやり消えていきます。<br>
+      反射と太陽のきらめきは<b>フレネルの重みだけ</b>載るようになったので、
+      真下を覗き込んだときに水面のテカリで底が見えなくなることもありません。<br>
+      コストはシーン 1 枚ぶんの追加描画（0.55 倍解像度・空と陸の装飾は除外）。
+      屈折は入れていません。
     </div>
 
     <h3>地形と水深</h3>

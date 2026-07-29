@@ -197,6 +197,9 @@ export class Game {
     this.angler.setPosition(this.pos.x, this.pos.y, this.pos.z);
     this.angler.setYaw(this.yaw);
 
+    /* 水越しの絵に写らないもの（空・雨・陸の木と岩）はキャプチャから外す */
+    this.water.setCaptureHidden([this.env.sky, this.env.rain, ...(this.terrain.landProps || [])]);
+
     this.school.populate(this.pos, (d) => this.rollSpecies(d));
     if (this.state.settings.debug) this.debug.setEnabled(true);
     if (this.state.settings.fpv) this._setFirstPerson(true, true);
@@ -882,6 +885,8 @@ export class Game {
     });
 
     this.ui.updateHUD(this);
+    // 水越しの絵のために、水面を隠したシーンを 1 枚描いておく
+    this.water.capture(this.renderer, this.scene, this.camera);
     this.renderer.render(this.scene, this.camera);
     this.debug.update(dt);
   }

@@ -97,13 +97,23 @@ export class Water {
       uDeep: { value: new THREE.Color(0x0a2740) },
       uExposure: { value: opts.exposure ?? 1.0 },
       uCamPos: { value: new THREE.Vector3() },
+      /* 水中の見え方：シーンを一度描いたテクスチャを、水を通る距離で減衰させて合成する。
+         「不透明度で水を被せる」方式だと湖底の色との差で境目が出るため */
+      uSceneColor: { value: null },
+      uSceneDepth: { value: null },
+      uResolution: { value: new THREE.Vector2(1, 1) },
+      uCamNear: { value: 0.1 },
+      uCamFar: { value: 3000 },
+      // 1m あたりの吸収（赤から先に消える）
+      uAbsorb: { value: new THREE.Vector3(0.46, 0.20, 0.13) },
+      uDebug: { value: 0 },   // 1=シーンテクスチャ 2=水の厚み（開発用）
     };
 
     const mat = new THREE.ShaderMaterial({
       uniforms: this.uniforms,
-      transparent: true,
+      transparent: false,
       side: THREE.DoubleSide,
-      depthWrite: false,
+      depthWrite: true,
       vertexShader: /* glsl */ `
         ${waveGLSL()}
         uniform float uTime, uWind, uRegion;
@@ -135,14 +145,22 @@ export class Water {
       `,
       fragmentShader: /* glsl */ `
         ${COMMON_GLSL}
-        uniform vec3 uSunDir, uSunColor, uZenith, uHorizon, uFogColor, uShallow, uDeep, uCamPos;
-        uniform float uTime, uNight, uRain, uFogNear, uFogFar, uExposure, uWind, uRegion;
-        uniform sampler2D uHeightTex;
+        uniform vec3 uSunDir, uSunColor, uZenith, uHorizon, uFogColor, uShallow, uDeep, uCamPos, uAbsorb;
+        uniform float uTime, uNight, uRain, uFogNear, uFogFar, uExposure, uWind, uRegion, uCamNear, uCamFar;
+        uniform sampler2D uHeightTex, uSceneColor, uSceneDepth;
+        uniform vec2 uResolution;
+        uniform float uDebug;
         varying vec3 vWorld;
         varying vec2 vWaveD;
         varying float vDepth;
         varying float vFogDepth;
         varying float vWaveH;
+
+        /** 深度テクスチャの値 → ビュー空間の z 距離（m） */
+        float eyeZ(float depth) {
+          float z = depth * 2.0 - 1.0;                                   // NDC
+          return (2.0 * uCamNear * uCamFar) / (uCamFar + uCamNear - z * (uCamFar - uCamNear));
+        }
 
         /** その位置の湖底の高さ（水面 0 基準。水中は負） */
         float bedHeight(vec2 xz) {
@@ -206,23 +224,31 @@ export class Water {
           R.y = abs(R.y);
           vec3 refl = skyAt(R);
 
-          // --- 水中の色（視線が通る水の長さで濃くする） ---
-          float path = opticalDepth(vWorld, -V);
+          /* --- 水中の見え方 ---
+             シーンを描いたテクスチャから「水面より奥にある物」を取り出し、
+             水を通る距離ぶん指数関数で減衰させる。距離はピクセルごとに
+             連続なので、透ける／透けないの境目が出ない */
+          vec2 suv = gl_FragCoord.xy / uResolution;
+          float sceneZ = eyeZ(texture2D(uSceneDepth, suv).x);
+          // ビュー空間の z 差を視線方向の長さに直す
+          float rayScale = length(vWorld - uCamPos) / max(vFogDepth, 0.001);
+          float thick = max(0.0, sceneZ - vFogDepth) * rayScale;
+          float path = min(thick, opticalDepth(vWorld, -V) + 1.5);
+          vec3 sceneCol = texture2D(uSceneColor, suv).rgb;
+
           float dn = smoothstep(0.4, 13.0, path);
           vec3 body = mix(uShallow, uDeep, dn);
           body *= mix(0.22, 1.0, 1.0 - uNight * 0.82);
 
-          vec3 col = mix(body, refl, under ? 0.55 : fres);
-
-          // --- 太陽の映り込み ---
+          /* --- 水面で反射する光（空 + 太陽・月のきらめき） --- */
+          vec3 surf = refl;
           vec3 H = normalize(V + uSunDir);
           float spec = pow(max(dot(N, H), 0.0), 620.0) * 5.5
                      + pow(max(dot(N, H), 0.0), 48.0) * 0.35;
-          col += uSunColor * spec * (1.0 - uNight) * (1.0 - uRain * 0.4);
-          // 月光（きらめきの道になるよう広めに）
+          surf += uSunColor * spec * (1.0 - uNight) * (1.0 - uRain * 0.4);
           vec3 MH = normalize(V - uSunDir);
           float mnd = max(dot(N, MH), 0.0);
-          col += vec3(0.72, 0.82, 1.0) * (pow(mnd, 300.0) * 1.5 + pow(mnd, 34.0) * 0.10) * uNight;
+          surf += vec3(0.72, 0.82, 1.0) * (pow(mnd, 300.0) * 1.5 + pow(mnd, 34.0) * 0.10) * uNight;
 
           // --- 泡 ---
           float lap = smoothstep(0.42, 0.0, vDepth + vWaveH * 1.3);
@@ -232,7 +258,6 @@ export class Water {
           float crestFoam = crest * smoothstep(0.35, 0.75, vnoise(vWorld.xz * 2.2 + uTime * 0.3)) * 0.5;
           float foam = clamp(shoreFoam + crestFoam, 0.0, 1.0);
           vec3 foamCol = mix(vec3(0.72, 0.78, 0.80), vec3(1.0), 0.5) * mix(0.35, 1.0, 1.0 - uNight * 0.7);
-          col = mix(col, foamCol, foam * 0.9);
 
           // --- 雨粒 ---
           if (uRain > 0.02) {
@@ -241,29 +266,30 @@ export class Water {
             float cellT = floor(t);
             vec2 cell = floor(rp);
             float r = hash21(cell + cellT * 7.1);
-            float ring = fract(t) ;
+            float ring = fract(t);
             float d = length(fract(rp) - vec2(0.5));
             float drop = smoothstep(0.02, 0.0, abs(d - ring * 0.5)) * step(0.86, r) * (1.0 - ring);
-            col += vec3(0.5) * drop * uRain;
+            surf += vec3(0.5) * drop * uRain;
           }
 
-          /* --- アルファ ---
-             覗き込んだ浅瀬は底が見え、浅瀬越しに深場を見たときは
-             水を長く通るので見えなくなる */
-          float alpha = mix(0.26, 0.965, smoothstep(0.35, 8.0, path));
-          /* 濁り：湖の水はそこまで澄んでいないので、離れるほど底が見えなくなる。
-             覗き込んだ足元は見え、10m 以上先は閉じる（距離は画面上で連続に変わるので境目が出ない） */
-          float murk = smoothstep(5.0, 22.0, length(uCamPos - vWorld)) * 0.92;
-          alpha = max(alpha, murk);
-          alpha = max(alpha, fres * 0.9);
-          alpha = max(alpha, foam * 0.95);
-          if (under) alpha = 0.86;
+          /* --- 合成 ---
+             下から来る光（湖底が水で減衰したもの）と、水面の反射をフレネルで混ぜる。
+             不透明度で被せる方式と違い、湖底は「水の色に溶けていく」ので境目が出ない */
+          vec3 bodyEnc = encodeOutput(body, uExposure);
+          vec3 trans = exp(-uAbsorb * path);
+          float murk = smoothstep(7.0, 30.0, length(vWorld - uCamPos));
+          vec3 below = mix(mix(bodyEnc, sceneCol, trans), bodyEnc, murk);
+          vec3 outc = mix(below, encodeOutput(surf, uExposure), under ? 0.35 : fres);
+          outc = mix(outc, encodeOutput(foamCol, uExposure), foam * 0.9);
 
+          if (uDebug > 0.5) {
+            if (uDebug < 1.5) { gl_FragColor = vec4(sceneCol, 1.0); return; }
+            gl_FragColor = vec4(vec3(clamp(path / 12.0, 0.0, 1.0)), 1.0); return;
+          }
           // --- フォグ ---
           float fog = smoothstep(uFogNear, uFogFar, vFogDepth);
-          vec3 outc = encodeOutput(col, uExposure);
           outc = mix(outc, encodeOutput(uFogColor, uExposure), fog);
-          gl_FragColor = vec4(outc, alpha * (1.0 - fog * 0.85) + fog * 0.85);
+          gl_FragColor = vec4(outc, 1.0);
         }
       `,
     });
@@ -276,6 +302,61 @@ export class Water {
 
     this._buildRipples();
     this._buildSplash();
+
+    /* 水面より下を写すレンダーターゲット。水越しの絵はぼやけて見えるので
+       解像度は 0.6 倍で足りる（負荷も下がる） */
+    this.rtScale = opts.quality === 'low' ? 0.4 : opts.quality === 'high' ? 0.7 : 0.55;
+    this.rt = null;
+  }
+
+  /** 画面サイズに合わせてレンダーターゲットを用意する */
+  _ensureRT(renderer) {
+    const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+    const w = Math.max(2, Math.floor(size.x * this.rtScale));
+    const h = Math.max(2, Math.floor(size.y * this.rtScale));
+    if (this.rt && this.rt.width === w && this.rt.height === h) return;
+    if (this.rt) this.rt.dispose();
+    const depth = new THREE.DepthTexture(w, h);
+    depth.type = THREE.UnsignedIntType;
+    this.rt = new THREE.WebGLRenderTarget(w, h, {
+      depthTexture: depth,
+      depthBuffer: true,
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      generateMipmaps: false,
+    });
+    this.rt.texture.colorSpace = THREE.SRGBColorSpace;   // 画面と同じ色空間で受け取る
+    this.uniforms.uSceneColor.value = this.rt.texture;
+    this.uniforms.uSceneDepth.value = depth;
+    this.uniforms.uResolution.value.set(size.x, size.y);
+  }
+
+  /**
+   * 水面を隠した状態でシーンを 1 枚描いておく（毎フレーム、本描画の直前に呼ぶ）。
+   * これを水面シェーダが読んで、水中の減衰込みで合成する
+   */
+  /** 水越しには写らないもの（空・雨・陸の木や岩）を登録しておくと、キャプチャを軽くできる */
+  setCaptureHidden(list) {
+    this._extraHidden = (list || []).filter(Boolean);
+  }
+
+  capture(renderer, scene, camera) {
+    this._ensureRT(renderer);
+    this.uniforms.uCamNear.value = camera.near;
+    this.uniforms.uCamFar.value = camera.far;
+    const hidden = [this.mesh, this.splash, ...(this._extraHidden || [])];
+    for (const r of this.ripples) hidden.push(r.mesh);
+    const vis = hidden.map((o) => o.visible);
+    for (const o of hidden) o.visible = false;
+    const prevTarget = renderer.getRenderTarget();
+    renderer.setRenderTarget(this.rt);
+    renderer.clear();
+    // 影はこのパスで更新し、本描画では作り直さない（1 フレーム 2 回描くので）
+    renderer.shadowMap.autoUpdate = true;
+    renderer.render(scene, camera);
+    renderer.shadowMap.autoUpdate = false;
+    renderer.setRenderTarget(prevTarget);
+    hidden.forEach((o, i) => { o.visible = vis[i]; });
   }
 
   /* ---------------- CPU 側のサンプリング ---------------- */

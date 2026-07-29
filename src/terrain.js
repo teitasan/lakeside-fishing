@@ -541,6 +541,7 @@ export class Terrain {
     leaves.instanceMatrix.needsUpdate = true;
     if (leaves.instanceColor) leaves.instanceColor.needsUpdate = true;
     this.scene.add(trunks, leaves);
+    this.landProps = [trunks, leaves];
 
     /* --- 岩 --- */
     const rockGeo = new THREE.IcosahedronGeometry(1, 0);
@@ -572,6 +573,7 @@ export class Terrain {
     rocks.count = ri;
     rocks.instanceMatrix.needsUpdate = true;
     this.scene.add(rocks);
+    this.landProps.push(rocks);
 
     /* --- 岩場の転石 ---
        底質が岩の所に小さめの石をたくさん置いて、見た目で「岩場」と分かるようにする。
