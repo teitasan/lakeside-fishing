@@ -146,8 +146,8 @@ export class Water {
       fragmentShader: /* glsl */ `
         ${COMMON_GLSL}
         uniform vec3 uSunDir, uSunColor, uZenith, uHorizon, uFogColor, uShallow, uDeep, uCamPos, uAbsorb;
-        uniform float uTime, uNight, uRain, uFogNear, uFogFar, uExposure, uWind, uRegion, uCamNear, uCamFar;
-        uniform sampler2D uHeightTex, uSceneColor, uSceneDepth;
+        uniform float uTime, uNight, uRain, uFogNear, uFogFar, uExposure, uWind, uCamNear, uCamFar;
+        uniform sampler2D uSceneColor, uSceneDepth;
         uniform vec2 uResolution;
         uniform float uDebug;
         varying vec3 vWorld;
@@ -160,32 +160,6 @@ export class Water {
         float eyeZ(float depth) {
           float z = depth * 2.0 - 1.0;                                   // NDC
           return (2.0 * uCamNear * uCamFar) / (uCamFar + uCamNear - z * (uCamFar - uCamNear));
-        }
-
-        /** その位置の湖底の高さ（水面 0 基準。水中は負） */
-        float bedHeight(vec2 xz) {
-          return texture2D(uHeightTex, clamp(xz / uRegion + 0.5, vec2(0.0005), vec2(0.9995))).r;
-        }
-
-        /**
-         * 視線が水中を通る長さ（光学的厚み）。
-         * 水面のその点の水深で決めると、浅瀬越しに奥の深場まで透けてしまう。
-         * かわりに視線を一定間隔で進めて「水中にある区間」を積む。
-         * 湖底と水面の境は smoothstep でぼかすので、透ける／透けないが
-         * 急に切り替わらず、画面上でも滑らかに変わる。
-         */
-        float opticalDepth(vec3 pos, vec3 dir) {
-          const float STEP = 1.7;
-          float acc = 0.0;
-          vec3 q = pos + dir * (STEP * 0.5);
-          for (int i = 0; i < 10; i++) {
-            float bed = bedHeight(q.xz);
-            float below = smoothstep(0.3, -0.3, q.y);            // 水面より下
-            float above = smoothstep(bed - 0.55, bed + 0.55, q.y); // 湖底より上
-            acc += below * above * STEP;
-            q += dir * STEP;
-          }
-          return acc;
         }
 
         vec3 skyAt(vec3 dir) {
@@ -232,8 +206,7 @@ export class Water {
           float sceneZ = eyeZ(texture2D(uSceneDepth, suv).x);
           // ビュー空間の z 差を視線方向の長さに直す
           float rayScale = length(vWorld - uCamPos) / max(vFogDepth, 0.001);
-          float thick = max(0.0, sceneZ - vFogDepth) * rayScale;
-          float path = min(thick, opticalDepth(vWorld, -V) + 1.5);
+          float path = max(0.0, sceneZ - vFogDepth) * rayScale;
           vec3 sceneCol = texture2D(uSceneColor, suv).rgb;
 
           float dn = smoothstep(0.4, 13.0, path);
@@ -277,8 +250,7 @@ export class Water {
              不透明度で被せる方式と違い、湖底は「水の色に溶けていく」ので境目が出ない */
           vec3 bodyEnc = encodeOutput(body, uExposure);
           vec3 trans = exp(-uAbsorb * path);
-          float murk = smoothstep(7.0, 30.0, length(vWorld - uCamPos));
-          vec3 below = mix(mix(bodyEnc, sceneCol, trans), bodyEnc, murk);
+          vec3 below = mix(bodyEnc, sceneCol, trans);
           vec3 outc = mix(below, encodeOutput(surf, uExposure), under ? 0.35 : fres);
           outc = mix(outc, encodeOutput(foamCol, uExposure), foam * 0.9);
 

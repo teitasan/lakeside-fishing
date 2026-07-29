@@ -198,7 +198,7 @@ export class Game {
     this.angler.setYaw(this.yaw);
 
     /* 水越しの絵に写らないもの（空・雨・陸の木と岩）はキャプチャから外す */
-    this.water.setCaptureHidden([this.env.sky, this.env.rain, ...(this.terrain.landProps || [])]);
+    this.water.setCaptureHidden([this.env.sky, this.env.rain, ...(this.terrain.overWaterProps || [])]);
 
     this.school.populate(this.pos, (d) => this.rollSpecies(d));
     if (this.state.settings.debug) this.debug.setEnabled(true);
