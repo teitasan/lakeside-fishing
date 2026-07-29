@@ -811,11 +811,20 @@ v = clamp01(<span class="n">0.52</span> + ノイズ×<span class="n">0.62</span>
             <span><i style="background:#ffd479;width:9px;height:9px;border-radius:50%"></i>桟橋</span>
             <span><i style="background:#c86bff;width:9px;height:9px;border-radius:50%"></i>深い淵</span>
             <span><i style="background:#6de08a;width:9px;height:9px;border-radius:50%"></i>藻場</span>
+            <span><i style="background:#ff9a5a;width:9px;height:9px;border-radius:50%"></i>沈み岩</span>
+            <span><i style="background:#ff9a5a;width:8px;height:8px;transform:rotate(45deg)"></i>立ち枯れ</span>
             <span style="opacity:.7">白い輪 = 桟橋からキャストが届く範囲</span>
+          </div>
+          <div class="legend" id="lakeBedLegend" style="display:none">
+            <span><i style="background:#b8a06a"></i>砂地</span>
+            <span><i style="background:#74787a"></i>岩場</span>
+            <span><i style="background:#4a4a3c"></i>泥底</span>
+            <span style="opacity:.7">明るいほど浅い</span>
           </div>
         </div>
         <div class="tw" id="lakeProfile"></div>
       </div>
+      <div class="tw" id="lakeDirs" style="margin-top:10px"></div>
     </div>
 
     <div class="grid c2">
@@ -1594,7 +1603,7 @@ const savedSeed = (() => {
     return typeof s === 'number' && isFinite(s) ? s : 20240711;
   } catch (e) { return 20240711; }
 })();
-const lakeState = { seed: savedSeed };
+const lakeState = { seed: savedSeed, view: 'depth' };
 
 function renderLakeCtl() {
   const c = document.getElementById('lakeCtl');
@@ -1618,6 +1627,9 @@ function renderLakeCtl() {
   b1.onclick = () => { lakeState.seed = randomSeed(); runLake(); };
   d2.appendChild(b1);
   c.appendChild(d2);
+
+  c.appendChild(ctlSelect('マップの表示', 'lakeView', [['depth', '水深'], ['bed', '底質（砂地・岩場・泥底）']], lakeState.view,
+    (v) => { lakeState.view = v; runLake(); }));
 
   const d3 = el('div', 'ctl');
   d3.appendChild(el('label', '', '　'));
@@ -1653,7 +1665,9 @@ function runLake() {
     <div class="stat"><div class="k">淵まで（先端から）</div><div class="v" style="font-size:16px">${S.holeFromDock.toFixed(0)}m</div></div>
     <div class="stat"><div class="k">藻場</div><div class="v" style="color:var(--good)">${f1(S.flatDepth)}m</div></div>
     <div class="stat"><div class="k">狙える水深</div><div class="v" style="font-size:16px">${f1(S.minDepth)}〜${f1(S.maxDepth)}m</div></div>
-    <div class="stat"><div class="k">床のクリアランス</div><div class="v" style="font-size:16px">${f2(S.dockClearance)}m</div></div>`;
+    <div class="stat"><div class="k">床のクリアランス</div><div class="v" style="font-size:16px">${f2(S.dockClearance)}m</div></div>
+    <div class="stat"><div class="k">ストラクチャー</div><div class="v" style="font-size:16px;color:#ff9a5a">${S.structures} 個<br><span style="font-size:11px;opacity:.7">桟橋から ${S.structNearDock}</span></div></div>
+    <div class="stat"><div class="k">先端の水底</div><div class="v" style="font-size:16px">${BED_LABEL[lake.bedAt(D.end.x, D.end.z).kind]}</div></div>`;
 
   const bandsTxt = [['shallow', '浅場1〜4m'], ['mid', '中層5〜10m'], ['deep', '深場12〜18m'], ['veryDeep', '深淵20m+']]
     .map(([k, l]) => `<span style="color:${S.bands[k] ? 'var(--good)' : 'var(--bad)'}">${S.bands[k] ? '○' : '✗'} ${l}</span>`).join('　');
@@ -1670,12 +1684,40 @@ function runLake() {
   for (const dd of [0, 5, 10, 15, 20, 25, 30, 35, 40, 46]) {
     const x = D.end.x + dirx * dd, z = D.end.z + dirz * dd;
     const d = lake.depthAt(x, z);
-    rows.push(`<tr><td class="l">先端から ${dd} m</td><td class="num" style="color:${d >= 17 ? 'var(--violet)' : d >= 12 ? 'var(--cyan)' : 'inherit'}">${d > 0 ? f1(d) + ' m' : '—'}</td></tr>`);
+    const near = lake.structures.find((t) => (t.x - x) ** 2 + (t.z - z) ** 2 < 5 * 5);
+    rows.push(`<tr><td class="l">先端から ${dd} m</td>
+      <td class="num" style="color:${d >= 17 ? 'var(--violet)' : d >= 12 ? 'var(--cyan)' : 'inherit'}">${d > 0 ? f1(d) + ' m' : '—'}</td>
+      <td class="num" style="font-size:11px">${d > 0.4 ? BED_LABEL[lake.bedAt(x, z).kind] : '—'}</td>
+      <td class="num" style="font-size:11px;color:#ff9a5a">${near ? (near.kind === 'rock' ? '岩' : '枯木') : ''}</td></tr>`);
+  }
+  /* 方角ごとの斜面（緩急がひと目で分かるように） */
+  const dirRows = [];
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const ca = Math.cos(a), sa = Math.sin(a);
+    const sr = lake.shoreAtAngle(a);
+    const cells = [5, 10, 20, 30].map((dd) => {
+      const r = sr - dd;
+      const d = lake.depthAt(ca * r, sa * r);
+      const col = d >= 17 ? 'var(--violet)' : d >= 12 ? 'var(--cyan)' : d < 3 ? 'var(--good)' : 'inherit';
+      return `<td class="num" style="color:${col}">${f1(d)}</td>`;
+    }).join('');
+    const d20 = lake.depthAt(ca * (sr - 20), sa * (sr - 20));
+    const kind = d20 > 11 ? '<b style="color:var(--warn)">急</b>' : d20 < 5 ? '<b style="color:var(--good)">緩</b>' : 'ふつう';
+    dirRows.push(`<tr><td class="l">${(i * 45)}°</td><td class="num">${sr.toFixed(0)}</td>${cells}<td class="l">${kind}</td></tr>`);
   }
   document.getElementById('lakeProfile').innerHTML =
-    `<table><thead><tr><th class="l">桟橋から正面へ</th><th class="num">水深</th></tr></thead><tbody>${rows.join('')}</tbody>
-     <tfoot><tr><td colspan="2" class="l">紫 = 白龍魚(17m+) / 水色 = 湖の主(14m+) が成立する水深</td></tr></tfoot></table>`;
+    `<table><thead><tr><th class="l">桟橋から正面へ</th><th class="num">水深</th><th class="num">水底</th><th class="num">構造</th></tr></thead>
+     <tbody>${rows.join('')}</tbody>
+     <tfoot><tr><td colspan="4" class="l">紫 = 白龍魚(17m+) / 水色 = 湖の主(14m+) が成立する水深。構造物は 5 m 以内にあるもの</td></tr></tfoot></table>`;
+  document.getElementById('lakeDirs').innerHTML =
+    `<table><thead><tr><th class="l">方角</th><th class="num">岸線<br>半径m</th>
+     <th class="num">岸から<br>5m</th><th class="num">10m</th><th class="num">20m</th><th class="num">30m</th><th class="l">斜面</th></tr></thead>
+     <tbody>${dirRows.join('')}</tbody>
+     <tfoot><tr><td colspan="7" class="l">方角ごとに斜面の指数（0.46〜1.30）とかけあがりが変わるので、
+       同じ湖でも<b>緩い浅棚の岸</b>と<b>急に落ちる岸</b>が混在します（20 m 沖で 11 m 超なら急、5 m 未満なら緩と表示）。</td></tr></tfoot></table>`;
 
+  document.getElementById('lakeBedLegend').style.display = lakeState.view === 'bed' ? '' : 'none';
   drawLakeMap(lake, S);
 }
 
@@ -1695,8 +1737,16 @@ function drawLakeMap(lake, S) {
       let col;
       if (h < 0) {
         const t = clamp01(-h / 25);
-        const r = Math.round(lerp(90, 8, t)), g = Math.round(lerp(190, 40, t)), b = Math.round(lerp(190, 95, t));
-        col = `rgb(${r},${g},${b})`;
+        if (lakeState.view === 'bed') {
+          // 底質モード：砂地 / 岩場 / 泥底。深いほど暗く
+          const kind = lake.bedAt(x, z).kind;
+          const base = kind === 'sand' ? [184, 160, 106] : kind === 'rock' ? [116, 120, 122] : [74, 74, 60];
+          const sh = lerp(1.05, 0.42, t);
+          col = `rgb(${Math.round(base[0] * sh)},${Math.round(base[1] * sh)},${Math.round(base[2] * sh)})`;
+        } else {
+          const r = Math.round(lerp(90, 8, t)), g = Math.round(lerp(190, 40, t)), b = Math.round(lerp(190, 95, t));
+          col = `rgb(${r},${g},${b})`;
+        }
       } else if (h < 1.2) col = '#c8b78a';
       else if (h < 22) { const t = clamp01((h - 1.2) / 22); col = `rgb(${Math.round(lerp(90, 60, t))},${Math.round(lerp(130, 90, t))},${Math.round(lerp(70, 55, t))})`; }
       else if (h < 60) { const t = clamp01((h - 22) / 38); col = `rgb(${Math.round(lerp(105, 140, t))},${Math.round(lerp(100, 135, t))},${Math.round(lerp(95, 135, t))})`; }
@@ -1722,6 +1772,15 @@ function drawLakeMap(lake, S) {
   };
   ring(lake.hole, 22, '#c86bff');
   ring(lake.flat, 22, '#6de08a');
+  // 水中ストラクチャー（● 沈み岩 / ◆ 立ち枯れ）
+  for (const t of lake.structures) {
+    const [tx, ty] = P(t.x, t.z);
+    ctx.fillStyle = '#ff9a5a';
+    ctx.beginPath();
+    if (t.kind === 'rock') ctx.arc(tx, ty, 2.6, 0, Math.PI * 2);
+    else { ctx.moveTo(tx, ty - 3); ctx.lineTo(tx + 3, ty); ctx.lineTo(tx, ty + 3); ctx.lineTo(tx - 3, ty); }
+    ctx.fill();
+  }
   // 桟橋
   const [sx, sy] = P(D.start.x, D.start.z);
   ctx.strokeStyle = '#ffd479'; ctx.lineWidth = 3;
