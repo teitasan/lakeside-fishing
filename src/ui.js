@@ -3,7 +3,7 @@
    =========================================================== */
 import {
   SPECIES, RARITY, GEAR, GEAR_LABEL, ACHIEVEMENTS, RIG_LAYERS,
-  valueOf, gearStats, swimLayer, swimLayerLabel, depthFit, dielNote,
+  valueOf, gearStats, swimLayer, swimLayerLabel, depthFit, dielNote, BED_LABEL,
 } from './data.js';
 import { PROFILES, BODY, profileAt, CRUST_SHAPES } from './fish.js';
 import { fmtInt, fmt1, fmtWeight, fmtClock, timeBand, timeBandLabel, clamp01 } from './util.js';
@@ -676,6 +676,11 @@ export class UI {
     // 開いた時点の狙い先の水深と時間帯で判定する（開いている間はゲームが止まる）
     this._rigSpotDepth = this.game.hudDepth > 0 ? this.game.hudDepth : null;
     this._rigBand = timeBand(this.game.state.clock);
+    // 狙い先の底質と、近くの水中ストラクチャー
+    const g0 = this.game;
+    const at = g0.fs === 'idle' || g0.fs === 'charge' ? g0.aimPoint : g0.bobber;
+    this._rigBed = at && this._rigSpotDepth ? g0.terrain.bedAt(at.x, at.z).kind : null;
+    this._rigStruct = at && this._rigSpotDepth ? g0.terrain.structureNear(at.x, at.z, 4.5) : null;
     this.renderRig();
     this.el.rigWin.classList.add('open');
     this.openModal = 'rig';
@@ -693,6 +698,10 @@ export class UI {
       el.querySelector('.mt').textContent = L.short;
     }
     $('rig-depth').textContent = spot != null ? `${fmt1(spot)} m` : '—';
+    const st = this._rigStruct;
+    $('rig-bed').innerHTML = this._rigBed
+      ? `${BED_LABEL[this._rigBed]}${st ? `<span style="color:var(--gold)"> ＋${st.kind === 'rock' ? '沈み岩' : '立ち枯れ'}</span>` : ''}`
+      : '—';
     $('rig-note').textContent = `${cur.desc}（いまは${timeBandLabel(g.state.clock)}）`;
 
     /* ここ（その水深）× この層 で食いつく魚。生息水深と遊泳層の両方で絞る。

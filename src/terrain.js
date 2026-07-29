@@ -145,13 +145,20 @@ export class Terrain {
     const rocky = clamp01((slope - 0.5) * 1.6);
 
     if (h < -0.15) {
-      // 湖底：浅場は砂、深場は暗い泥
+      /* 湖底：底質（砂地・岩場・泥底）で色を変える。
+         深いほど暗く落として、水の透明度と合わせる */
+      const bed = this.lake.bedAt(x, z, slope);
       const d = clamp01(-h / 16);
-      out.setRGB(
-        lerp(0.42, 0.075, d) + n * 0.05,
-        lerp(0.38, 0.10, d) + n * 0.05,
-        lerp(0.26, 0.09, d) + n * 0.03
-      );
+      const shade = lerp(1.0, 0.34, d);
+      if (bed.kind === 'rock') {
+        out.setRGB((0.40 + n * 0.10) * shade, (0.39 + n * 0.09) * shade, (0.36 + n * 0.08) * shade);
+      } else if (bed.kind === 'sand') {
+        out.setRGB((0.52 + n * 0.07) * shade, (0.46 + n * 0.06) * shade, (0.31 + n * 0.05) * shade);
+      } else {
+        out.setRGB((0.26 + n * 0.05) * shade, (0.25 + n * 0.05) * shade, (0.19 + n * 0.04) * shade);
+      }
+      // 砂と岩の境目を少し混ぜて、パッチの縁を柔らかくする
+      if (bed.v > 0.62 && bed.v < 0.74) out.multiplyScalar(0.94);
     } else if (h < 1.1) {
       // 汀線の砂浜
       const t = clamp01((h + 0.15) / 1.25);
@@ -375,6 +382,19 @@ export class Terrain {
 
   /* ---------------- 障害物（岩・木） ---------------- */
   /** @param top 上端の高さ（糸の判定に使う） */
+  /** 水中ストラクチャーが近くにあるか（あれば一番近いものを返す） */
+  structureNear(x, z, radius = 4.5) {
+    let best = null, bd = radius * radius;
+    for (const t of this.structures || []) {
+      const d = (t.x - x) ** 2 + (t.z - z) ** 2;
+      if (d < bd) { bd = d; best = t; }
+    }
+    return best;
+  }
+
+  /** 底質（'mud' | 'sand' | 'rock'） */
+  bedAt(x, z) { return this.lake.bedAt(x, z); }
+
   addObstacle(x, z, r, top = 0) {
     this.obstacles.push(x, z, r, top);
     const key = ((Math.floor(x / OBS_CELL) & 1023) << 10) | (Math.floor(z / OBS_CELL) & 1023);
@@ -552,6 +572,67 @@ export class Terrain {
     rocks.count = ri;
     rocks.instanceMatrix.needsUpdate = true;
     this.scene.add(rocks);
+
+    /* --- 水中のストラクチャー（沈み岩・立ち枯れ） ---
+       湖底に置いて、必ず水面より下に収める。糸は水面上を通るので
+       キャストの邪魔にはならないが、水中カメラで見えて魚が付く */
+    this.structures = [];
+    {
+      const sRocks = new THREE.InstancedMesh(
+        rockGeo,
+        new THREE.MeshStandardMaterial({ color: 0x4e5550, roughness: 0.98, flatShading: true }),
+        Math.max(1, this.lake.structures.length * 3)
+      );
+      sRocks.receiveShadow = true;
+      const snagMat = new THREE.MeshStandardMaterial({ color: 0x4a4034, roughness: 1, flatShading: true });
+      const snagGeo = new THREE.CylinderGeometry(0.16, 0.30, 1, 5);
+      snagGeo.translate(0, 0.5, 0);
+      const snags = new THREE.InstancedMesh(snagGeo, snagMat, Math.max(1, this.lake.structures.length * 5));
+      let si = 0, gi = 0;
+      for (const t of this.lake.structures) {
+        const bedY = this.heightAt(t.x, t.z);
+        if (t.kind === 'rock') {
+          // 3 つの岩を寄せて 1 つのシモリにする
+          for (let k = 0; k < 3; k++) {
+            const ox = (k === 0 ? 0 : (k === 1 ? 1 : -1)) * t.r * 0.75;
+            const oz = (k === 0 ? 0 : (k === 1 ? -1 : 1)) * t.r * 0.55;
+            const sc = t.r * (k === 0 ? 1 : 0.62) * (0.85 + t.v * 0.3);
+            qt.setFromEuler(new THREE.Euler(t.rot + k, t.rot * 1.7, t.v * 3));
+            p.set(t.x + ox, bedY + sc * 0.35, t.z + oz);
+            s.set(sc, sc * (0.55 + t.v * 0.35), sc);
+            m.compose(p, qt, s);
+            if (si < sRocks.count) sRocks.setMatrixAt(si++, m);
+          }
+        } else {
+          // 立ち枯れ：幹 + 枝 3〜4 本
+          qt.setFromAxisAngle(UP, t.rot);
+          const lean = 0.12 + t.v * 0.3;
+          const q2 = new THREE.Quaternion().setFromEuler(new THREE.Euler(lean, t.rot, 0));
+          p.set(t.x, bedY, t.z);
+          s.set(t.r * 2.2, t.h, t.r * 2.2);
+          m.compose(p, q2, s);
+          if (gi < snags.count) snags.setMatrixAt(gi++, m);
+          const branches = 3 + (t.v > 0.6 ? 1 : 0);
+          for (let k = 0; k < branches; k++) {
+            const ba = t.rot + k * (TAU / branches);
+            const bh = bedY + t.h * (0.45 + 0.16 * k);
+            const bq = new THREE.Quaternion().setFromEuler(new THREE.Euler(1.0 + t.v * 0.5, ba, 0));
+            p.set(t.x, bh, t.z);
+            s.set(t.r * 1.1, t.h * (0.42 - k * 0.06), t.r * 1.1);
+            m.compose(p, bq, s);
+            if (gi < snags.count) snags.setMatrixAt(gi++, m);
+          }
+        }
+        // 当たり判定（上端は水面下なので、糸には掛からない＝キャストの邪魔をしない）
+        this.addObstacle(t.x, t.z, t.r * 1.15, bedY + t.h);
+        this.structures.push({ x: t.x, z: t.z, kind: t.kind, r: t.r, top: bedY + t.h, depth: t.depth });
+      }
+      sRocks.count = si;
+      snags.count = gi;
+      sRocks.instanceMatrix.needsUpdate = true;
+      snags.instanceMatrix.needsUpdate = true;
+      this.scene.add(sRocks, snags);
+    }
 
     /* --- 葦（浅場） --- */
     const reedGeo = new THREE.ConeGeometry(0.06, 1, 4, 1, true);

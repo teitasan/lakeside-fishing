@@ -394,6 +394,8 @@ F.runTimer = rand(<span class="n">1.4</span>, <span class="n">3.2</span>)       
   × エサ相性                                            <span class="cm">// ⑤ タグの平均</span>
   × 遊泳層[プレイヤーが選んだ層]                        <span class="cm">// ⑥ 水中のどこで食うか</span>
   × (レア度≧3 なら bait.rare) × rod.attract             <span class="cm">// ⑦ レア補正</span>
+  × 底質の相性 ^ 層の底寄り度                            <span class="cm">// ⑧ 砂地/岩場/泥底</span>
+  × (近くにストラクチャーがあれば その倍率)              <span class="cm">// ⑨ 沈み岩・立ち枯れ</span>
   × レベル解禁（エピック/レジェンドのみ）
 
 <span class="cm">// ② 生息水深：sp.depth = [d0, d1] は「その魚が居る場所の水深」</span>
@@ -409,8 +411,16 @@ d0 ≦ 水深 ≦ d1              → <span class="n">1.00</span>
 <span class="cm">//    一部の魚は時間帯ごとに重みが入れ替わる（日周鉛直移動）。</span>
 <span class="cm">//    また ② の生息水深も sp.diel で時間帯ごとに上下する（夜に浅場へ差す魚）</span>
 
-<span class="cm">// ⑦ レベル解禁（伝説タグ以外は下限 0.013 = 解禁前でも極低確率で掛かる）</span>
-レア度4（エピック）  × max(<span class="n">0.013</span>, clamp01((Lv − <span class="n">2</span>) / <span class="n">5</span>))  <span class="cm">// Lv3 から出始め Lv7 で全開</span>
+<span class="cm">// ⑧ 底質（タグ平均の倍率）。底寄り度は 底層 1 / 中層 0.35 / 表層 0.1 乗</span>
+砂地: bottom 1.30 carp 1.15 deep 1.10 trout 1.05 predator 0.90 weed 0.70
+岩場: predator 1.50 weed 1.35 trout 1.25 bottom 1.10 deep 0.95 carp 0.70
+泥底: carp 1.50 bottom 1.45 deep 1.10 weed 1.05 predator 0.80 trout 0.75
+
+<span class="cm">// ⑨ ストラクチャー（ウキから 4.5m 以内）</span>
+肉食魚・藻場 ×<span class="n">1.45</span> / 底物 ×<span class="n">1.3</span> / 鱒 ×<span class="n">1.15</span> / それ以外 ×<span class="n">0.95</span>
+
+<span class="cm">// ⑩ レベル解禁（伝説タグ以外は下限 0.008 = 解禁前でも極低確率で掛かる）</span>
+レア度4（エピック）  × max(<span class="n">0.008</span>, clamp01((Lv − <span class="n">2</span>) / <span class="n">5</span>))  <span class="cm">// Lv3 から出始め Lv7 で全開</span>
 レア度5（レジェンド）× clamp01((Lv − <span class="n">5</span>) / <span class="n">6</span>)           <span class="cm">// 湖の主・白龍魚は tags に legend → 下限なし</span></pre>
 
     <div class="note">
@@ -536,7 +546,7 @@ d0 ≦ 水深 ≦ d1              → <span class="n">1.00</span>
         78 m 以上離れる／水深 0.35 m 未満に乗り上げると 26〜58 m 先へ入れ替わります。</p></div>
       <div class="card tight"><h4>ただし条件は違う</h4><p>泳いでいる魚の抽選には<b>エサ・タナ・ロッド・レベル解禁が掛かりません</b>。
         つまり Lv1 でも<b>レジェンドが泳いでいるのは見えます</b>。アタリの抽選ではレア度 4 が Lv3〜7、
-        レア度 5 が Lv6〜11 で解禁されますが、<b>伝説（湖の主・白龍魚）以外は解禁前も重み 0.013 で残る</b>ので、
+        レア度 5 が Lv6〜11 で解禁されますが、<b>伝説（湖の主・白龍魚）以外は解禁前も重み 0.008 で残る</b>ので、
         Lv1 でもエピックが掛かることがあります。</p></div>
     </div>
 
@@ -735,9 +745,25 @@ y(t) = lerp(先端, 着水点, t) − sin(πt) × min(距離×<span class="n">0.
       生成は <code>src/lakefield.js</code> にあり、<b>採用前に検証を通す</b>ことで「破綻」と「詰み」を防いでいます。
     </p>
     <pre><span class="cm">// 湖底の高さ（over = 岸線からの距離、k = 1 − r/岸線半径）</span>
-岸線半径 = clamp(<span class="n">130</span> + <span class="n">34</span> × ノイズ(方角), <span class="n">92</span>, <span class="n">168</span>)     <span class="cm">// 角度だけの関数 → 湖は常に1つ</span>
-水中: h = −(<span class="n">26</span> × k^<span class="n">0.6</span> × smoothstep(<span class="n">0</span>, <span class="n">0.075</span>, k)) + 湖底ノイズ×<span class="n">1.35</span>k − 淵 + 藻場
+岸線半径 = clamp(<span class="n">130</span> + <span class="n">34</span>×うねり(方角) + <span class="n">12</span>×入り組み(方角), <span class="n">88</span>, <span class="n">172</span>)
+  <span class="cm">// 角度だけの関数なので、どんなに入り組んでも湖は常に1つ（島も内陸湖もできない）</span>
+
+<span class="cm">// 斜面は方角ごとに変わる：指数が小さいほど急、大きいほど広い浅棚</span>
+指数 exp     = <span class="n">0.46</span> 〜 <span class="n">1.30</span>（方角ノイズ）
+ブレイク位置 = k <span class="n">0.16</span> 〜 <span class="n">0.42</span>、段差 <span class="n">0</span> 〜 <span class="n">5.8</span> m
+水中: 深さ = min(<span class="n">26</span> × k^exp × smoothstep(<span class="n">0</span>, <span class="n">0.075</span>, k)
+            + 段差 × smoothstep(ブレイク±<span class="n">0.04</span>, k), <span class="n">32</span>)
+      h = −深さ + 湖底ノイズ×<span class="n">1.35</span>k − 淵 + 藻場
 陸上: h = over × <span class="n">0.15</span> + 丘ノイズ×<span class="n">7.5</span> + 山リッジ×<span class="n">105</span>×smoothstep(<span class="n">70</span>, <span class="n">320</span>, over)
+
+<span class="cm">// 底質（砂地 / 岩場 / 泥底）：深いほど泥、急斜面ほど岩、浅場はノイズで混じる</span>
+v = clamp01(<span class="n">0.52</span> + ノイズ×<span class="n">0.62</span> + clamp01(勾配−<span class="n">0.3</span>)×<span class="n">0.7</span> − clamp01((水深−<span class="n">4</span>)/<span class="n">18</span>)×<span class="n">0.66</span>)
+    → v &lt; <span class="n">0.34</span> 泥底 / &lt; <span class="n">0.68</span> 砂地 / それ以上 岩場
+
+<span class="cm">// 水中ストラクチャー：沈み岩（岩3つのシモリ）と立ち枯れ（幹＋枝3〜4本）</span>
+本数 = <span class="n">16</span>〜<span class="n">23</span>（うち最初の 4 本は桟橋の先から狙える扇の中）
+水深 <span class="n">1.2</span>〜<span class="n">20</span> m / 高さ 岩 <span class="n">0.7</span>〜<span class="n">2.6</span>m・枯れ木 <span class="n">1.8</span>〜<span class="n">5.2</span>m（必ず水面下）
+互いに <span class="n">11</span> m 以上離す・桟橋の真下 <span class="n">4.5</span> m は避ける
 
 <span class="cm">// 桟橋：方角はシードでランダム。岸線を二分探索して位置を決める</span>
 桟橋 = 岸線 +<span class="n">3.5</span>m（陸側） 〜 −<span class="n">26</span>m（沖側）
@@ -762,11 +788,12 @@ y(t) = lerp(先端, 着水点, t) − sin(πt) × min(距離×<span class="n">0.
         <tr><td class="l name"><b>全魚種の到達性</b></td><td class="l">18 魚種すべてについて、生息層（fit=1 の窓）に入る水深が届く範囲にある</td><td class="l">図鑑がコンプできない</td></tr>
         <tr><td class="l name">淵</td><td class="l">水深 20〜34 m・岸から 18 m 以上内側・桟橋の先端から 44 m 以内</td><td class="l">レジェンドが狙えない／淵が土手を削る</td></tr>
         <tr><td class="l name">藻場</td><td class="l">水深 1.4〜4.6 m・岸から 6 m 以上内側・淵から 45 m 以上離れる</td><td class="l">浅場が成立しない／2つの地形が潰し合う</td></tr>
+        <tr><td class="l name"><b>ストラクチャー</b></td><td class="l">水中に 7 個以上、うち<b>桟橋の先端から届く所に 2 個以上</b></td><td class="l">スタート地点の近くに狙う目標がない</td></tr>
       </tbody>
       <tfoot><tr><td colspan="3" class="l">
         「届く範囲」= 桟橋の先端と岸線 64 地点から、キャスト距離 7〜46 m・±43° の扇形。
-        ランダムなシード 1500 個で <b>84.7% がそのまま合格</b>、不合格ならシードを +1 して再生成するため
-        <b>1500 個すべてが最終的に合格</b>（平均 1.16 回・最大 5 回の引き直し、生成は 1 湖あたり約 5 ms）。
+        ランダムなシード 300 個で <b>97% がそのまま合格</b>（落ちるのはほぼ「桟橋先端の水深」）。
+        不合格ならシードを +1 して再生成するため<b>すべて最終的に合格</b>します（平均 1.05 回の引き直し）。
       </td></tr></tfoot>
     </table></div>
 
@@ -795,6 +822,12 @@ y(t) = lerp(先端, 着水点, t) − sin(πt) × min(距離×<span class="n">0.
       <div class="card tight"><h4>ドロップオフ</h4><p>岸線からすぐ落ち込む急深型です（岸から 1 m で約 2 m、8 m で約 8 m）。<b>浅場の魚は岸すぐ、深場の魚は遠投</b>で狙い分けます。キャスト中の予測リングと水深表示がそのまま指標になります。</p></div>
       <div class="card tight"><h4>深い淵（ホール）</h4><p>桟橋から見て左右どちらかの前方、岸から 26〜36 m 内側に半径 30 m。<b>必ず水深 24 m 前後</b>になるよう掘る量が決まるので、どの湖でもレジェンドの層（湖の主 14〜28 m / 白龍魚 17〜30 m）が成立します。</p></div>
       <div class="card tight"><h4>藻場</h4><p>淵の反対側、岸から 14〜24 m 内側。<b>必ず水深 2.5 m 前後</b>。weed タグ（ライギョ・ブルーギル・バス）を中層〜底層で狙う場所（水深 2.5 m なので底層でも 2.2 m）。葦が密生します。</p></div>
+      <div class="card tight"><h4>斜面の緩急</h4><p>方角ごとに指数が変わるので、<b>広い浅棚が続く岸</b>と<b>岸からすぐ落ちる急斜面</b>が同じ湖に混在します。
+        さらに 1 段の<b>かけあがり</b>（最大 5.8 m の段差）が入り、水深 5m 付近で急に落ちるラインができます。</p></div>
+      <div class="card tight"><h4>水中ストラクチャー</h4><p><b>沈み岩</b>と<b>立ち枯れ</b>が 16〜23 個。水面上には出ないので
+        キャストの邪魔はしませんが、<b>肉食魚・藻場の魚 ×1.45／底物 ×1.3</b> の集魚効果があります。水中カメラ（<kbd>V</kbd>）で見えます。</p></div>
+      <div class="card tight"><h4>底質</h4><p><b>砂地・岩場・泥底</b>の 3 種。底を釣るときだけ強く効きます（中層 0.35 乗・表層 0.1 乗）。
+        岩場はバス・ライギョ・鱒、泥底はコイ科と底物、砂地は底物と深場の魚に向きます。</p></div>
       <div class="card tight"><h4>歩ける範囲</h4><p>地形高さ <b>−0.55 m</b> まで（水深 0.55 m まで）入れます。勾配 1.5 超の急斜面は登れません。中心から 460 m が世界の端。</p></div>
     </div>
   </section>
@@ -847,6 +880,7 @@ y(t) = lerp(先端, 着水点, t) − sin(πt) × min(距離×<span class="n">0.
 import {
   SPECIES, RARITY, RODS, LINES, BAITS, ACHIEVEMENTS, RIG_LAYERS,
   baitStrengths, TAG_LABEL, swimLayer, swimLayerLabel, depthFit, depthBandAt, dielNote,
+  bedAffinity, structureBonus, BED_LABEL,
   FIGHT_PATTERNS, fightPattern, weightOf, valueOf, xpOf,
 } from './src/data.js';
 import { xpForLevel } from './src/save.js';
@@ -1225,7 +1259,7 @@ function baitAffinity(sp, bait) {
   for (const t of sp.tags) if (bait.aff[t] !== undefined) { sum += bait.aff[t]; n++; }
   return n ? sum / n : 1;
 }
-function biteWeights({ depth, hour, weather, baitId, rodId, level, layer }) {
+function biteWeights({ depth, hour, weather, baitId, rodId, level, layer, bed, struct }) {
   const band = timeBand(hour);
   const bait = BAITS.find((b) => b.id === baitId);
   const rod = RODS.find((r) => r.id === rodId);
@@ -1244,19 +1278,20 @@ function biteWeights({ depth, hour, weather, baitId, rodId, level, layer }) {
     parts.layer = swimLayer(sp)[layer];
     parts.rare = sp.rarity >= 3 ? bait.rare : 1;
     parts.attract = rod.attract;
-    // レベル解禁：伝説タグ以外は解禁前も 0.013 の重みで残る（ゲーム本体の LV_FLOOR）
+    // レベル解禁：伝説タグ以外は解禁前も 0.008 の重みで残る（ゲーム本体の LV_FLOOR）
     const gate = (from, span) => {
       const g = clamp01((level - from) / span);
-      return sp.tags.includes('legend') ? g : Math.max(0.013, g);
+      return sp.tags.includes('legend') ? g : Math.max(0.008, g);
     };
     parts.lv = sp.rarity === 4 ? gate(2, 5) : sp.rarity === 5 ? gate(5, 6) : 1;
-    w = sp.spawn * fit * parts.time * parts.weather * parts.aff * parts.layer * parts.rare * parts.attract * parts.lv;
+    w = sp.spawn * fit * parts.time * parts.weather * parts.aff * parts.layer
+      * parts.bed * parts.struct * parts.rare * parts.attract * parts.lv;
     return { sp, w, parts, baitDepth };
   });
   return { rows, bait, rod, baitDepth, band };
 }
 
-const rollState = { depth: 18, hour: 6, weather: 'clear', bait: 'worm', rod: 'bamboo', level: 1, caught: 10, layer: 'mid' };
+const rollState = { depth: 18, hour: 6, weather: 'clear', bait: 'worm', rod: 'bamboo', level: 1, caught: 10, layer: 'mid', bed: 'sand', struct: false };
 function renderRollCtl() {
   const c = document.getElementById('rollCtl');
   c.innerHTML = '';
@@ -1266,12 +1301,15 @@ function renderRollCtl() {
   c.appendChild(ctlSelect('天候', 'rw', Object.entries(WEATHERS).map(([k, w]) => [k, w.name]), rollState.weather, (v) => { rollState.weather = v; runRoll(); }));
   c.appendChild(ctlSelect('エサ', 'rb', BAITS.map((b) => [b.id, `${b.name}（得意 ${baitStrengths(b, 2).join('・')}）`]), rollState.bait, (v) => { rollState.bait = v; runRoll(); }));
   c.appendChild(ctlSelect('ロッド', 'rr', RODS.map((r) => [r.id, r.name]), rollState.rod, (v) => { rollState.rod = v; runRoll(); }));
+  c.appendChild(ctlSelect('水底', 'rbd', [['sand', '砂地'], ['rock', '岩場'], ['mud', '泥底']], rollState.bed, (v) => { rollState.bed = v; runRoll(); }));
+  c.appendChild(ctlSelect('ストラクチャー', 'rst', [['no', 'なし'], ['yes', '近くにある']], rollState.struct ? 'yes' : 'no', (v) => { rollState.struct = v === 'yes'; runRoll(); }));
   c.appendChild(ctlRange('プレイヤーレベル', 'rl', 1, 20, 1, rollState.level, (v) => 'Lv' + v, (v) => { rollState.level = v; runRoll(); }));
 }
 function runRoll() {
   const { rows, bait, rod, baitDepth, band } = biteWeights({
     depth: rollState.depth, hour: rollState.hour, weather: rollState.weather,
     baitId: rollState.bait, rodId: rollState.rod, level: rollState.level, layer: rollState.layer,
+    bed: rollState.bed, struct: rollState.struct,
   });
   const total = rows.reduce((a, r) => a + r.w, 0);
   const junkP = 0.085 * bait.junk * (rollState.depth < 1.4 ? 1.8 : 1)
@@ -1294,7 +1332,7 @@ function runRoll() {
     : `<table><thead><tr>
         <th class="l">魚</th><th class="l">レア度</th><th class="num">確率</th><th style="width:150px"></th>
         <th class="num">生息水深</th><th class="num">①spawn</th><th class="num">②水深</th><th class="num">③時間</th>
-        <th class="num">④天候</th><th class="num">⑤エサ</th><th class="num">⑥遊泳層</th><th class="num">⑦レア</th><th class="num">Lv</th>
+        <th class="num">④天候</th><th class="num">⑤エサ</th><th class="num">⑥遊泳層</th><th class="num">⑧底質</th><th class="num">⑨構造</th><th class="num">⑦レア</th><th class="num">Lv</th>
       </tr></thead><tbody>
       ${sorted.map(({ sp, w, parts }) => {
         const p = w / total;
@@ -1311,6 +1349,8 @@ function runRoll() {
           <td class="num" style="color:${parts.weather >= 1.2 ? 'var(--good)' : parts.weather < 0.8 ? 'var(--bad)' : 'inherit'}">${f2(parts.weather ?? 0)}</td>
           <td class="num" style="color:${parts.aff >= 1.3 ? 'var(--good)' : parts.aff < 0.8 ? 'var(--bad)' : 'inherit'}">${f2(parts.aff ?? 0)}</td>
           <td class="num" style="color:${parts.layer >= 1.0 ? 'var(--good)' : parts.layer < 0.4 ? 'var(--bad)' : 'inherit'}">${f2(parts.layer ?? 0)}</td>
+          <td class="num" style="color:${(parts.bed ?? 1) >= 1.15 ? 'var(--good)' : (parts.bed ?? 1) < 0.9 ? 'var(--bad)' : 'inherit'}">${f2(parts.bed ?? 1)}</td>
+          <td class="num" style="color:${(parts.struct ?? 1) > 1.05 ? 'var(--good)' : (parts.struct ?? 1) < 1 ? 'var(--bad)' : 'inherit'}">${f2(parts.struct ?? 1)}</td>
           <td class="num">${f2(parts.rare ?? 1)}</td>
           <td class="num" style="color:${parts.lv === 0 ? 'var(--bad)' : parts.lv < 1 ? 'var(--warn)' : 'inherit'}">${f2(parts.lv ?? 1)}</td>
         </tr>`;
@@ -1444,7 +1484,7 @@ function runRoll() {
       ${cell(sp.weather.clear)}${cell(sp.weather.cloudy)}${cell(sp.weather.rain)}
       <td class="num">${sp.rarity >= 4
         ? (sp.rarity === 4 ? 'Lv3〜7' : 'Lv6〜11')
-          + (sp.tags.includes('legend') ? '' : '<br><span style="opacity:.55;font-size:10px">前も 0.013</span>')
+          + (sp.tags.includes('legend') ? '' : '<br><span style="opacity:.55;font-size:10px">前も 0.008</span>')
         : '—'}</td>
     </tr>`).join('');
   document.getElementById('spTable2').innerHTML = `<table><thead><tr>

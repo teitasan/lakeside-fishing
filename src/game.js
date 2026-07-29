@@ -14,6 +14,7 @@ import { AudioEngine } from './audio.js';
 import * as Save from './save.js';
 import {
   REAL_FISH, JUNK, GEAR, ACHIEVEMENTS, RIG_LAYERS, rigLayerOf, swimLayer, depthFit,
+  bedAffinity, structureBonus,
   weightOf, valueOf, xpOf, rollLength, fightPattern,
 } from './data.js';
 import {
@@ -514,6 +515,10 @@ export class Game {
     const useBait = !!opts.bait;
     const bait = this.bait;
     const layerId = opts.layer ?? this.rigLayer.id;
+    const bed = opts.bed ?? null;                       // 'sand' | 'rock' | 'mud'
+    const nearStruct = !!opts.struct;
+    // 底質は底を釣るときほど効く
+    const bottomness = layerId === 'bottom' ? 1 : layerId === 'mid' ? 0.35 : 0.1;
 
     return weightedPick(REAL_FISH, (sp) => {
       let w = sp.spawn;
@@ -533,6 +538,9 @@ export class Game {
            「底物は表層で食わない」「藻場の雷魚は表層で食う」が成立する。
            日周鉛直移動を持つ魚は、時間帯ごとに重みが入れ替わる */
         w *= swimLayer(sp, band)[layerId] ?? 1;
+        // ⑧ 底質（砂地・岩場・泥底）と ⑨ 水中ストラクチャー
+        if (bed) w *= bedAffinity(sp, bed, bottomness);
+        if (nearStruct) w *= structureBonus(sp);
         if (sp.rarity >= 3) w *= bait.rare;
         w *= this.rod.attract;
         /* 序盤に強すぎる魚が来て理不尽にならないよう、レベルで解禁。
@@ -1468,7 +1476,11 @@ export class Game {
     if (Math.random() < junkP) {
       sp = pick(JUNK);
     } else {
-      sp = this.rollSpecies(depth, { bait: true, layer: this.rigLayer.id });
+      sp = this.rollSpecies(depth, {
+        bait: true, layer: this.rigLayer.id,
+        bed: this.terrain.bedAt(x, z).kind,
+        struct: !!this.terrain.structureNear(x, z, 4.5),
+      });
     }
     if (!sp) { this.biteTimer = rand(2, 4); return; }
 

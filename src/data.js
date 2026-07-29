@@ -638,6 +638,39 @@ export function swimLayerLabel(sp, band = null) {
   return on.length === 3 ? '全層' : on.join('〜') + '層';
 }
 
+/* ---------------- 底質・ストラクチャー ----------------
+   底質は底を釣るときだけ強く効く（表層で泥か砂かは関係ない）。
+   値はタグごとの「増減」で、平均を取って 1 + delta として掛ける */
+const BED_AFF = {
+  sand: { bottom: 1.30, carp: 1.15, deep: 1.10, trout: 1.05, predator: 0.90, weed: 0.70 },
+  rock: { predator: 1.50, weed: 1.35, trout: 1.25, bottom: 1.10, deep: 0.95, carp: 0.70 },
+  mud: { carp: 1.50, bottom: 1.45, deep: 1.10, weed: 1.05, predator: 0.80, trout: 0.75 },
+};
+export const BED_LABEL = { sand: '砂地', rock: '岩場', mud: '泥底' };
+
+/**
+ * 底質の効き（タグ平均の倍率）。
+ * bottomness = その層がどれだけ底に近いか（底層 1 / 中層 0.35 / 表層 0.1）で
+ * 効きを弱めるので、表層では底が砂か泥かはほとんど関係しない
+ */
+export function bedAffinity(sp, bedKind, bottomness = 1) {
+  const t = BED_AFF[bedKind];
+  if (!t) return 1;
+  let sum = 0, n = 0;
+  for (const tag of sp.tags) if (t[tag] !== undefined) { sum += t[tag]; n++; }
+  if (!n) return 1;
+  return Math.pow(sum / n, bottomness);
+}
+
+/** 水中ストラクチャー（沈み岩・立ち枯れ）が近いときの倍率 */
+export function structureBonus(sp) {
+  const t = sp.tags;
+  if (t.includes('predator') || t.includes('weed')) return 1.45;
+  if (t.includes('bottom')) return 1.3;
+  if (t.includes('trout')) return 1.15;
+  return 0.95;                                  // 開けた水域を回る魚は少し落ちる
+}
+
 /* ---------------- 日周移動（時間帯で釣れる深さが変わる） ---------------- */
 /** sp.diel[band]：−1 で浅場寄り / +1 で深場寄り。生息水深の帯をずらす量に使う */
 export const dielShift = (sp, band) => (sp.diel && band ? sp.diel[band] ?? 0 : 0);

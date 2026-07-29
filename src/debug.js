@@ -398,6 +398,7 @@ ${kv('yaw/pitch', `${g.yaw.toFixed(2)} / ${g.pitch.toFixed(2)}`)}${kv('move', fm
 <hr>${kv('state', `<b class="hl">${g.fs}</b>`)}${kv('t', fmt1(g.stateTime) + 's')}
 ${kv('bite in', g.fs === 'wait' ? fmt1(Math.max(0, g.biteTimer)) + 's' : '—')}${kv('approach', g.hookFish ? fmt1(g.approachT) + 's' : '—')}
 ${kv('depth', fmt1(g.hudDepth) + ' m')}${kv('タナ', g.rigLayer.name + ' ' + fmt1(g.hudRig) + ' m')}
+${kv('水底', (() => { const a = ['wait','nibble','bite'].includes(g.fs) ? g.bobber : g.aimPoint; return a ? t.bedAt(a.x, a.z).kind + (t.structureNear(a.x, a.z, 4.5) ? ' +struct' : '') : '—'; })())}
 ${kv('charge', fmt2(g.charge))}${kv('cast dist', fmt1(g.castDist) + ' m')}
 ${kv('line hit', this.lineObstruct ? `<span class="bad">${this.lineObstruct}</span>` : 'clear')}${kv('cast warn', g.fs === 'charge' && g.castObstruction ? `<span class="bad">${g.castObstruction}</span>` : '—')}
 ${kv('hooked', g.hookFish ? `${g.hookFish.species.name} ${fmt1(g.hookFish.length)}cm` : '—')}

@@ -37,15 +37,40 @@ export function makeLake(seed) {
   const noise = makeNoise2D(s);
   const rng = makeRng((Math.imul(s, 2654435761) ^ 0x9e3779b9) >>> 0);
 
-  /* ---------- 岸線（角度のみの関数 → 湖は常に単連結） ---------- */
-  const shoreAtAngle = (ang) => {
-    const n = noise.fbm(Math.cos(ang) * 1.55 + 11.3, Math.sin(ang) * 1.55 - 4.7, 3);
-    return clamp(130 + 34 * n, 92, 168);
+  /* ---------- 岸線（角度のみの関数 → 湖は常に単連結） ----------
+     大きなうねり + 細かい入り組み（岬とワンド）の 2 枚重ね。
+     角度の関数である限り、どんなに入り組んでも湖の中に陸はできない */
+  const shoreFrom = (cx, cz) => {
+    const n = noise.fbm(cx * 1.55 + 11.3, cz * 1.55 - 4.7, 3);       // 大きな形
+    const n2 = noise.fbm(cx * 4.3 - 27.1, cz * 4.3 + 9.4, 2);        // 岬・入り江
+    return clamp(130 + 34 * n + 12 * n2, 88, 172);
   };
+  const shoreAtAngle = (ang) => shoreFrom(Math.cos(ang), Math.sin(ang));
   const shoreRadius = (x, z) => {
     const r = Math.hypot(x, z) || 1e-4;
-    const n = noise.fbm((x / r) * 1.55 + 11.3, (z / r) * 1.55 - 4.7, 3);
-    return clamp(130 + 34 * n, 92, 168);
+    return shoreFrom(x / r, z / r);
+  };
+
+  /* ---------- 方角ごとの斜面（緩急）とブレイクライン ----------
+     指数が小さいほど岸からすぐ落ちる急斜面、大きいほど広い浅棚。
+     さらに 1 段のかけあがり（ブレイク）を入れて、のっぺりしないようにする */
+  const slopeProfile = (cx, cz) => {
+    const n = noise.fbm(cx * 0.95 + 31.7, cz * 0.95 - 17.3, 2);      // -1..1
+    const nb = noise.fbm(cx * 1.7 - 5.9, cz * 1.7 + 23.5, 2);
+    const nk = noise.fbm(cx * 2.4 + 14.2, cz * 2.4 - 31.8, 2);
+    return {
+      exp: 0.46 + 0.42 * (n + 1),                                    // 0.46（急）〜1.30（緩）
+      breakK: 0.16 + 0.13 * (nk + 1),                                // 岸から k=0.16〜0.42
+      breakAmp: Math.max(0, 1.2 + 4.6 * nb),                         // 段差 0〜5.8m
+    };
+  };
+  /** 岸から湖心へ向かう深さのプロファイル（k = 1 - r/岸線半径） */
+  const depthProfile = (cx, cz, k) => {
+    const P = slopeProfile(cx, cz);
+    let d = MAX_DEPTH * Math.pow(k, P.exp) * smoothstep(0, 0.075, k);
+    // かけあがり：一段落ちる
+    d += P.breakAmp * smoothstep(P.breakK - 0.04, P.breakK + 0.04, k);
+    return Math.min(d, MAX_DEPTH + 6);
   };
 
   /* ---------- フィーチャなしの高さ ---------- */
@@ -54,9 +79,8 @@ export function makeLake(seed) {
     const shoreR = shoreRadius(x, z);
     const over = r - shoreR;
     if (over < 0) {
-      const t = clamp01(r / shoreR);
-      const k = 1 - t;
-      const depth = MAX_DEPTH * Math.pow(k, 0.6) * smoothstep(0, 0.075, k);
+      const k = 1 - clamp01(r / shoreR);
+      const depth = depthProfile(x / (r || 1e-4), z / (r || 1e-4), k);
       return -depth + noise.fbm(x * 0.017, z * 0.017, 3) * 1.35 * k;
     }
     return over * 0.15
@@ -124,9 +148,8 @@ export function makeLake(seed) {
 
     if (over >= 0) return baseHeight(x, z) + detail(x, z, over);
 
-    const t = clamp01(r / shoreR);
-    const k = 1 - t;
-    const depth = MAX_DEPTH * Math.pow(k, 0.6) * smoothstep(0, 0.075, k);
+    const k = 1 - clamp01(r / shoreR);
+    const depth = depthProfile(x / (r || 1e-4), z / (r || 1e-4), k);
     let h = -depth + noise.fbm(x * 0.017, z * 0.017, 3) * 1.35 * k;
 
     // 深い淵：掘るだけなので陸はできない。岸際ではフェードして土手を削らない
@@ -145,6 +168,15 @@ export function makeLake(seed) {
     }
     return h + detail(x, z, over);
   }
+
+  /* ---------- 底質（泥 / 砂 / 岩） ----------
+     深いほど泥、急斜面ほど岩、浅場はノイズで砂と岩が混じる */
+  function bedValue(x, z, slope) {
+    const d = Math.max(0, -heightAt(x, z));
+    const n = noise.fbm(x * 0.019 + 5.5, z * 0.019 - 3.3, 2);
+    return clamp01(0.52 + n * 0.62 + clamp01(slope - 0.3) * 0.7 - clamp01((d - 4) / 18) * 0.66);
+  }
+  const bedKindOf = (v) => (v < 0.34 ? 'mud' : v < 0.68 ? 'sand' : 'rock');
 
   /* ---------- 桟橋（完成した高さで岸線を取り直す） ---------- */
   const r0 = crossing(dockAngle, heightAt);
@@ -171,15 +203,66 @@ export function makeLake(seed) {
     dir: { x: -dockCos, z: -dockSin },   // 岸 → 湖心
   };
 
+  const slopeAt = (x, z, e = 1.2) => {
+    const hL = heightAt(x - e, z), hR = heightAt(x + e, z);
+    const hD = heightAt(x, z - e), hU = heightAt(x, z + e);
+    const dx = (hR - hL) / (2 * e), dz = (hU - hD) / (2 * e);
+    return Math.sqrt(dx * dx + dz * dz);
+  };
+
+  /* ---------- 水中のストラクチャー（沈み岩・立ち枯れ） ----------
+     底質と水深で種類を決め、必ず水面より下に収める。
+     桟橋の真上は避けるが、キャストで届く所に必ず何本か残る */
+  const structures = [];
+  {
+    const want = 16 + Math.floor(rng() * 8);
+    const dx0 = dock.start.x, dz0 = dock.start.z;
+    const dx1 = dock.end.x, dz1 = dock.end.z;
+    const distToDock = (x, z) => {
+      const vx = dx1 - dx0, vz = dz1 - dz0;
+      const t = clamp01(((x - dx0) * vx + (z - dz0) * vz) / (vx * vx + vz * vz));
+      return Math.hypot(x - (dx0 + vx * t), z - (dz0 + vz * t));
+    };
+    for (let i = 0; i < want * 40 && structures.length < want; i++) {
+      let x, z;
+      if (structures.length < 4) {
+        // 最初の何本かは桟橋の先から狙える扇の中に置く（スタート地点で必ず遊べる）
+        const a = dockAngle + Math.PI + (rng() - 0.5) * 1.7;
+        const dist = 8 + rng() * 32;
+        x = dock.end.x + Math.cos(a) * dist;
+        z = dock.end.z + Math.sin(a) * dist;
+        if (Math.hypot(x, z) > shoreRadius(x, z) - 2) continue;
+      } else {
+        const a = rng() * TAU;
+        const sr = shoreAtAngle(a);
+        const rr = sr * (0.3 + rng() * 0.66);
+        x = Math.cos(a) * rr; z = Math.sin(a) * rr;
+      }
+      const d = -heightAt(x, z);
+      if (d < 1.2 || d > 20) continue;                        // 浅すぎ・深すぎは置かない
+      if (distToDock(x, z) < 4.5) continue;                   // 桟橋の真下は避ける
+      const gap = structures.length < 4 ? 8 : 11;
+      if (structures.some((t) => (t.x - x) ** 2 + (t.z - z) ** 2 < gap * gap)) continue;
+      const bed = bedKindOf(bedValue(x, z, slopeAt(x, z)));
+      const kind = bed === 'rock' || rng() < 0.4 ? 'rock' : 'snag';
+      const h = kind === 'rock' ? 0.7 + rng() * 1.9 : 1.8 + rng() * 3.4;
+      if (h > d - 0.5) continue;                              // 水面から出さない
+      structures.push({
+        x, z, depth: d, kind, h,
+        r: kind === 'rock' ? 1.1 + rng() * 1.7 : 0.45 + rng() * 0.5,
+        rot: rng() * TAU, v: rng(),
+      });
+    }
+  }
+
   return {
-    seed: s, noise, shoreAtAngle, shoreRadius, baseHeight, heightAt,
+    seed: s, noise, shoreAtAngle, shoreRadius, baseHeight, heightAt, slopeAt,
     depthAt: (x, z) => Math.max(0, -heightAt(x, z)),
-    dock, hole, flat, baseShoreDock,
-    slopeAt(x, z, e = 1.2) {
-      const hL = heightAt(x - e, z), hR = heightAt(x + e, z);
-      const hD = heightAt(x, z - e), hU = heightAt(x, z + e);
-      const dx = (hR - hL) / (2 * e), dz = (hU - hD) / (2 * e);
-      return Math.sqrt(dx * dx + dz * dz);
+    dock, hole, flat, baseShoreDock, structures,
+    /** 底質（'mud' | 'sand' | 'rock'）。slope を渡せば計算を節約できる */
+    bedAt(x, z, slope = null) {
+      const v = bedValue(x, z, slope ?? slopeAt(x, z));
+      return { v, kind: bedKindOf(v) };
     },
   };
 }
@@ -299,6 +382,10 @@ export function analyzeLake(lake, opts = {}) {
     landInLake, minLakeDepth, shoreMin, shoreMax, shoreSlope,
     dockClearance, dockY: lake.dock.y,
     shoreR0: lake.dock.r0, deepSpot, shallowSpot, unreachable,
+    structures: lake.structures.length,
+    // 桟橋の先端からキャストで届くストラクチャーの数
+    structNearDock: lake.structures.filter((t) =>
+      Math.hypot(t.x - lake.dock.end.x, t.z - lake.dock.end.z) <= CAST_MAX).length,
   };
 }
 
@@ -326,6 +413,8 @@ export function validateLake(lake, stats = analyzeLake(lake)) {
   if (!(S.shoreSlope <= 1.4)) bad.push(`桟橋の付け根が崖 (勾配 ${S.shoreSlope.toFixed(2)})`);
   if (!(S.dockClearance >= 0.25)) bad.push(`桟橋が地形に埋まる (余裕 ${S.dockClearance.toFixed(2)}m)`);
   if (S.unreachable.length) bad.push(`届かない魚種: ${S.unreachable.join(',')}`);
+  if (!(S.structures >= 7)) bad.push(`水中ストラクチャーが少ない (${S.structures}個)`);
+  if (!(S.structNearDock >= 2)) bad.push(`桟橋から狙えるストラクチャーがない (${S.structNearDock}個)`);
 
   return { ok: bad.length === 0, reasons: bad, stats: S };
 }
