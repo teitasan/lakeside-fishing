@@ -144,29 +144,30 @@ export class Water {
         varying float vFogDepth;
         varying float vWaveH;
 
-        /** その位置の湖底の深さ（m。陸なら 0） */
-        float bedDepth(vec2 xz) {
-          float g = texture2D(uHeightTex, clamp(xz / uRegion + 0.5, vec2(0.0005), vec2(0.9995))).r;
-          return max(0.0, -g);
+        /** その位置の湖底の高さ（水面 0 基準。水中は負） */
+        float bedHeight(vec2 xz) {
+          return texture2D(uHeightTex, clamp(xz / uRegion + 0.5, vec2(0.0005), vec2(0.9995))).r;
         }
 
         /**
-         * 視線が水中を通る距離。
-         * 水面のその点の水深ではなく「そこから湖底に当たるまで実際に水を通る長さ」を使うと、
-         * 浅瀬越しに深場を覗いても濁って見えなくなる（現実と同じ）。
-         * 湖底は高さフィールドなので t = 深さ/下向き成分 の不動点反復で近似する。
-         * 湖底が視線より速く落ちていく（＝奥が深場）ときは収束せず t が伸び、
-         * それがそのまま「水を長く通る＝見えない」になる。
+         * 視線が水中を通る長さ（光学的厚み）。
+         * 水面のその点の水深で決めると、浅瀬越しに奥の深場まで透けてしまう。
+         * かわりに視線を一定間隔で進めて「水中にある区間」を積む。
+         * 湖底と水面の境は smoothstep でぼかすので、透ける／透けないが
+         * 急に切り替わらず、画面上でも滑らかに変わる。
          */
-        float waterPath(vec3 pos, vec3 dir, float depth0) {
-          float dy = max(-dir.y, 0.015);
-          float t = depth0 / dy;
-          for (int i = 0; i < 3; i++) {
-            vec2 q = pos.xz + dir.xz * t;
-            t = bedDepth(q) / dy;
-            if (t > 90.0) break;
+        float opticalDepth(vec3 pos, vec3 dir) {
+          const float STEP = 1.7;
+          float acc = 0.0;
+          vec3 q = pos + dir * (STEP * 0.5);
+          for (int i = 0; i < 10; i++) {
+            float bed = bedHeight(q.xz);
+            float below = smoothstep(0.3, -0.3, q.y);            // 水面より下
+            float above = smoothstep(bed - 0.55, bed + 0.55, q.y); // 湖底より上
+            acc += below * above * STEP;
+            q += dir * STEP;
           }
-          return clamp(t, 0.0, 90.0);
+          return acc;
         }
 
         vec3 skyAt(vec3 dir) {
@@ -206,8 +207,8 @@ export class Water {
           vec3 refl = skyAt(R);
 
           // --- 水中の色（視線が通る水の長さで濃くする） ---
-          float path = waterPath(vWorld, -V, vDepth);
-          float dn = smoothstep(0.15, 11.0, path);
+          float path = opticalDepth(vWorld, -V);
+          float dn = smoothstep(0.4, 13.0, path);
           vec3 body = mix(uShallow, uDeep, dn);
           body *= mix(0.22, 1.0, 1.0 - uNight * 0.82);
 
@@ -249,7 +250,11 @@ export class Water {
           /* --- アルファ ---
              覗き込んだ浅瀬は底が見え、浅瀬越しに深場を見たときは
              水を長く通るので見えなくなる */
-          float alpha = mix(0.30, 0.965, smoothstep(0.08, 6.5, path));
+          float alpha = mix(0.26, 0.965, smoothstep(0.35, 8.0, path));
+          /* 濁り：湖の水はそこまで澄んでいないので、離れるほど底が見えなくなる。
+             覗き込んだ足元は見え、10m 以上先は閉じる（距離は画面上で連続に変わるので境目が出ない） */
+          float murk = smoothstep(5.0, 22.0, length(uCamPos - vWorld)) * 0.92;
+          alpha = max(alpha, murk);
           alpha = max(alpha, fres * 0.9);
           alpha = max(alpha, foam * 0.95);
           if (under) alpha = 0.86;
