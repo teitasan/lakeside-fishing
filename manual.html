@@ -757,6 +757,8 @@ y(t) = lerp(先端, 着水点, t) − sin(πt) × min(距離×<span class="n">0.
 陸上: h = over × <span class="n">0.15</span> + 丘ノイズ×<span class="n">7.5</span> + 山リッジ×<span class="n">105</span>×smoothstep(<span class="n">70</span>, <span class="n">320</span>, over)
 
 <span class="cm">// 底質（砂地 / 岩場 / 泥底）：深いほど泥、急斜面ほど岩、浅場はノイズで混じる</span>
+<span class="cm">// 岩場には転石（0.28〜1.28m）を撒く：v ≥ 0.64 かつ smoothstep(0.64, 0.92, v) で間引き、</span>
+<span class="cm">// さらに疎密ノイズで patchy にする。水深 0.5〜16m・勾配 1.45 以下・水面より下</span>
 v = clamp01(<span class="n">0.52</span> + ノイズ×<span class="n">0.62</span> + clamp01(勾配−<span class="n">0.3</span>)×<span class="n">0.7</span> − clamp01((水深−<span class="n">4</span>)/<span class="n">18</span>)×<span class="n">0.66</span>)
     → v &lt; <span class="n">0.34</span> 泥底 / &lt; <span class="n">0.68</span> 砂地 / それ以上 岩場
 
@@ -836,7 +838,9 @@ v = clamp01(<span class="n">0.52</span> + ノイズ×<span class="n">0.62</span>
       <div class="card tight"><h4>水中ストラクチャー</h4><p><b>沈み岩</b>と<b>立ち枯れ</b>が 16〜23 個。水面上には出ないので
         キャストの邪魔はしませんが、<b>肉食魚・藻場の魚 ×1.45／底物 ×1.3</b> の集魚効果があります。水中カメラ（<kbd>V</kbd>）で見えます。</p></div>
       <div class="card tight"><h4>底質</h4><p><b>砂地・岩場・泥底</b>の 3 種。底を釣るときだけ強く効きます（中層 0.35 乗・表層 0.1 乗）。
-        岩場はバス・ライギョ・鱒、泥底はコイ科と底物、砂地は底物と深場の魚に向きます。</p></div>
+        岩場はバス・ライギョ・鱒、泥底はコイ科と底物、砂地は底物と深場の魚に向きます。<br>
+        <b>岩場には転石が 600〜2400 個</b>（描画品質で変わる）散らばるので、水中カメラで見れば底質が目で分かります。
+        砂地との境は底質の値でまばらにし、斜面ほど深く埋めて浮いて見えないようにしています。</p></div>
       <div class="card tight"><h4>歩ける範囲</h4><p>地形高さ <b>−0.55 m</b> まで（水深 0.55 m まで）入れます。勾配 1.5 超の急斜面は登れません。中心から 460 m が世界の端。</p></div>
     </div>
   </section>

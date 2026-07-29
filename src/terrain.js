@@ -573,6 +573,51 @@ export class Terrain {
     rocks.instanceMatrix.needsUpdate = true;
     this.scene.add(rocks);
 
+    /* --- 岩場の転石 ---
+       底質が岩の所に小さめの石をたくさん置いて、見た目で「岩場」と分かるようにする。
+       境目は底質の値でまばらにして、砂地との境が不自然な線にならないようにする */
+    {
+      const bedRockTarget = q === 'low' ? 600 : q === 'high' ? 2400 : 1500;
+      const bedRocks = new THREE.InstancedMesh(
+        rockGeo,
+        new THREE.MeshStandardMaterial({ color: 0x5f635e, roughness: 0.97, flatShading: true }),
+        bedRockTarget
+      );
+      bedRocks.receiveShadow = true;
+      let bri = 0, bt = 0;
+      while (bri < bedRockTarget && bt < bedRockTarget * 30) {
+        bt++;
+        const ang = rng() * TAU;
+        const sr = this.shoreRadius(Math.cos(ang), Math.sin(ang));
+        const rr = sr * (0.05 + Math.pow(rng(), 0.55) * 0.95);
+        const x = Math.cos(ang) * rr, z = Math.sin(ang) * rr;
+        const h = this.heightAt(x, z);
+        const d = -h;
+        if (d < 0.5 || d > 16) continue;                      // 汀線ぎわと深すぎる所は置かない
+        const slope = this.slopeAt(x, z);
+        if (slope > 1.45) continue;                           // 崖には置かない
+        const bed = this.lake.bedAt(x, z, slope);
+        if (bed.v < 0.64) continue;                           // 岩場だけ
+        if (rng() > smoothstep(0.64, 0.92, bed.v)) continue;   // 境目はまばらに
+        // 疎密をつける（一様にばら撒くと人工的に見える）
+        const cluster = this.noise.fbm(x * 0.075 + 17.4, z * 0.075 - 8.9, 2) * 0.5 + 0.5;
+        if (rng() > 0.55 + cluster * 0.6) continue;
+        // ほとんどは拳〜頭くらいの石で、たまに大きめの転石
+        const sc = 0.28 + Math.pow(rng(), 2.2) * 1.0;
+        if (sc * 0.5 > d - 0.3) continue;                     // 水面から出さない
+        qt.setFromEuler(new THREE.Euler(rng() * TAU, rng() * TAU, rng() * TAU));
+        // 斜面ほど深く埋めて、浮いて見えないようにする
+        p.set(x, h + sc * (0.05 - Math.min(0.5, slope) * 0.22), z);
+        s.set(sc * (0.85 + rng() * 0.45), sc * (0.4 + rng() * 0.32), sc * (0.85 + rng() * 0.45));
+        m.compose(p, qt, s);
+        bedRocks.setMatrixAt(bri++, m);
+      }
+      bedRocks.count = bri;
+      bedRocks.instanceMatrix.needsUpdate = true;
+      this.scene.add(bedRocks);
+      this.bedRockCount = bri;
+    }
+
     /* --- 水中のストラクチャー（沈み岩・立ち枯れ） ---
        湖底に置いて、必ず水面より下に収める。糸は水面上を通るので
        キャストの邪魔にはならないが、水中カメラで見えて魚が付く */
