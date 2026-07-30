@@ -593,10 +593,9 @@ export class Fish {
         break;
       }
       case 'hooked': {
-        // 位置は fight ロジックが直接指定
+        // 位置・向き・体のうねりは fight ロジックが毎フレーム指定する
+        // （ここで向きを上書きすると「巻かれている＝プレイヤーを向く」が崩れる）
         this.mesh.position.copy(this.pos);
-        this._orient(dt, _v1.set(Math.sin(ctx.time * 6) * 0.6, 0.1, 1).normalize(), 0.7);
-        this._wiggle(dt, 2.4, 0.16);
         return;
       }
       case 'flee': {

@@ -405,7 +405,7 @@ ${kv('hooked', g.hookFish ? `${g.hookFish.species.name} ${fmt1(g.hookFish.length
 ${F ? `${kv('dist', `${fmt1(F.dist)} / ${fmt1(F.span)} m（掛 ${fmt1(F.len0)}）`)}${kv('tension', `${fmt2(F.tension)} / ${g.line.cap} (${(F.tension / g.line.cap * 100).toFixed(0)}%)`)}
 ${kv('stamina', fmt2(F.stamina))}${kv('pull0', fmt2(F.pull0))}
 ${kv('pattern', `<b class="hl">${F.pattern.id}</b>`)}${kv('sizeF', fmt2(F.sizeF))}
-${kv('running', F.running ? '<span class="bad">RUN</span>' : 'no')}${kv('shake/jump', `${F.shakeOn ? '<span class="bad">SHAKE</span>' : '-'} / ${F.jumpT > 0 ? '<span class="bad">JUMP</span>' : F.jumpQueued > 0 ? fmt1(F.jumpQueued) : '-'}`)}` : ''}`;
+${kv('向き', F.face === 'move' ? '進行方向' : F.face === 'jump' ? '跳ね' : 'プレイヤー')}${kv('running', F.running ? '<span class="bad">RUN</span>' : 'no')}${kv('shake/jump', `${F.shakeOn ? '<span class="bad">SHAKE</span>' : '-'} / ${F.jumpT > 0 ? '<span class="bad">JUMP</span>' : F.jumpQueued > 0 ? fmt1(F.jumpQueued) : '-'}`)}` : ''}`;
 
     const S = g.lakeStats || {};
     const env = g.env;

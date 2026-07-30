@@ -47,6 +47,9 @@ const EYE_H = 1.62;
    0.008 = Lv1・深い淵の底層・夜で エピックが約 1%（100 回のアタリに 1 回）。
    生息水深の判定が厳しくなり深場の競合が減ったので、以前より小さい値で足りる */
 const LV_FLOOR = 0.008;
+/* 水中カメラの寄り引き（m） */
+const UW_MIN = 0.9;
+const UW_MAX = 6.5;
 /* カメラ距離（三人称）。CAM_MIN からさらに手前へ回すと一人称 */
 const CAM_MIN = 1.6;
 const CAM_MAX = 9;
@@ -103,6 +106,10 @@ export class Game {
     this.pitch = -0.12;
     this.moveAmt = 0;
     this.underwaterCam = false;
+    // 水中カメラ：マウスで回す（プレイヤーの向きとは独立）
+    this.uwYaw = 0;
+    this.uwPitch = -0.18;
+    this.uwDist = 2.6;
     this.camDist = 4.6;
     this.firstPerson = false;
 
@@ -262,6 +269,11 @@ export class Game {
       if (!this.playing || this.ui.isBlocking()) return;
       const d = Math.sign(e.deltaY);
       if (!d) return;
+      // 水中カメラ中はカメラの寄り引き
+      if (this.underwaterCam) {
+        this.uwDist = clamp(this.uwDist + d * 0.35, UW_MIN, UW_MAX);
+        return;
+      }
       // 三人称の最短(CAM_MIN)からさらに手前へ回すと一人称、奥へ回すと三人称に戻る
       if (this.firstPerson) {
         if (d > 0) this._setFirstPerson(false);
@@ -819,6 +831,9 @@ export class Game {
       running: surge,
       runDur: surge ? rand(0.6, 1.2) * pattern.runDur : 0,
       lateral: 0,
+      px: this.bobber.x,   // 前フレームの魚の位置（向きを動いている方へ向けるため）
+      pz: this.bobber.z,
+      face: 'player',      // いま向いている基準（player / move / jump）
       sizeF,
       pull0: sp.str * sizeF,
       time: 0,
@@ -917,6 +932,19 @@ export class Game {
   /* ---------------- 視点 ---------------- */
   _updateLook(dt) {
     const sens = 0.0022 * this.state.settings.sens;
+    /* 水中カメラ中は、プレイヤーの向きは固定してカメラだけ回す
+       （竿や糸が振り回されないし、V で戻ったときに視点が飛ばない） */
+    if (this.underwaterCam) {
+      if (this.mouseDX || this.mouseDY) {
+        this.uwYaw -= this.mouseDX * sens;
+        this.uwPitch = clamp(this.uwPitch - this.mouseDY * sens, -1.15, 1.15);
+        this.mouseDX = 0;
+        this.mouseDY = 0;
+      }
+      if (this.uwYaw > Math.PI) this.uwYaw -= TAU;
+      if (this.uwYaw < -Math.PI) this.uwYaw += TAU;
+      return;
+    }
     if (this.mouseDX || this.mouseDY) {
       this.yaw -= this.mouseDX * sens;
       this.pitch = clamp(this.pitch - this.mouseDY * sens, -1.15, 0.7);
@@ -1000,16 +1028,27 @@ export class Game {
     }
 
     if (this.underwaterCam && (this.fs === 'wait' || this.fs === 'nibble' || this.fs === 'bite' || this.fs === 'fight')) {
-      // 水中カメラ：ウキの周りを見る
+      /* 水中カメラ：注視点（ファイト中は魚・それ以外はエサ）のまわりを
+         マウスで回す。向きの符号は通常のマウス操作と同じ */
+      const hooked = this.fs === 'fight' && this.hookFish ? this.hookFish.pos : null;
       const b = this.bobber;
-      const depth = this.terrain.depthAt(b.x, b.z);
-      const surf = this.water.surfaceY(b.x, b.z);
-      const targetY = clamp(this.baitY - 0.15, -depth + 0.5, surf - 0.35);
-      const ang = this.time * 0.12;
-      _v1.set(b.x + Math.cos(ang) * 2.3, targetY + 1.0, b.z + Math.sin(ang) * 2.3);
-      cam.position.lerp(_v1, snap ? 1 : 1 - Math.exp(-3 * dt));
-      _v2.set(b.x, this.baitY - 0.05, b.z);
-      cam.lookAt(_v2);
+      const look = _v2.set(
+        hooked ? hooked.x : b.x,
+        hooked ? hooked.y : this.baitY - 0.05,
+        hooked ? hooked.z : b.z
+      );
+      const surf = this.water.surfaceY(look.x, look.z);
+      const bed = this.terrain.heightAt(look.x, look.z);
+      look.y = clamp(look.y, bed + 0.2, surf - 0.2);
+      const cp = Math.cos(this.uwPitch);
+      _v1.set(Math.sin(this.uwYaw) * cp, Math.sin(this.uwPitch), Math.cos(this.uwYaw) * cp);
+      const want = _v3.copy(look).addScaledVector(_v1, -this.uwDist);
+      // 水面より下・湖底より上に収める
+      const wSurf = this.water.surfaceY(want.x, want.z);
+      const wBed = this.terrain.heightAt(want.x, want.z);
+      want.y = clamp(want.y, wBed + 0.35, wSurf - 0.28);
+      cam.position.lerp(want, snap ? 1 : 1 - Math.exp(-10 * dt));
+      cam.lookAt(look);
       this._setUnderwaterFx(cam.position.y < this.water.surfaceY(cam.position.x, cam.position.z));
       return;
     }
@@ -1101,8 +1140,13 @@ export class Game {
       return;
     }
     this.underwaterCam = !this.underwaterCam;
+    if (this.underwaterCam) {
+      // いまの立ち位置から仕掛けを見る向きで始める
+      this.uwYaw = Math.atan2(this.bobber.x - this.pos.x, this.bobber.z - this.pos.z);
+      this.uwPitch = -0.18;
+    }
     this.audio.click();
-    this.ui.toast(this.underwaterCam ? `${iconHtml('ui-wave')} 水中カメラ ON（Vで戻る）` : '水中カメラ OFF');
+    this.ui.toast(this.underwaterCam ? `${iconHtml('ui-wave')} 水中カメラ ON（<b>マウス</b>で見回す／<b>ホイール</b>で寄り引き／Vで戻る）` : '水中カメラ OFF');
   }
 
   /* =========================================================
@@ -1720,16 +1764,35 @@ export class Game {
     f.pos.set(wx, fy, wz);
     f.state = 'hooked';
     f.mesh.position.copy(f.pos);
-    // 向き（プレイヤーに引かれる方向を向く／跳ねている間は上向き）
+    /* 向き
+       - 巻かれている間：引かれるのでプレイヤーを向く
+       - それ以外（走り・糸を送っている間）：実際に動いている方へ向く
+         （横に張るランなら横、プレイヤーから離れるランなら沖向きになる）
+       - 跳ねている間：上／下向き */
     const jumpUp = jumping && F.jumpT > (P.jumpDur || 0.62) * 0.5;
-    _v1.set(near.x - wx, jumping ? (jumpUp ? 0.85 : -0.85) : 0.05, near.z - wz).normalize();
+    const mvx = wx - (F.px ?? wx), mvz = wz - (F.pz ?? wz);
+    const mvSpeed = Math.hypot(mvx, mvz) / Math.max(dt, 1e-4);
+    F.px = wx; F.pz = wz;
+    if (jumping) {
+      F.face = 'jump';
+      _v1.set(near.x - wx, jumpUp ? 0.85 : -0.85, near.z - wz).normalize();
+    } else {
+      const moving = !reeling && Math.hypot(mvx, mvz) > 1e-4;
+      F.face = moving ? 'move' : 'player';
+      if (moving) _v1.set(mvx, 0, mvz);
+      else _v1.set(near.x - wx, 0, near.z - wz);
+      _v1.normalize();
+      _v1.y = 0.03;
+      _v1.normalize();
+    }
     const roll = jumping ? Math.sin(F.time * 22) * 0.9
       : F.shakeOn ? Math.sin(F.time * 26) * 0.55
         : Math.sin(F.time * 7) * 0.5 * (F.running ? 1 : 0.35);
     f._orient(dt, _v1, roll);
+    // 体のうねり（魚群側の hooked では触らないので、ここだけで決める）
     f._wiggle(dt,
-      2.2 + (F.running ? 2.2 : 0) + (F.shakeOn ? 3.4 : 0) + (jumping ? 3.0 : 0),
-      0.1 + (F.running ? 0.09 : 0) + (F.shakeOn ? 0.13 : 0));
+      4.6 + (F.running ? 2.2 : 0) + (F.shakeOn ? 3.4 : 0) + (jumping ? 3.0 : 0),
+      0.13 + (F.running ? 0.09 : 0) + (F.shakeOn ? 0.13 : 0));
 
     // 水面の演出
     if (!jumping && f.pos.y > surf - 0.35) {
