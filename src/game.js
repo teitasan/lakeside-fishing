@@ -38,6 +38,8 @@ const MAX_LINE = 62;
    RUN_MARGIN 掛けた地点よりどれだけ走られたら逃走か（m）。距離に関係なく一定に
               しているので、バーの「目印から右端まで」はいつでも同じ 16m ぶん
    LAND_M    ここまで寄せたら取り込み */
+/* アタリを逃したときにエサが残る確率（残りはエサを持っていかれる） */
+const BAIT_KEEP_ON_MISS = 0.2;
 const REEL_MPS = 4.2;
 const LINEOUT_MPS = 0.70;
 const RUN_MARGIN = 16;
@@ -498,7 +500,17 @@ export class Game {
       return false;
     }
     this.state.money -= item.price;
-    this.state.owned[kind].push(item.id);
+    if (kind === 'bait') {
+      // エサは消耗品：束（pack）ぶん在庫に足す。何度でも買える
+      const st = this.state.baitStock;
+      st[item.id] = (st[item.id] || 0) + item.pack;
+      this.state.gear.bait = item.id;
+      this.audio.buy();
+      this.ui.toast(`${iconHtml(item.icon)} <b>${item.name}</b> ×${item.pack}（在庫 ${st[item.id]}）`, 'gold');
+      this.saveState();
+      return true;
+    }
+    if (!this.state.owned[kind].includes(item.id)) this.state.owned[kind].push(item.id);
     this.state.gear[kind] = item.id;
     this.audio.buy();
     this.ui.toast(`${iconHtml(item.icon)} <b>${item.name}</b> を購入しました！`, 'gold');
@@ -506,8 +518,48 @@ export class Game {
     return true;
   }
 
+  /* ---------------- エサの在庫 ---------------- */
+  baitCount(id = this.state.gear.bait) { return this.state.baitStock[id] || 0; }
+  get hasBait() { return this.baitCount() > 0; }
+
+  /** 在庫のある一番安いエサ（持ち替え先） */
+  _cheapestBait() {
+    return GEAR.bait
+      .filter((b) => this.baitCount(b.id) > 0 && b.id !== this.state.gear.bait)
+      .sort((a, b) => a.price - b.price)[0] || null;
+  }
+
+  /**
+   * エサを 1 個消費する。無くなったら在庫のあるエサへ持ち替え、
+   * それも無ければキャストできない状態にする（ミミズは 0G なので詰まらない）
+   * @param {string} why  取られた理由（トーストの文言）
+   */
+  _useBait(why) {
+    const id = this.state.gear.bait;
+    const st = this.state.baitStock;
+    const left = Math.max(0, (st[id] || 0) - 1);
+    st[id] = left;
+    const bait = this.bait;
+    if (why) {
+      this.ui.toast(`${iconHtml(bait.icon)} ${why}<small style="opacity:.75"> — ${bait.name} 残り ${left}</small>`,
+        left <= 0 ? 'bad' : left <= 2 ? 'gold' : '');
+    }
+    if (left <= 0) {
+      const next = this._cheapestBait();
+      if (next) {
+        this.state.gear.bait = next.id;
+        this.ui.toast(`${iconHtml(next.icon)} <b>${next.name}</b> に持ち替えた<small style="opacity:.75"> — 残り ${this.baitCount(next.id)}</small>`, 'gold');
+      } else {
+        this.ui.toast('エサを切らした… <b>B</b> でショップへ（ミミズは無料）', 'bad');
+      }
+    }
+    this.saveState();
+  }
+
   equip(kind, id) {
-    if (!this.state.owned[kind].includes(id)) return;
+    if (kind === 'bait') {
+      if (this.baitCount(id) <= 0) { this.audio.deny(); return; }
+    } else if (!this.state.owned[kind].includes(id)) return;
     this.state.gear[kind] = id;
     this.audio.click();
     const item = GEAR[kind].find((x) => x.id === id);
@@ -594,6 +646,11 @@ export class Game {
 
     switch (this.fs) {
       case 'idle':
+        if (!this.hasBait) {
+          this.ui.toast('エサがありません — <b>B</b> でショップへ（ミミズは無料）', 'bad');
+          this.audio.deny();
+          break;
+        }
         this.fs = 'charge';
         this.charge = 0;
         this.chargeDir = 1;
@@ -1242,7 +1299,9 @@ export class Game {
         this.marker.visible = false;
         ui.showPower(false);
         ui.showFight(false);
-        ui.setPrompt(`<b>水面の輪で狙い</b>、長押しして<b>目印で離す</b>　/　<b>E</b> でタナ（いま ${this.rigLayer.name}）`);
+        ui.setPrompt(this.hasBait
+          ? `<b>水面の輪で狙い</b>、長押しして<b>目印で離す</b>　/　<b>E</b> でタナ（いま ${this.rigLayer.name}）`
+          : '<b>エサ切れ</b> — <b>B</b> でショップへ（ミミズは 0G で補充できる）');
         break;
       }
 
@@ -1630,6 +1689,13 @@ export class Game {
     this.biteTimer = rand(3, 6);
     this.audio.escape();
     this.ui.toast('アワセが遅れた…逃げられた', 'bad');
+    // 逃げ際にエサを持っていかれる（2 割は無事に残って、そのまま釣り続けられる）
+    if (Math.random() < BAIT_KEEP_ON_MISS) {
+      this.ui.toast('エサは無事だった', 'good');
+    } else {
+      this._useBait('エサを取られた');
+      this._retrieve();   // 針が空になったので回収するしかない
+    }
   }
 
   /* =========================================================
@@ -1849,6 +1915,7 @@ export class Game {
   _lineSnap() {
     this.audio.snap();
     this.ui.toast(`${iconHtml('ui-boom')} <b>ラインが切れた…！</b>`, 'bad');
+    this._useBait('仕掛けごと持っていかれた');
     if (this.fight && this.fight.pull0 > this.line.cap * 1.35) {
       setTimeout(() => this.ui.toast('この魚には道具が足りない。<b>Bキー</b>でラインとロッドを強化しよう', 'gold'), 1200);
     }
@@ -1859,6 +1926,7 @@ export class Game {
   _fishEscaped() {
     this.audio.escape();
     this.ui.toast('魚に走り切られた…', 'bad');
+    this._useBait('エサを持っていかれた');
     this.state.escaped++;
     this._releaseFish(true);
   }
@@ -1899,6 +1967,7 @@ export class Game {
     this.water.addRipple(f.pos.x, f.pos.z, 1.4, 1.6);
     this.audio.catchFanfare(sp.rarity);
     this.ui.showFight(false);
+    this._useBait(null);   // 取り込んだエサは駄目になる（在庫だけ静かに減らす）
   }
 
   _showCatchCard() {

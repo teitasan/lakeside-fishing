@@ -544,9 +544,12 @@ export class UI {
       this.el.gearRod.innerHTML = iconLabel(rod.icon, rod.name, 'ico gear');
       this._last.rod = rodTxt;
     }
-    const baitTxt = `${bait.icon}|${bait.name}`;
+    // エサは残り個数も出す（少なくなったら色を変える）
+    const n = (s.baitStock && s.baitStock[bait.id]) || 0;
+    const baitTxt = `${bait.icon}|${bait.name}|${n}`;
     if (this._last.bait !== baitTxt) {
-      this.el.gearBait.innerHTML = iconLabel(bait.icon, bait.name, 'ico gear');
+      this.el.gearBait.innerHTML = iconLabel(bait.icon, bait.name, 'ico gear')
+        + `<b class="bait-n${n <= 0 ? ' out' : n <= 3 ? ' low' : ''}">×${n}</b>`;
       this._last.bait = baitTxt;
     }
   }
@@ -590,8 +593,10 @@ export class UI {
     const list = GEAR[kind];
     const wrap = $('shop-list');
     wrap.innerHTML = '';
+    const isBait = kind === 'bait';
     for (const it of list) {
-      const owned = s.owned[kind].includes(it.id);
+      const stock = isBait ? g.baitCount(it.id) : 0;
+      const owned = isBait ? stock > 0 : s.owned[kind].includes(it.id);
       const equipped = s.gear[kind] === it.id;
       const locked = s.level < it.level;
       const div = document.createElement('div');
@@ -601,13 +606,31 @@ export class UI {
       div.innerHTML = `
         <div class="ic">${iconHtml(it.icon, 'ico shop')}</div>
         <div class="body">
-          <div class="nm">${it.name}${equipped ? ' <small style="opacity:.7">（装備中）</small>' : ''}</div>
+          <div class="nm">${it.name}${isBait ? ` <b class="stock${stock <= 0 ? ' out' : stock <= 3 ? ' low' : ''}">在庫 ${stock}</b>` : ''}${equipped ? ' <small style="opacity:.7">（装備中）</small>' : ''}</div>
           <div class="ds">${it.desc}</div>
           <div class="stats">${stats.map((x) => `<i>${x}</i>`).join('')}</div>
         </div>
         <div class="act"></div>`;
       const act = div.querySelector('.act');
-      if (equipped) {
+      if (isBait) {
+        if (!locked && !equipped && stock > 0) {
+          const e = document.createElement('button');
+          e.className = 'btn ghost';
+          e.textContent = '装備';
+          e.onclick = () => { g.equip(kind, it.id); this.renderShop(); };
+          act.appendChild(e);
+        }
+        if (locked) {
+          act.innerHTML = `<span class="locked">Lv ${it.level} で解禁</span>`;
+        } else {
+          const b = document.createElement('button');
+          b.className = 'btn ghost';
+          b.innerHTML = `<small style="opacity:.7">${it.pack}個</small> <span class="price">${it.price ? fmtInt(it.price) + ' G' : '無料'}</span>`;
+          b.disabled = s.money < it.price;
+          b.onclick = () => { if (g.buy(kind, it.id)) this.renderShop(); };
+          act.appendChild(b);
+        }
+      } else if (equipped) {
         act.innerHTML = '<span style="color:var(--gold);font-size:12px">装備中</span>';
       } else if (owned) {
         const b = document.createElement('button');
@@ -714,6 +737,9 @@ export class UI {
     $('rig-bed').innerHTML = this._rigBed
       ? `${BED_LABEL[this._rigBed]}${st ? `<span style="color:var(--gold)"> ＋${st.kind === 'rock' ? '沈み岩' : '立ち枯れ'}</span>` : ''}`
       : '—';
+    const bn = g.baitCount();
+    $('rig-bait').innerHTML = `${iconLabel(g.bait.icon, g.bait.name, 'ico gear')}`
+      + `<b class="bait-n${bn <= 0 ? ' out' : bn <= 3 ? ' low' : ''}">×${bn}</b>`;
     $('rig-note').textContent = `${cur.desc}（いまは${timeBandLabel(g.state.clock)}）`;
 
     /* ここ（その水深）× この層 で食いつく魚。生息水深と遊泳層の両方で絞る。

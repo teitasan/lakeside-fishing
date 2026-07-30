@@ -27,6 +27,8 @@ export function defaultState() {
     seed: null, // 湖のシード（null = 起動時にランダムで決める）
     gear: { rod: 'bamboo', line: 'nylon', bait: 'worm' },
     owned: { rod: ['bamboo'], line: ['nylon'], bait: ['worm'] },
+    // エサの在庫（id -> 個数）。魚が触ると減る。ミミズは 0G なので詰まらない
+    baitStock: { worm: 10 },
     records: {}, // id -> {count, maxLen, maxWeight}
     achievements: [],
     // volume = 効果音 / bgm = 環境音（雨・風・水・虫）
@@ -78,6 +80,29 @@ export function load() {
     out.gear.bait = toBait(out.gear.bait) || base.gear.bait;
     out.owned.bait = uniq(out.owned.bait.map(toBait).filter(Boolean));
     if (!out.owned.bait.includes(out.gear.bait)) out.owned.bait.push(out.gear.bait);
+    /* エサの在庫。旧セーブ（在庫の概念が無かった頃）は、持っていたエサに
+       1 束ぶんを配って引き継ぐ。装備中のエサが 0 なら 1 束足す */
+    const packOf = (id) => (BAITS.find((b) => b.id === id) || {}).pack || 10;
+    const stock = {};
+    const raw0 = data.baitStock && typeof data.baitStock === 'object' ? data.baitStock : null;
+    for (const b of BAITS) {
+      if (raw0) {
+        const n = raw0[b.id] ?? raw0[Object.keys(BAIT_ALIAS).find((k) => BAIT_ALIAS[k] === b.id && raw0[k] !== undefined)];
+        if (typeof n === 'number' && isFinite(n) && n > 0) stock[b.id] = Math.max(0, Math.floor(n));
+      } else if (out.owned.bait.includes(b.id)) {
+        stock[b.id] = packOf(b.id);
+      }
+    }
+    const total = Object.values(stock).reduce((a, n) => a + n, 0);
+    if (total <= 0) {
+      // 全部切らしていたら詰まないようにミミズだけ配る（ショップでも 0G）
+      stock.worm = packOf('worm');
+      out.gear.bait = 'worm';
+    } else if (!(stock[out.gear.bait] > 0)) {
+      // 装備中のエサが切れていたら、在庫のある一番安いエサに持ち替える
+      out.gear.bait = BAITS.filter((b) => stock[b.id] > 0).sort((a, b) => a.price - b.price)[0].id;
+    }
+    out.baitStock = stock;
     // 旧セーブ（seed を持たない）は、これまでと同じ湖を保つ
     if (data.seed === undefined || data.seed === null) out.seed = LEGACY_SEED;
     else if (typeof data.seed !== 'number' || !isFinite(data.seed)) out.seed = null;

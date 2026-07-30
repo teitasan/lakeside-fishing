@@ -149,7 +149,7 @@
         <button class="tab" data-tab="bait">エサ</button>
       </nav>
       <div class="shop-list" id="shop-list"></div>
-      <footer class="shop-foot">上位ロッドは<b>レベル</b>で解禁されます。エサは<b>どの魚が食いつくか</b>を変えます（狙う層＝<b>タナ</b>は <b>E</b> キーのウインドウで 表層／中層／底層 から選びます）。</footer>
+      <footer class="shop-foot">上位ロッドは<b>レベル</b>で解禁されます。エサは<b>消耗品</b>で、束（個数）で買います。<b>魚が触ると 1 個消費</b>（アタリを逃す・バラす・取り込む・ゴミを釣る）。アタリを逃したときだけ 2 割の確率で無事に残ります。<b>何も来ずに回収したエサは減りません</b>。ミミズは 0G で補充できます。</footer>
     </div>
   </div>
 
@@ -174,6 +174,7 @@
       <div class="rig-main">
         <div class="rig-col" id="rig-col"></div>
         <div class="rig-side">
+          <div class="rig-row"><span>エサ</span><b id="rig-bait">--</b></div>
           <div class="rig-row"><span>いまの水深</span><b id="rig-depth">-- m</b></div>
           <div class="rig-row"><span>水底</span><b id="rig-bed">--</b></div>
           <div class="rig-note" id="rig-note"></div>

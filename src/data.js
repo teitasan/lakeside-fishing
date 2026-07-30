@@ -530,43 +530,43 @@ export const LINES = [
    aff = タグ別の食いつき。タナ × エサの組み合わせで釣れる魚が変わる */
 export const BAITS = [
   {
-    id: 'worm', name: 'ミミズ', icon: 'bait-worm', price: 0, level: 1,
+    id: 'worm', name: 'ミミズ', icon: 'bait-worm', price: 0, level: 1, pack: 10,
     attract: 1.0, rare: 1.0, junk: 1.0,
     aff: { bottom: 1.7, carp: 1.4, mid: 1.0, predator: 0.6, trout: 0.8, weed: 0.9, deep: 1.0 },
     desc: '万能の置き餌。底を突く魚に強い。',
   },
   {
-    id: 'akamushi', name: 'アカムシ', icon: 'bait-akamushi', price: 180, level: 1,
+    id: 'akamushi', name: 'アカムシ', icon: 'bait-akamushi', price: 180, level: 1, pack: 20,
     attract: 1.14, rare: 0.88, junk: 0.9,
     aff: { mid: 1.6, bottom: 1.3, weed: 1.2, carp: 1.0, trout: 0.9, predator: 0.3, deep: 0.7 },
     desc: '極小の赤い虫。小物のアタリが速いが、大物は寄らない。',
   },
   {
-    id: 'dough', name: '練り餌', icon: 'bait-dough', price: 250, level: 1,
+    id: 'dough', name: '練り餌', icon: 'bait-dough', price: 250, level: 1, pack: 20,
     attract: 1.08, rare: 1.05, junk: 0.8,
     aff: { carp: 1.9, bottom: 1.2, mid: 1.2, predator: 0.4, trout: 0.7, weed: 1.0, deep: 0.8 },
     desc: 'フナ・コイの大好物。練り込んで針に付ける。',
   },
   {
-    id: 'roe', name: 'イクラ', icon: 'bait-roe', price: 900, level: 2,
+    id: 'roe', name: 'イクラ', icon: 'bait-roe', price: 900, level: 2, pack: 15,
     attract: 1.16, rare: 1.15, junk: 0.6,
     aff: { trout: 2.0, mid: 1.2, deep: 1.1, predator: 0.9, bottom: 0.8, weed: 0.8, carp: 0.6 },
     desc: '鱒が目の色を変える一粒。流れの中で映える。',
   },
   {
-    id: 'shrimp', name: '川エビ', icon: 'bait-shrimp', price: 1600, level: 3,
+    id: 'shrimp', name: '川エビ', icon: 'bait-shrimp', price: 1600, level: 3, pack: 12,
     attract: 1.2, rare: 1.25, junk: 0.5,
     aff: { predator: 1.9, deep: 1.4, bottom: 1.3, trout: 1.2, weed: 1.2, mid: 1.0, carp: 0.6 },
     desc: '生きたまま付ける定番の生き餌。何にでも効く。',
   },
   {
-    id: 'minnow', name: '小魚（泳がせ）', icon: 'bait-minnow', price: 3800, level: 6,
+    id: 'minnow', name: '小魚（泳がせ）', icon: 'bait-minnow', price: 3800, level: 6, pack: 10,
     attract: 1.22, rare: 1.45, junk: 0.4,
     aff: { predator: 2.2, deep: 1.8, trout: 1.3, mid: 1.0, bottom: 0.9, weed: 1.0, carp: 0.4 },
     desc: '生きた小魚を泳がせる大物狙い。小物は寄りつかない。',
   },
   {
-    id: 'secret', name: '秘伝の撒き餌', icon: 'bait-secret', price: 12000, level: 10,
+    id: 'secret', name: '秘伝の撒き餌', icon: 'bait-secret', price: 12000, level: 10, pack: 3,
     attract: 1.7, rare: 2.2, junk: 0.25,
     aff: { deep: 1.6, legend: 2.6, predator: 1.4, trout: 1.4, carp: 1.4, bottom: 1.4, mid: 1.4, weed: 1.2 },
     desc: '老人が「主を呼ぶ」と言って売ってくれた壺。何かがおかしい匂い。',

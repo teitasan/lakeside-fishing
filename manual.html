@@ -651,6 +651,32 @@ p    = <span class="n">2.1</span> − min(<span class="n">1.2</span>, bait.rare 
       <b>エサは層を持ちません</b>（狙う層＝タナは <kbd>E</kbd> の仕掛けウインドウで 表層／中層／底層 の 3 択で決めます）。
       ルアーは<b>投げて放置する操作と噛み合わない</b>ため廃止し、すべて置き餌・生き餌に置き換えました。
     </p>
+    <h4>エサは消耗品（在庫）</h4>
+    <pre><span class="cm">// 買うとき：束（pack）ぶんまとめて在庫に入る。何度でも買える</span>
+在庫[id] += pack        <span class="cm">// ミミズ 10 / アカムシ 20 / 練り餌 20 / イクラ 15</span>
+                       <span class="cm">// 川エビ 12 / 小魚 10 / 秘伝 3</span>
+
+<span class="cm">// 減るとき：魚がエサに触ったときだけ 1 個</span>
+アタリを逃した   → <span class="n">80</span>% で取られる（<span class="n">20</span>% は無事に残り、そのまま待てる）
+                   取られたら針が空なので<b>強制回収</b>
+ラインブレイク   → 取られる（仕掛けごと）
+走り切られて逃走 → 取られる
+取り込んだ       → 減る（ゴミを釣ったときも同じ）
+
+<span class="cm">// 減らないとき</span>
+何も来ずに回収 / 魚が寄って来ただけ / 触られる前に回収 → そのまま使える
+根掛かり・糸が伸びきって強制回収 → そのまま使える
+
+<span class="cm">// 0 個になったら</span>
+在庫のある一番安いエサへ自動で持ち替え → 無ければキャスト不可
+（<b>ミミズは 0G</b> なので、ショップで必ず立て直せる）</pre>
+    <p class="src">src/game.js — buy(), _useBait(), _missBite(), _land(), _lineSnap(), _fishEscaped()</p>
+    <div class="note">
+      1 個あたりの値段は<b>狙う魚の値段に釣り合う</b>ように束の数を決めています
+      （アカムシ 9G／個、練り餌 12.5G／個、イクラ 60G／個、川エビ 133G／個、小魚 380G／個、秘伝 4000G／個）。
+      レア度 1 の魚は 20〜116G、レア度 3 は 484〜1785G、レア度 5 は 1 万 G 超なので、
+      <b>高級エサで小物を狙うと赤字</b>になります。
+    </div>
     <div class="tw" id="baitTable"></div>
     <div class="tw" id="affTable"></div>
   </section>
@@ -1596,11 +1622,11 @@ function runRoll() {
       <tfoot><tr><td colspan="6" class="l">「切れるまで」は竹の釣り竿（power 1.0）で pull0 = 1.0 の魚を巻き続けた場合。power が高いほど伸びます。</td></tr></tfoot></table>`;
 
   document.getElementById('baitTable').innerHTML = `<table><thead><tr>
-    <th class="l">エサ</th><th class="num">価格 G</th><th class="num">解禁 Lv</th><th class="l">得意</th>
+    <th class="l">エサ</th><th class="num">価格 G</th><th class="num">束</th><th class="num">1個</th><th class="num">解禁 Lv</th><th class="l">得意</th>
     <th class="num">attract<br><span style="opacity:.6">アタリ速さ</span></th><th class="num">rare<br><span style="opacity:.6">レア補正</span></th>
     <th class="num">junk<br><span style="opacity:.6">ゴミ率</span></th><th class="num">ゴミ率<br>(深場)</th><th class="l">説明</th>
     </tr></thead><tbody>${BAITS.map((b) => `<tr>
-      <td class="l name">${ico(b.icon)}${b.name}</td><td class="num">${b.price.toLocaleString()}</td><td class="num">${b.level}</td>
+      <td class="l name">${ico(b.icon)}${b.name}</td><td class="num">${b.price.toLocaleString()}</td><td class="num">${b.pack}</td><td class="num">${(b.price / b.pack).toFixed(1)}</td><td class="num">${b.level}</td>
       <td class="l">${baitStrengths(b, 3).join('・')}</td>
       <td class="num" style="color:var(--cyan)">${b.attract}</td><td class="num" style="color:var(--violet)">${b.rare}</td>
       <td class="num">${b.junk}</td><td class="num">${(0.085 * b.junk * 100).toFixed(1)}%</td>
