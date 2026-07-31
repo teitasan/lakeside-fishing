@@ -910,6 +910,33 @@ v = clamp01(<span class="n">0.52</span> + ノイズ×<span class="n">0.62</span>
         砂地との境は底質の値でまばらにし、斜面ほど深く埋めて浮いて見えないようにしています。</p></div>
       <div class="card tight"><h4>歩ける範囲</h4><p>地形高さ <b>−0.55 m</b> まで（水深 0.55 m まで）入れます。勾配 1.5 超の急斜面は登れません。中心から 460 m が世界の端。</p></div>
     </div>
+
+    <h3>地形図鑑（判定の条件）</h3>
+    <p>
+      <b>着水した瞬間</b>にその地点を調べて、当てはまる地形が図鑑（<kbd>Q</kbd> → 地形）に登録されます。
+      1 回のキャストで<b>水深帯 ＋ 底質 ＋ 地形の特徴</b>がまとめて埋まることもあります。
+      その場所で釣れた魚も、その地形に記録されます。
+    </p>
+    <pre><span class="cm">// 判定に使う値（terrainCtxAt）</span>
+depth    = その地点の水深
+grad     = <b>沖へ向かう傾き</b> = (岸側 4m の水深 − 沖側 4m の水深) / 8      <span class="cm">// + が沖へ深くなる</span>
+bed      = 底質（mud / sand / rock）
+struct   = 4.5m 以内の水中ストラクチャー（rock / snag）
+inHole   = 淵の中心から 半径×0.8 以内 かつ 水深 19m 以上
+inFlat   = 藻場の中心から 半径×0.8 以内 かつ 水深 5.5m 以下
+dockDist = 桟橋までの距離</pre>
+    <div class="tw" id="terrainTable"></div>
+    <div class="note">
+      この湖のジェネレータは<b>完全に平らな底を作らない</b>（浅場でも傾き 0.19〜0.32 くらい）ので、
+      <b>浅棚</b>は「傾き 0.22 以下＝ゆるい方の斜面」という判定にしています。
+      400 地点で試した出現率：深場 60%／泥底 67%／砂地 25%／中場 23%／浅場 13%／かけあがり 11%／
+      浅棚 5%／葦際 4%／岩場 5%／淵 2%／藻場 2%／立ち枯れ 2%／沈み岩 1%／桟橋際 0.5%。
+    </div>
+    <div class="note">
+      <b>デバッグ表示（F3 / ポーズ画面）を ON にすると、さかな図鑑・地形図鑑・仕掛けウインドウの
+      「ここで食いつく魚」が全部見えます</b>（未発見のものは「未発見（デバッグ表示）」と出ます）。
+      進捗のカウントは実際の発見数のままです。
+    </div>
   </section>
 
   <!-- ============================================================ -->
@@ -960,7 +987,7 @@ v = clamp01(<span class="n">0.52</span> + ノイズ×<span class="n">0.62</span>
 import {
   SPECIES, RARITY, RODS, LINES, BAITS, ACHIEVEMENTS, RIG_LAYERS,
   baitStrengths, TAG_LABEL, swimLayer, swimLayerLabel, depthFit, depthBandAt, dielNote,
-  bedAffinity, structureBonus, BED_LABEL,
+  bedAffinity, structureBonus, BED_LABEL, TERRAIN_KINDS, TERRAIN_GROUPS,
   FIGHT_PATTERNS, fightPattern, weightOf, valueOf, xpOf,
 } from './src/data.js';
 import { xpForLevel } from './src/save.js';
@@ -1631,6 +1658,16 @@ function runRoll() {
       <td class="num" style="color:var(--cyan)">${b.attract}</td><td class="num" style="color:var(--violet)">${b.rare}</td>
       <td class="num">${b.junk}</td><td class="num">${(0.085 * b.junk * 100).toFixed(1)}%</td>
       <td class="l" style="white-space:normal;color:var(--fg-dim)">${b.desc}</td></tr>`).join('')}</tbody></table>`;
+
+  document.getElementById('terrainTable').innerHTML = `<table><thead><tr>
+    <th class="l">地形</th><th class="l">分類</th><th class="l">登録される条件</th><th class="l">どんな所か</th><th class="l">釣りへの効き</th>
+    </tr></thead><tbody>${TERRAIN_KINDS.map((t) => `<tr>
+      <td class="l name">${t.name}</td>
+      <td class="l" style="font-size:11px;opacity:.7">${TERRAIN_GROUPS[t.group]}</td>
+      <td class="l" style="white-space:normal;color:var(--cyan)">${t.rule}</td>
+      <td class="l" style="white-space:normal;color:var(--fg-dim)">${t.desc}</td>
+      <td class="l" style="white-space:normal;color:var(--fg-dim)">${t.fish}</td></tr>`).join('')}</tbody>
+    <tfoot><tr><td colspan="5" class="l">src/data.js — TERRAIN_KINDS / terrainMatches()、src/game.js — terrainCtxAt() / _noteTerrain()</td></tr></tfoot></table>`;
 
   const tags = ['bottom', 'mid', 'predator', 'trout', 'carp', 'weed', 'deep', 'legend'];
   document.getElementById('affTable').innerHTML = `<table><thead><tr>

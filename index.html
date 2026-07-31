@@ -157,10 +157,14 @@
   <div id="journal" class="modal">
     <div class="sheet">
       <header>
-        <h2><img class="ico title" src="./assets/icons/ui-journal.webp" alt="" width="22" height="22"> さかな図鑑</h2>
+        <h2><img class="ico title" src="./assets/icons/ui-journal.webp" alt="" width="22" height="22"> 図鑑</h2>
         <div class="wallet"><b id="journal-progress">0 / 0</b></div>
         <button class="close" data-close="journal" aria-label="閉じる"><img class="ico" src="./assets/icons/ui-close.webp" alt="×" width="18" height="18"></button>
       </header>
+      <nav class="tabs jtabs">
+        <button class="jtab active" data-jtab="fish">さかな</button>
+        <button class="jtab" data-jtab="terrain">地形</button>
+      </nav>
       <div class="journal-grid" id="journal-grid"></div>
       <footer class="shop-foot" id="journal-ach"></footer>
     </div>

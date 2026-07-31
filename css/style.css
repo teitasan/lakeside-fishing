@@ -363,9 +363,9 @@ kbd {
   color: #fff; width: 30px; height: 30px; border-radius: 9px; cursor: pointer; font-size: 13px; }
 .close:hover { background: rgba(255, 93, 93, .25); }
 .tabs { display: flex; gap: 6px; padding: 12px 20px 0; }
-.tab { appearance: none; background: transparent; border: none; border-bottom: 2px solid transparent;
+.tab, .jtab { appearance: none; background: transparent; border: none; border-bottom: 2px solid transparent;
   color: #c3d0e0; font-family: inherit; font-size: 13px; padding: 6px 12px; cursor: pointer; }
-.tab.active { color: var(--gold); border-color: var(--gold); }
+.tab.active, .jtab.active { color: var(--gold); border-color: var(--gold); }
 .shop-list { overflow-y: auto; padding: 14px 20px; display: flex; flex-direction: column; gap: 9px; }
 .shop-foot { padding: 11px 20px; font-size: 10.5px; opacity: .5; border-top: 1px solid rgba(255, 255, 255, .07); }
 .shop-foot b { color: var(--gold); }
@@ -394,6 +394,11 @@ kbd {
 .jcard { background: rgba(255, 255, 255, .04); border: 1px solid rgba(255, 255, 255, .08);
   border-radius: 12px; padding: 10px; }
 .jcard.unknown { opacity: .38; }
+.jcard .jt { font-size: 9px; opacity: .55; letter-spacing: .08em; }
+.jcard .jfish { font-size: 9.5px; opacity: .75; margin-top: 3px; display: flex; flex-wrap: wrap; gap: 3px; }
+.jcard .jfish i { font-style: normal; background: rgba(255, 255, 255, .07); border-radius: 4px; padding: 1px 5px; }
+.jtabs { padding: 0 4px; }
+.jgroup { grid-column: 1 / -1; font-size: 10px; letter-spacing: .14em; opacity: .5; margin: 6px 0 -2px; }
 .jcard canvas { width: 100%; height: 54px; display: block; }
 .jcard .jn { font-size: 12.5px; font-weight: 700; margin-top: 4px; display: flex; justify-content: space-between; align-items: baseline; }
 .jcard .jr { font-size: 9px; opacity: .7; letter-spacing: .1em; }

@@ -843,3 +843,117 @@ export function rollLength(sp, luck = 0) {
 }
 
 export const rarityInfo = (sp) => RARITY[sp.rarity];
+
+/* ===========================================================
+   地形図鑑
+   ------------------------------------------------------------
+   初めてそこに投げたときに登録される。1 回のキャストで
+   「水深帯 + 底質 + 地形の特徴」が同時に埋まることもある。
+   match() に渡す ctx は game.js の terrainCtxAt() が作る
+   =========================================================== */
+export const TERRAIN_GROUPS = {
+  depth: '水深帯',
+  bed: '底質',
+  feature: '地形',
+  struct: 'ストラクチャー',
+};
+
+export const TERRAIN_KINDS = [
+  /* --- 水深帯 --- */
+  {
+    id: 'shallow', group: 'depth', name: '浅場', rule: '水深 4.5m まで',
+    desc: '岸寄りの明るい棚。水温も光もよく届き、小物と浅場の魚が集まる。',
+    fish: '小物・浅場の魚。表層〜底層まで距離が短いので、タナはどれでも当たりやすい',
+  },
+  {
+    id: 'midwater', group: 'depth', name: '中場', rule: '水深 4.5〜11.5m',
+    desc: '浅場から落ちた先の中間帯。回遊してくる魚の通り道になる。',
+    fish: '中層を泳ぐ回遊魚。浅場と深場の魚がどちらも顔を出す',
+  },
+  {
+    id: 'deep', group: 'depth', name: '深場', rule: '水深 11.5m 以上',
+    desc: '光の届きにくい沖の底。大型が身を寄せるが、アタリは少なくなる。',
+    fish: '深場の大型。底層に落とすほど本命に近づく',
+  },
+  /* --- 底質 --- */
+  {
+    id: 'bed-sand', group: 'bed', name: '砂地', rule: '底質 = 砂',
+    desc: '波と流れで洗われた明るい砂。起伏が少なく、餌を見つけてもらいやすい。',
+    fish: '底物にプラス（×1.15 前後）。障害物が無いので根掛かりの心配もない',
+  },
+  {
+    id: 'bed-rock', group: 'bed', name: '岩場', rule: '底質 = 岩',
+    desc: '転石がゴロゴロ散らばる硬い底。エビやカニ、岩陰につく魚の住処。',
+    fish: '甲殻類・肉食魚・岩につく魚にプラス。コイ科はやや落ちる',
+  },
+  {
+    id: 'bed-mud', group: 'bed', name: '泥底', rule: '底質 = 泥',
+    desc: '深みに溜まった柔らかい泥。虫が湧き、底を掘って餌を探す魚が好む。',
+    fish: 'ドジョウ・ナマズ・コイ科などの底物にプラス。鱒類はやや落ちる',
+  },
+  /* --- 地形 --- */
+  {
+    id: 'break', group: 'feature', name: 'かけあがり', rule: '沖へ 8m で 2.4m 以上落ちる所',
+    desc: '一段落ちる斜面。水深が急に変わる境目で、魚が身を寄せて餌を待つ。',
+    fish: '深場の魚が浅場へ出てくる通り道。上下のタナを試す価値がある',
+  },
+  {
+    id: 'shelf', group: 'feature', name: '浅棚', rule: '水深 1.5〜8m で傾斜がゆるい所',
+    desc: '傾斜がゆるく、だらだらと続く浅い棚。日中は静かだが、朝夕に魚が差してくる。',
+    fish: '回遊してくる魚。夜と朝夕に浅場へ寄る魚がねらい目',
+  },
+  {
+    id: 'weedbed', group: 'feature', name: '藻場', rule: '湖に必ず 1 つある浅い平場',
+    desc: '水草が茂る浅い平場。小魚が身を隠し、それを狙う魚が待ち構える。',
+    fish: '藻場の魚・肉食魚。表層で食う魚も多い',
+  },
+  {
+    id: 'hole', group: 'feature', name: '深い淵', rule: '湖に必ず 1 つある 20m 超の窪み',
+    desc: '湖の一番深い窪み。冷たく暗く、めったに姿を見せない大物が沈んでいる。',
+    fish: 'レジェンド級。夜・雨・高級エサと重ねると確率が上がる',
+  },
+  {
+    id: 'edge', group: 'feature', name: '葦際', rule: '水深 1.5m 以下の岸ぎわ',
+    desc: '葦が生えた岸のすぐ際。虫が落ち、浅場の魚がひっきりなしに出入りする。',
+    fish: '小物と浅場の魚。ただしゴミが増える（浅い所は ×1.8）',
+  },
+  /* --- ストラクチャー --- */
+  {
+    id: 'sunkrock', group: 'struct', name: '沈み岩', rule: '沈み岩の 4.5m 以内',
+    desc: '水中に寄り集まった大岩（シモリ）。流れを遮り、魚の付き場になる。',
+    fish: '肉食魚・藻場の魚 ×1.45／底物 ×1.3 の集魚効果',
+  },
+  {
+    id: 'snag', group: 'struct', name: '立ち枯れ', rule: '立ち枯れの 4.5m 以内',
+    desc: '沈んだまま立っている枯れ木。枝の陰に小魚が溜まる。',
+    fish: '肉食魚・藻場の魚 ×1.45／底物 ×1.3 の集魚効果',
+  },
+  {
+    id: 'dock', group: 'struct', name: '桟橋際', rule: '桟橋から 5m 以内',
+    desc: '桟橋の脚が作る日陰。人工物でも立派なストラクチャーで、魚は影を好む。',
+    fish: '影に付く魚。足元なので短い距離のファイトになる',
+  },
+];
+
+export const TERRAIN_BY_ID = Object.fromEntries(TERRAIN_KINDS.map((t) => [t.id, t]));
+
+/** ctx（terrainCtxAt の戻り）に当てはまる地形 id の配列 */
+export function terrainMatches(ctx) {
+  const out = [];
+  const d = ctx.depth;
+  if (d <= 4.5) out.push('shallow');
+  else if (d <= 11.5) out.push('midwater');
+  else out.push('deep');
+  if (ctx.bed === 'sand') out.push('bed-sand');
+  else if (ctx.bed === 'rock') out.push('bed-rock');
+  else if (ctx.bed === 'mud') out.push('bed-mud');
+  if (ctx.grad >= 0.30) out.push('break');
+  if (ctx.grad <= 0.22 && d >= 1.5 && d <= 8) out.push('shelf');
+  if (ctx.inFlat) out.push('weedbed');
+  if (ctx.inHole) out.push('hole');
+  if (d <= 1.5) out.push('edge');
+  if (ctx.struct === 'rock') out.push('sunkrock');
+  if (ctx.struct === 'snag') out.push('snag');
+  if (ctx.dockDist <= 5) out.push('dock');
+  return out;
+}

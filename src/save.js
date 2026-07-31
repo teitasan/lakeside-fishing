@@ -30,6 +30,7 @@ export function defaultState() {
     // エサの在庫（id -> 個数）。魚が触ると減る。ミミズは 0G なので詰まらない
     baitStock: { worm: 10 },
     records: {}, // id -> {count, maxLen, maxWeight}
+    terrain: {}, // 地形図鑑: id -> {casts, depth, fish[]}（初めて投げた時に登録）
     achievements: [],
     // volume = 効果音 / bgm = 環境音（雨・風・水・虫）
     // fpv = 一人称視点（ホイールを手前まで回すと切り替わる）
@@ -64,6 +65,13 @@ export function load() {
       bait: uniq([...base.owned.bait, ...((data.owned && data.owned.bait) || [])]),
     };
     out.records = (data.records && typeof data.records === 'object') ? data.records : {};
+    out.terrain = (data.terrain && typeof data.terrain === 'object') ? data.terrain : {};
+    for (const [k, v] of Object.entries(out.terrain)) {
+      if (!v || typeof v !== 'object') { delete out.terrain[k]; continue; }
+      v.casts = typeof v.casts === 'number' && isFinite(v.casts) ? v.casts : 1;
+      v.depth = typeof v.depth === 'number' && isFinite(v.depth) ? v.depth : 0;
+      v.fish = Array.isArray(v.fish) ? v.fish : [];
+    }
     out.achievements = Array.isArray(data.achievements) ? data.achievements : [];
     for (const k of ['money', 'xp', 'level', 'totalCaught', 'totalEarned', 'maxLen', 'clock']) {
       if (typeof out[k] !== 'number' || !isFinite(out[k])) out[k] = base[k];

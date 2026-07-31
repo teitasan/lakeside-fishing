@@ -4,6 +4,7 @@
 import {
   SPECIES, RARITY, GEAR, GEAR_LABEL, ACHIEVEMENTS, RIG_LAYERS,
   valueOf, gearStats, swimLayer, swimLayerLabel, depthFit, dielNote, BED_LABEL,
+  TERRAIN_KINDS, TERRAIN_GROUPS, SPECIES_BY_ID,
 } from './data.js';
 import { PROFILES, BODY, profileAt, CRUST_SHAPES } from './fish.js';
 import { fmtInt, fmt1, fmtWeight, fmtClock, timeBand, timeBandLabel, clamp01 } from './util.js';
@@ -334,6 +335,18 @@ export class UI {
     );
     this.shopTab = 'rod';
 
+    // 図鑑のタブ（さかな / 地形）
+    this.journalTab = 'fish';
+    document.querySelectorAll('.jtab').forEach((t) =>
+      t.addEventListener('click', () => {
+        document.querySelectorAll('.jtab').forEach((x) => x.classList.remove('active'));
+        t.classList.add('active');
+        this.journalTab = t.dataset.jtab;
+        this.openJournal();
+        g.audio.click();
+      })
+    );
+
     // 設定
     const s = g.state.settings;
     $('opt-volume').value = Math.round(s.volume * 100);
@@ -658,7 +671,9 @@ export class UI {
 
   /* ---------------- 図鑑 ---------------- */
   openJournal() {
+    if (this.journalTab === 'terrain') return this.openTerrainJournal();
     const s = this.game.state;
+    const reveal = this.game.revealAll;
     const grid = $('journal-grid');
     grid.innerHTML = '';
     let known = 0, knownFish = 0, totalFish = 0;
@@ -666,9 +681,9 @@ export class UI {
     const order = [...SPECIES].sort((a, b) =>
       (a.rarity === 0 ? 9 : a.rarity) - (b.rarity === 0 ? 9 : b.rarity) || a.len[1] - b.len[1]);
     for (const sp of order) {
-      const rec = s.records[sp.id];
+      const rec = s.records[sp.id] || (reveal ? { count: 0, maxLen: sp.len[0], maxWeight: 0, dbg: true } : null);
       if (sp.rarity > 0) totalFish++;
-      if (rec) { known++; if (sp.rarity > 0) knownFish++; }
+      if (rec && !rec.dbg) { known++; if (sp.rarity > 0) knownFish++; }
       const d = document.createElement('div');
       d.className = 'jcard r' + sp.rarity + (rec ? '' : ' unknown');
       const cv = document.createElement('canvas');
@@ -678,7 +693,7 @@ export class UI {
       if (rec) {
         info.innerHTML = `
           <div class="jn"><span>${sp.name}</span><span class="jr" style="color:${RARITY[sp.rarity].color}">${RARITY[sp.rarity].label}</span></div>
-          <div class="jm">${rec.count} 匹 / 最大 ${fmt1(rec.maxLen)} cm<br>${fmtWeight(rec.maxWeight)}・${fmtInt(valueOf(sp, rec.maxLen))} G<br><span style="opacity:.55">水深 ${sp.depth[0]}〜${sp.depth[1]} m・${swimLayerLabel(sp)}${
+          <div class="jm">${rec.dbg ? '<span style="color:var(--gold)">未発見（デバッグ表示）</span>' : `${rec.count} 匹 / 最大 ${fmt1(rec.maxLen)} cm<br>${fmtWeight(rec.maxWeight)}・${fmtInt(valueOf(sp, rec.maxLen))} G`}<br><span style="opacity:.55">水深 ${sp.depth[0]}〜${sp.depth[1]} m・${swimLayerLabel(sp)}${
             dielNote(sp) ? `<br>🕒 ${dielNote(sp)}` : ''}</span></div>`;
       } else if (sp.rarity === 0) {
         info.innerHTML = `
@@ -691,10 +706,12 @@ export class UI {
       }
       d.appendChild(info);
       grid.appendChild(d);
+      // デバッグ表示のときは姿も見せる（未発見のマークは文言で分かる）
       drawFishIcon(cv, sp, { unknown: !rec });
     }
-    $('journal-progress').textContent =
-      `魚 ${knownFish}/${totalFish}・その他 ${known - knownFish}/${SPECIES.length - totalFish}`;
+    $('journal-progress').innerHTML =
+      `魚 ${knownFish}/${totalFish}・その他 ${known - knownFish}/${SPECIES.length - totalFish}`
+      + (reveal ? '<small style="color:var(--gold);margin-left:8px">デバッグ：全表示</small>' : '');
     const got = ACHIEVEMENTS.filter((a) => s.achievements.includes(a.id));
     $('journal-ach').innerHTML =
       `<b>実績 ${got.length}/${ACHIEVEMENTS.length}</b> ` +
@@ -702,6 +719,54 @@ export class UI {
         const ok = s.achievements.includes(a.id);
         return `<span style="margin-left:10px;opacity:${ok ? 1 : 0.4};display:inline-flex;align-items:center;gap:4px">${iconHtml(ok ? 'ui-medal' : 'ui-empty', 'ico tiny')} ${a.name}<small style="opacity:.6">（${a.desc}）</small></span>`;
       }).join('');
+    this.el.journal.classList.add('open');
+    this.openModal = 'journal';
+  }
+
+  /* ---------------- 地形図鑑 ---------------- */
+  openTerrainJournal() {
+    const s = this.game.state;
+    const reveal = this.game.revealAll;
+    const grid = $('journal-grid');
+    grid.innerHTML = '';
+    let known = 0;
+    let group = null;
+    for (const k of TERRAIN_KINDS) {
+      const rec = s.terrain[k.id];
+      const seen = !!rec;
+      if (seen) known++;
+      if (k.group !== group) {
+        group = k.group;
+        const h = document.createElement('div');
+        h.className = 'jgroup';
+        h.textContent = TERRAIN_GROUPS[group];
+        grid.appendChild(h);
+      }
+      const show = seen || reveal;
+      const d = document.createElement('div');
+      d.className = 'jcard tcard' + (show ? '' : ' unknown');
+      const cv = document.createElement('canvas');
+      cv.width = 200; cv.height = 68;
+      d.appendChild(cv);
+      const info = document.createElement('div');
+      const fish = seen ? rec.fish.map((id) => SPECIES_BY_ID[id]).filter(Boolean) : [];
+      info.innerHTML = `
+        <div class="jn"><span>${show ? k.name : '???'}</span><span class="jt">${k.rule}</span></div>
+        <div class="jm">${show ? k.desc : '<span style="opacity:.7">まだ投げていない場所</span>'}
+          ${show ? `<br><span style="opacity:.62">${k.fish}</span>` : ''}
+          ${seen ? `<br><span style="opacity:.5">${rec.casts} 回投げた・初めて見た水深 ${fmt1(rec.depth)} m</span>` : ''}
+          ${!seen && reveal ? '<br><span style="color:var(--gold)">未発見（デバッグ表示）</span>' : ''}</div>
+        ${fish.length ? `<div class="jfish">${fish.map((sp) => `<i style="color:${RARITY[sp.rarity].color}">${sp.name}</i>`).join('')}</div>` : ''}`;
+      d.appendChild(info);
+      grid.appendChild(d);
+      drawTerrainIcon(cv, k.id, { unknown: !show });
+    }
+    $('journal-progress').innerHTML = `地形 ${known}/${TERRAIN_KINDS.length}`
+      + (reveal ? '<small style="color:var(--gold);margin-left:8px">デバッグ：全表示</small>' : '');
+    $('journal-ach').innerHTML =
+      '<b>地形図鑑</b> <small style="opacity:.7">初めてそこに投げた時に登録されます。'
+      + '1 回のキャストで「水深帯 ＋ 底質 ＋ 地形の特徴」がまとめて埋まることもあります。'
+      + '釣れた魚はその地形に記録されます。</small>';
     this.el.journal.classList.add('open');
     this.openModal = 'journal';
   }
@@ -749,7 +814,7 @@ export class UI {
     const here = spot == null ? [] : SPECIES
       .filter((sp) => sp.rarity > 0 && depthFit(sp, spot, band) > 0.35 && swimLayer(sp, band)[cur.id] >= 0.5)
       .sort((a, b) => score(b) - score(a));
-    const known = here.filter((sp) => s.records[sp.id]);
+    const known = here.filter((sp) => s.records[sp.id] || g.revealAll);
     const unknown = here.length - known.length;
     // ◎ ＝ その層にぴったり、○ ＝ まあまあ、△ ＝ 端の方（時間帯で変わる）
     const mark = (sp) => (score(sp) >= 0.75 ? '◎' : score(sp) >= 0.45 ? '○' : '△');
@@ -774,4 +839,165 @@ export class UI {
   }
 
   isBlocking() { return this.openModal !== null; }
+}
+
+/* ===========================================================
+   地形図鑑のサムネイル（断面図）
+   水面と湖底の断面を描いて、その地形の特徴を一目で見せる
+   =========================================================== */
+export function drawTerrainIcon(canvas, id, opts = {}) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  const un = !!opts.unknown;
+  const SURF = 12;                       // 水面の y
+  // 空（水面より上）
+  ctx.fillStyle = un ? '#1a2230' : '#243447';
+  ctx.fillRect(0, 0, W, SURF);
+  // 水
+  const wg = ctx.createLinearGradient(0, SURF, 0, H);
+  if (un) { wg.addColorStop(0, '#1d2836'); wg.addColorStop(1, '#151d28'); }
+  else { wg.addColorStop(0, '#2f6f86'); wg.addColorStop(1, '#123043'); }
+  ctx.fillStyle = wg;
+  ctx.fillRect(0, SURF, W, H - SURF);
+  // 水面のライン
+  ctx.strokeStyle = un ? 'rgba(255,255,255,.10)' : 'rgba(190,235,255,.55)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = 0; x <= W; x += 4) ctx.lineTo(x, SURF + Math.sin(x * 0.13) * 1.1);
+  ctx.stroke();
+
+  const bedCol = { sand: '#8d7c56', rock: '#6d7370', mud: '#4a463a', def: '#5d6a63' };
+  /** 底の形（x → y）を塗る */
+  const fillBed = (fn, col) => {
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    for (let x = 0; x <= W; x += 2) ctx.lineTo(x, fn(x));
+    ctx.lineTo(W, H);
+    ctx.closePath();
+    ctx.fillStyle = un ? '#20262e' : col;
+    ctx.fill();
+    ctx.strokeStyle = un ? 'rgba(255,255,255,.06)' : 'rgba(0,0,0,.30)';
+    ctx.beginPath();
+    for (let x = 0; x <= W; x += 2) ctx.lineTo(x, fn(x));
+    ctx.stroke();
+  };
+  const rock = (x, y, r, col = '#6d7370') => {
+    ctx.fillStyle = un ? '#262c34' : col;
+    ctx.beginPath();
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * Math.PI * 2;
+      const rr = r * (0.72 + ((i * 37) % 11) / 22);
+      ctx[i ? 'lineTo' : 'moveTo'](x + Math.cos(a) * rr, y + Math.sin(a) * rr * 0.72);
+    }
+    ctx.closePath();
+    ctx.fill();
+  };
+  const weeds = (x0, x1, base, h) => {
+    ctx.strokeStyle = un ? 'rgba(255,255,255,.10)' : '#4f7a3c';
+    ctx.lineWidth = 1.6;
+    for (let x = x0; x < x1; x += 7) {
+      ctx.beginPath();
+      ctx.moveTo(x, base);
+      ctx.quadraticCurveTo(x + 3, base - h * 0.6, x + ((x % 3) - 1) * 4, base - h);
+      ctx.stroke();
+    }
+  };
+  const dots = (fn, col) => {
+    ctx.fillStyle = un ? 'rgba(255,255,255,.05)' : col;
+    for (let i = 0; i < 60; i++) {
+      const x = (i * 37) % W;
+      const y = fn(x) + 3 + ((i * 13) % 9);
+      if (y < H) ctx.fillRect(x, y, 1.4, 1.4);
+    }
+  };
+
+  const flat = (y) => () => y;
+  switch (id) {
+    /* --- 水深帯 --- */
+    case 'shallow': { const f = (x) => 30 + Math.sin(x * 0.05) * 2; fillBed(f, bedCol.sand); dots(f, 'rgba(255,240,200,.35)'); break; }
+    case 'midwater': { const f = (x) => 46 + Math.sin(x * 0.04) * 2.5; fillBed(f, bedCol.def); break; }
+    case 'deep': { const f = flat(H - 5); fillBed(f, bedCol.mud); break; }
+    /* --- 底質 --- */
+    case 'bed-sand': { const f = (x) => 44 + Math.sin(x * 0.09) * 1.6; fillBed(f, bedCol.sand); dots(f, 'rgba(255,240,200,.45)'); break; }
+    case 'bed-rock': {
+      const f = (x) => 46 + Math.sin(x * 0.07) * 2;
+      fillBed(f, bedCol.rock);
+      for (let i = 0; i < 9; i++) rock(10 + i * 22 + ((i * 7) % 6), f(10 + i * 22) - 1, 3 + ((i * 5) % 4));
+      break;
+    }
+    case 'bed-mud': { const f = (x) => 48 + Math.sin(x * 0.03) * 1.2; fillBed(f, bedCol.mud); dots(f, 'rgba(120,110,80,.5)'); break; }
+    /* --- 地形 --- */
+    case 'break': {
+      const f = (x) => 24 + 34 / (1 + Math.exp(-(x - 96) * 0.16));
+      fillBed(f, bedCol.def);
+      ctx.strokeStyle = un ? 'rgba(255,255,255,.10)' : 'rgba(255,220,140,.7)';
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(96, 20); ctx.lineTo(96, H - 2); ctx.stroke();
+      ctx.setLineDash([]);
+      break;
+    }
+    case 'shelf': {
+      const f = (x) => (x < 150 ? 32 + Math.sin(x * 0.06) * 1.2 : 32 + (x - 150) * 0.62);
+      fillBed(f, bedCol.sand);
+      dots(f, 'rgba(255,240,200,.35)');
+      break;
+    }
+    case 'weedbed': {
+      const f = (x) => 40 + Math.sin(x * 0.05) * 2;
+      fillBed(f, '#5a6a44');
+      weeds(6, W - 4, 40, 22);
+      break;
+    }
+    case 'hole': {
+      const f = (x) => 26 + 34 * Math.exp(-((x - 100) ** 2) / 2600);
+      ctx.save();
+      fillBed((x) => H - 2, bedCol.mud);
+      ctx.restore();
+      fillBed(f, bedCol.mud);
+      break;
+    }
+    case 'edge': {
+      const f = (x) => 58 - Math.max(0, (60 - x)) * 1.1;
+      ctx.fillStyle = un ? '#20262e' : '#6a6a4a';
+      ctx.beginPath(); ctx.moveTo(0, H); ctx.lineTo(0, 4); ctx.lineTo(46, 4); ctx.lineTo(62, SURF + 2);
+      for (let x = 62; x <= W; x += 2) ctx.lineTo(x, Math.min(H - 2, 20 + (x - 62) * 0.22));
+      ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
+      weeds(6, 74, 12, 16);
+      break;
+    }
+    /* --- ストラクチャー --- */
+    case 'sunkrock': {
+      const f = (x) => 50 + Math.sin(x * 0.05) * 1.5;
+      fillBed(f, bedCol.rock);
+      rock(88, 46, 11); rock(112, 49, 8); rock(72, 50, 7);
+      break;
+    }
+    case 'snag': {
+      const f = (x) => 54 + Math.sin(x * 0.05) * 1.5;
+      fillBed(f, bedCol.def);
+      ctx.strokeStyle = un ? '#2a3038' : '#5a4a36';
+      ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(100, 54); ctx.lineTo(96, 22); ctx.stroke();
+      ctx.lineWidth = 2.4;
+      for (const [dx, dy] of [[16, -6], [-15, -4], [12, 8]]) {
+        ctx.beginPath(); ctx.moveTo(97, 30 - dy); ctx.lineTo(97 + dx, 24 - dy - 4); ctx.stroke();
+      }
+      break;
+    }
+    case 'dock': {
+      const f = (x) => 52 + Math.sin(x * 0.05) * 1.5;
+      fillBed(f, bedCol.def);
+      ctx.fillStyle = un ? '#2a3038' : '#7a5b3c';
+      ctx.fillRect(0, 2, W, 7);
+      for (const px of [30, 96, 162]) ctx.fillRect(px, 9, 5, 44);
+      break;
+    }
+    default: { fillBed(flat(50), bedCol.def); break; }
+  }
+  if (un) {
+    ctx.fillStyle = 'rgba(255,255,255,.30)';
+    ctx.font = 'bold 15px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('?', W / 2, H / 2 + 5);
+  }
 }

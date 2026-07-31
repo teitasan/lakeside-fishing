@@ -14,7 +14,7 @@ import { AudioEngine } from './audio.js';
 import * as Save from './save.js';
 import {
   REAL_FISH, JUNK, GEAR, ACHIEVEMENTS, RIG_LAYERS, rigLayerOf, swimLayer, depthFit,
-  bedAffinity, structureBonus,
+  bedAffinity, structureBonus, terrainMatches, TERRAIN_BY_ID,
   weightOf, valueOf, xpOf, rollLength, fightPattern,
 } from './data.js';
 import {
@@ -565,6 +565,59 @@ export class Game {
     const item = GEAR[kind].find((x) => x.id === id);
     this.ui.toast(`${iconLabel(item.icon, item.name)} を装備`, 'good');
     this.saveState();
+  }
+
+  /* =========================================================
+     地形図鑑
+     ========================================================= */
+  /** デバッグ表示中は図鑑を全部見せる */
+  get revealAll() { return !!this.state.settings.debug; }
+
+  /**
+   * その地点の地形を調べる（地形図鑑の判定材料）。
+   * grad = 沖へ向かう水深の傾き（かけあがりの判定用）
+   */
+  terrainCtxAt(x, z) {
+    const t = this.terrain, L = t.lake;
+    const depth = t.depthAt(x, z);
+    const r = Math.hypot(x, z) || 1e-4;
+    const ux = x / r, uz = z / r;
+    // 沖（湖心）へ向かってどれだけ落ちているか。+ が「沖へ深くなる」
+    const grad = (t.depthAt(x - ux * 4, z - uz * 4) - t.depthAt(x + ux * 4, z + uz * 4)) / 8;
+    const st = t.structureNear(x, z, 4.5);
+    const dh = Math.hypot(x - L.hole.x, z - L.hole.z);
+    const df = Math.hypot(x - L.flat.x, z - L.flat.z);
+    return {
+      x, z, depth, grad,
+      bed: t.bedAt(x, z).kind,
+      struct: st ? st.kind : null,
+      inHole: L.hole.amp > 0 && dh < L.hole.r * 0.8 && depth >= 19,
+      inFlat: L.flat.amp > 0 && df < L.flat.r * 0.8 && depth <= 5.5,
+      dockDist: t.distToDock(x, z),
+    };
+  }
+
+  /** 着水したら、その地点の地形を図鑑に登録する */
+  _noteTerrain(x, z) {
+    const ctx = this.terrainCtxAt(x, z);
+    const ids = terrainMatches(ctx);
+    this.spotTerrain = ids;
+    const book = this.state.terrain;
+    const fresh = [];
+    for (const id of ids) {
+      let e = book[id];
+      if (!e) {
+        e = book[id] = { casts: 0, depth: +ctx.depth.toFixed(1), fish: [] };
+        fresh.push(id);
+      }
+      e.casts++;
+    }
+    if (fresh.length) {
+      this.ui.toast(`${iconHtml('ui-map')} <b>地形図鑑に登録</b>：`
+        + fresh.map((id) => TERRAIN_BY_ID[id].name).join('・'), 'gold');
+    }
+    this.saveState();
+    return ids;
   }
 
   /* =========================================================
@@ -1570,6 +1623,7 @@ export class Game {
     this.fs = 'wait';
     this.stateTime = 0;
     this.castDist = Math.hypot(x - this.pos.x, z - this.pos.z);
+    this._noteTerrain(x, z);
     this.audio.splash(0.55 + this.castPower * 0.5);
     this.water.addSplash(x, this.water.surfaceY(x, z), z, 16, 0.9 + this.castPower * 0.5);
     this.water.addRipple(x, z, 1.0 + this.castPower * 0.7, 1.9);
@@ -1989,6 +2043,11 @@ export class Game {
       rec.count++;
       rec.maxLen = Math.max(rec.maxLen, len);
       rec.maxWeight = Math.max(rec.maxWeight, weight);
+    }
+    // 釣れた地形にも記録する（地形図鑑の「ここで釣れた魚」）
+    for (const id of this.spotTerrain || []) {
+      const e = s.terrain[id];
+      if (e && !e.fish.includes(sp.id)) e.fish.push(sp.id);
     }
     s.money += value;
     s.totalEarned += value;
