@@ -58,8 +58,8 @@ const LV_FLOOR = 0.008;
 /* 湖の測量（M キーのマップ）
    WATER_REGION（440m）を MAP_N×MAP_N の格子で覆い、歩いた所・投げた所だけ開く */
 const MAP_N = 72;
-const MAP_WALK_R = 14;    // 歩いて分かる半径（m）
-const MAP_CAST_R = 18;    // 着水して分かる半径（m）
+const MAP_WALK_R = 30;    // 歩いて分かる半径（m）
+const MAP_CAST_R = 30;    // 着水して分かる半径（m）
 /* 水中カメラの寄り引き（m） */
 const UW_MIN = 0.9;
 const UW_MAX = 6.5;
