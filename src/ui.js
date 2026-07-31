@@ -7,7 +7,7 @@ import {
   TERRAIN_KINDS, TERRAIN_GROUPS, SPECIES_BY_ID,
 } from './data.js';
 import { PROFILES, BODY, profileAt, CRUST_SHAPES } from './fish.js';
-import { fmtInt, fmt1, fmtWeight, fmtClock, timeBand, timeBandLabel, clamp01 } from './util.js';
+import { fmtInt, fmt1, fmtWeight, fmtClock, timeBand, timeBandLabel, clamp01, lerp as lerpN } from './util.js';
 import { xpForLevel } from './save.js';
 import { iconHtml, iconLabel, loadIcon, preloadIcons, JUNK_ICONS } from './icons.js';
 
@@ -297,7 +297,7 @@ export class UI {
       powerTrack: document.querySelector('.pm-track'), aim: $('aim'),
       fight: $('fight-panel'), fightName: $('fight-name'), fightSub: $('fight-sub'),
       tension: $('tension-fill'), dist: $('dist-fill'), stam: $('stam-fill'),
-      distNum: $('dist-num'), distMark: $('dist-mark'),
+      distNum: $('dist-num'), distMark: $('dist-mark'), map: $('map-window'),
       danger: $('danger-flash'), biteAlert: $('bite-alert'), toasts: $('toasts'),
       loading: $('loading'), title: $('title-screen'),
       catchCard: $('catch-card'), shop: $('shop'), journal: $('journal'), pause: $('pause'),
@@ -316,6 +316,7 @@ export class UI {
     $('btn-resume').addEventListener('click', () => this.closeAll());
     $('btn-rest').addEventListener('click', () => g.rest());
     $('btn-rig-close').addEventListener('click', () => this.closeAll());
+    $('btn-map-close').addEventListener('click', () => this.closeAll());
     /* 3 つの層のボタンを作る（クリックで選択） */
     const col = $('rig-col');
     for (const L of RIG_LAYERS) {
@@ -737,6 +738,125 @@ export class UI {
     this.openModal = 'journal';
   }
 
+  /* ---------------- マップ（測量図） ---------------- */
+  openMap() {
+    const g = this.game, t = g.terrain;
+    const cv = $('map-canvas');
+    const ctx = cv.getContext('2d');
+    const W = cv.width, H = cv.height;
+    const N = g.mapN, step = g.mapStep;
+    const span = N * step;                       // 描く範囲（= WATER_REGION）
+    const P = (x, z) => [((x + span / 2) / span) * W, ((z + span / 2) / span) * H];
+
+    ctx.fillStyle = '#0b1118';
+    ctx.fillRect(0, 0, W, H);
+    const cw = W / N + 0.6;                      // 少し重ねて隙間を消す
+
+    /* --- 測量済みのセルを地形色で塗る --- */
+    for (let j = 0; j < N; j++) {
+      for (let i = 0; i < N; i++) {
+        if (!g.mapHas(i, j)) continue;
+        const x = (i + 0.5) * step - span / 2;
+        const z = (j + 0.5) * step - span / 2;
+        const h = t.heightAt(x, z);
+        let col;
+        if (h < 0) {
+          const d = -h;
+          // 浅い＝明るい水色 → 深い＝濃紺
+          const k = clamp01(d / 24);
+          const r = Math.round(lerpN(122, 18, k));
+          const gg = Math.round(lerpN(214, 46, k));
+          const b = Math.round(lerpN(206, 96, k));
+          col = `rgb(${r},${gg},${b})`;
+        } else if (h < 1.1) {
+          col = '#c8b78a';                       // 汀線の砂
+        } else {
+          const k = clamp01((h - 1.1) / 26);
+          const r = Math.round(lerpN(86, 44, k));
+          const gg = Math.round(lerpN(132, 84, k));
+          const b = Math.round(lerpN(66, 52, k));
+          col = `rgb(${r},${gg},${b})`;
+        }
+        ctx.fillStyle = col;
+        const [px, py] = P(x - step / 2, z - step / 2);
+        ctx.fillRect(px, py, cw, cw);
+      }
+    }
+
+    /* --- 見つけた地形（淵・浅い平場） --- */
+    const seenAt = (x, z) => {
+      const i = Math.floor((x + span / 2) / step), j = Math.floor((z + span / 2) / step);
+      return i >= 0 && j >= 0 && i < N && j < N && g.mapHas(i, j);
+    };
+    const ring = (o, col) => {
+      if (!seenAt(o.x, o.z)) return;
+      const [cx, cy] = P(o.x, o.z);
+      ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(cx, cy, (o.r * 0.75 / span) * W, 0, Math.PI * 2); ctx.stroke();
+    };
+    for (const o of t.lake.holes) ring(o, 'rgba(200,107,255,.85)');
+    for (const o of t.lake.flats) ring(o, 'rgba(109,224,138,.85)');
+
+    /* --- 見つけた水中ストラクチャー --- */
+    for (const st of t.structures || []) {
+      if (!seenAt(st.x, st.z)) continue;
+      const [sx, sy] = P(st.x, st.z);
+      ctx.fillStyle = '#ff9a5a';
+      ctx.beginPath();
+      if (st.kind === 'rock') ctx.arc(sx, sy, 2.6, 0, Math.PI * 2);
+      else { ctx.moveTo(sx, sy - 3); ctx.lineTo(sx + 3, sy); ctx.lineTo(sx, sy + 3); ctx.lineTo(sx - 3, sy); }
+      ctx.fill();
+    }
+
+    /* --- 桟橋 --- */
+    if (seenAt(t.dockEnd.x, t.dockEnd.z) || seenAt(t.dockStart.x, t.dockStart.z)) {
+      const [ax, ay] = P(t.dockStart.x, t.dockStart.z);
+      const [bx, by] = P(t.dockEnd.x, t.dockEnd.z);
+      ctx.strokeStyle = '#ffd479'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+    }
+
+    /* --- 仕掛けの位置（投げている間） --- */
+    if (['flight', 'wait', 'nibble', 'bite', 'fight'].includes(g.fs)) {
+      const [bx, by] = P(g.bobber.x, g.bobber.z);
+      ctx.strokeStyle = '#ff5d5d'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.arc(bx, by, 4.5, 0, Math.PI * 2); ctx.stroke();
+    }
+
+    /* --- プレイヤー（向き付き） --- */
+    const [ux, uy] = P(g.pos.x, g.pos.z);
+    ctx.save();
+    ctx.translate(ux, uy);
+    ctx.rotate(-g.yaw + Math.PI);      // 画面上向き = -Z
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.moveTo(0, -7); ctx.lineTo(4.6, 5); ctx.lineTo(0, 2.6); ctx.lineTo(-4.6, 5);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+
+    /* --- スケール --- */
+    ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = 1.5;
+    const bar = (100 / span) * W;
+    ctx.beginPath(); ctx.moveTo(12, H - 14); ctx.lineTo(12 + bar, H - 14); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,.7)';
+    ctx.font = '11px ui-monospace, monospace';
+    ctx.fillText('100 m', 14, H - 20);
+
+    $('map-progress').textContent = `${(g.mapProgress() * 100).toFixed(1)}%`;
+    const at = g.fs === 'idle' || g.fs === 'charge' ? g.aimPoint : g.bobber;
+    const d = at ? t.depthAt(at.x, at.z) : 0;
+    $('map-depth').textContent = d > 0 ? `${fmt1(d)} m` : '陸';
+    $('map-legend').innerHTML =
+      '<div><i style="background:#7ad6ce"></i>浅い　<i style="background:#122e60"></i>深い</div>'
+      + '<div><i style="background:#c8b78a"></i>汀線　<i style="background:#568442"></i>陸</div>'
+      + '<div><i style="background:#c86bff"></i>深い淵　<i style="background:#6de08a"></i>浅い平場</div>'
+      + '<div><i style="background:#ff9a5a"></i>沈み岩 ● / 立ち枯れ ◆</div>'
+      + '<div><i style="background:#ffd479"></i>桟橋　<i style="background:#ff5d5d"></i>いまの仕掛け</div>';
+
+    this.el.map.classList.add('open');
+    this.openModal = 'map';
+  }
+
   /* ---------------- 地形図鑑 ---------------- */
   openTerrainJournal() {
     const s = this.game.state;
@@ -847,7 +967,7 @@ export class UI {
   }
 
   closeAll() {
-    for (const k of ['shop', 'journal', 'pause', 'rigWin']) this.el[k].classList.remove('open');
+    for (const k of ['shop', 'journal', 'pause', 'rigWin', 'map']) this.el[k].classList.remove('open');
     if (this.openModal !== 'catch') this.openModal = null;
     this.game.audio.click();
   }

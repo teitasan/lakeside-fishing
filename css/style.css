@@ -217,6 +217,16 @@ h2 { display: flex; align-items: center; gap: 2px; }
 #stam-fill { position: absolute; inset: 0 auto 0 0; width: 100%; background: linear-gradient(90deg, #ff8fa3, #ff5d5d); transition: width .12s linear; }
 #fight-panel.reeling { border-color: rgba(126, 224, 255, .55); }
 
+/* ---------- マップ（測量図） ---------- */
+#map-window .card { width: min(760px, 94vw); text-align: left; }
+.map-wrap { display: flex; gap: 14px; align-items: flex-start; margin: 10px 0 4px; flex-wrap: wrap; }
+#map-canvas { width: 100%; max-width: 520px; height: auto; border-radius: 10px;
+  background: #0b1118; border: 1px solid rgba(255, 255, 255, .10); image-rendering: pixelated; }
+.map-side { flex: 1 1 170px; min-width: 150px; }
+.map-legend { margin-top: 10px; font-size: 10.5px; line-height: 1.9; opacity: .8; }
+.map-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+  margin-right: 5px; vertical-align: -1px; }
+
 /* ---------- トースト ---------- */
 #toasts { position: absolute; left: 50%; top: 84px; transform: translateX(-50%);
   display: flex; flex-direction: column; align-items: center; gap: 6px; }

@@ -31,6 +31,7 @@ export function defaultState() {
     baitStock: { worm: 10 },
     records: {}, // id -> {count, maxLen, maxWeight}
     terrain: {}, // 地形図鑑: id -> {casts, depth, fish[]}（初めて投げた時に登録）
+    map: { seed: null, cells: '' }, // 湖の測量（M キー）: 歩いた／投げた所だけ地形が分かる
     achievements: [],
     // volume = 効果音 / bgm = 環境音（雨・風・水・虫）
     // fpv = 一人称視点（ホイールを手前まで回すと切り替わる）
@@ -65,6 +66,8 @@ export function load() {
       bait: uniq([...base.owned.bait, ...((data.owned && data.owned.bait) || [])]),
     };
     out.records = (data.records && typeof data.records === 'object') ? data.records : {};
+    out.map = (data.map && typeof data.map === 'object'
+      && typeof data.map.cells === 'string') ? data.map : { seed: null, cells: '' };
     out.terrain = (data.terrain && typeof data.terrain === 'object') ? data.terrain : {};
     for (const [k, v] of Object.entries(out.terrain)) {
       if (!v || typeof v !== 'object') { delete out.terrain[k]; continue; }

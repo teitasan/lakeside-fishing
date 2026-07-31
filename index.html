@@ -84,6 +84,7 @@
       <span><b>タナ</b> E</span>
       <span><b>図鑑</b> Q</span>
       <span><b>ショップ</b> B</span>
+      <span><b>マップ</b> M</span>
       <span><b>水中カメラ</b> V</span>
       <span><b>メニュー</b> Esc</span>
     </div>
@@ -166,6 +167,23 @@
       </nav>
       <div class="journal-grid" id="journal-grid"></div>
       <footer class="shop-foot" id="journal-ach"></footer>
+    </div>
+  </div>
+
+  <!-- ============ マップ（測量） ============ -->
+  <div id="map-window" class="modal">
+    <div class="card">
+      <h2><img class="ico title" src="./assets/icons/ui-map.webp" alt="" width="22" height="22"> 湖の測量図</h2>
+      <p class="rig-lead">歩いた所と<b>仕掛けを落とした所</b>だけ地形が分かります。投げて水深を測っていきましょう。</p>
+      <div class="map-wrap">
+        <canvas id="map-canvas" width="520" height="520"></canvas>
+        <div class="map-side">
+          <div class="rig-row"><span>測量</span><b id="map-progress">0%</b></div>
+          <div class="rig-row"><span>いまの水深</span><b id="map-depth">-- m</b></div>
+          <div class="map-legend" id="map-legend"></div>
+        </div>
+      </div>
+      <button id="btn-map-close" class="btn">閉じる <small>(M / Esc)</small></button>
     </div>
   </div>
 

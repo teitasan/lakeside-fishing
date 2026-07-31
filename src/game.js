@@ -3,7 +3,7 @@
    =========================================================== */
 import * as THREE from 'three';
 import { Environment } from './sky.js';
-import { Terrain } from './terrain.js';
+import { Terrain, WATER_REGION } from './terrain.js';
 import { resolveLake } from './lakefield.js';
 import { Water } from './water.js';
 import { FishSchool } from './fish.js';
@@ -55,6 +55,11 @@ const EYE_H = 1.62;
    0.008 = Lv1・深い淵の底層・夜で エピックが約 1%（100 回のアタリに 1 回）。
    生息水深の判定が厳しくなり深場の競合が減ったので、以前より小さい値で足りる */
 const LV_FLOOR = 0.008;
+/* 湖の測量（M キーのマップ）
+   WATER_REGION（440m）を MAP_N×MAP_N の格子で覆い、歩いた所・投げた所だけ開く */
+const MAP_N = 72;
+const MAP_WALK_R = 14;    // 歩いて分かる半径（m）
+const MAP_CAST_R = 18;    // 着水して分かる半径（m）
 /* 水中カメラの寄り引き（m） */
 const UW_MIN = 0.9;
 const UW_MAX = 6.5;
@@ -189,6 +194,7 @@ export class Game {
       console.warn('湖底テクスチャの読み込みに失敗、頂点色で描画します', e);
     }
     this.terrain = new Terrain(this.scene, { quality: q, lake: resolved.lake, bedTextures });
+    this._initMap();
 
     await onProgress('水を注いでいます');
     this.water = new Water(this.scene, this.terrain, { quality: q, exposure: EXPOSURE });
@@ -330,7 +336,8 @@ export class Game {
         return;
       }
       if (this.ui.isBlocking()) {
-        if (e.code === 'Escape' || e.code === 'KeyQ' || e.code === 'KeyB' || e.code === 'KeyE') this.ui.closeAll();
+        if (e.code === 'Escape' || e.code === 'KeyQ' || e.code === 'KeyB' || e.code === 'KeyE'
+          || e.code === 'KeyM') this.ui.closeAll();
         return;
       }
       if (!this.playing) {
@@ -346,26 +353,7 @@ export class Game {
         case 'Escape': this._cancelCharge(); this._exitLock(); this.ui.openPause(); break;
         case 'KeyE': this._openRig(); break;
         case 'KeyV': this._toggleUnderwater(); break;
-        case 'KeyM': {
-          const s = this.state.settings;
-          // 効果音と環境音の両方をまとめてミュート／復帰
-          const muted = s.volume <= 0 && (s.bgm ?? 0) <= 0;
-          if (muted) {
-            s.volume = this._preMute?.volume ?? 0.7;
-            s.bgm = this._preMute?.bgm ?? 0.7;
-          } else {
-            this._preMute = { volume: s.volume, bgm: s.bgm ?? 0.7 };
-            s.volume = 0;
-            s.bgm = 0;
-          }
-          this.audio.setVolume(s.volume);
-          this.audio.setBgm(s.bgm);
-          document.getElementById('opt-volume').value = s.volume * 100;
-          document.getElementById('opt-bgm').value = s.bgm * 100;
-          this.ui.toast(muted ? `${iconHtml('ui-sound')} 音を戻した` : `${iconHtml('ui-mute')} ミュート`);
-          this.saveState();
-          break;
-        }
+        case 'KeyM': this._cancelCharge(); this._exitLock(); this.ui.openMap(); this.audio.click(); break;
       }
     });
 
@@ -416,7 +404,15 @@ export class Game {
     }, 200);
   }
 
-  saveState() { Save.save(this.state); }
+  saveState() {
+    // 測量した格子はビット列 → base64 にして持たせる
+    if (this._mapDirty && this.mapBits) {
+      this.state.map.cells = btoa(String.fromCharCode(...this.mapBits));
+      this.state.map.seed = this.state.seed;
+      this._mapDirty = false;
+    }
+    Save.save(this.state);
+  }
 
   resetSave() {
     Save.wipe();
@@ -584,6 +580,86 @@ export class Game {
     this.ui.toast(`${iconLabel(item.icon, item.name)} を装備`, 'good');
     this.saveState();
   }
+
+  /* =========================================================
+     湖の測量（マップ）
+     ========================================================= */
+  /** セーブから復元。湖が変わっていたら測量はやり直し */
+  _initMap() {
+    const bytes = Math.ceil((MAP_N * MAP_N) / 8);
+    const m = this.state.map || (this.state.map = { seed: null, cells: '' });
+    this.mapBits = new Uint8Array(bytes);
+    if (m.seed === this.state.seed && m.cells) {
+      try {
+        const u = Uint8Array.from(atob(m.cells), (c) => c.charCodeAt(0));
+        if (u.length === bytes) this.mapBits.set(u);
+      } catch (e) { /* 壊れていたら白紙から */ }
+    }
+    m.seed = this.state.seed;
+    // 測量できる範囲（湖 + 岸から 24m）のセル数を数えて分母にする
+    let total = 0;
+    for (let j = 0; j < MAP_N; j++) {
+      for (let i = 0; i < MAP_N; i++) {
+        const [x, z] = this._mapCellPos(i, j);
+        const r = Math.hypot(x, z);
+        if (r < this.terrain.shoreRadius(x, z) + 24) total++;
+      }
+    }
+    this.mapTotal = Math.max(1, total);
+    this._mapDirty = false;
+  }
+
+  /** セル中心のワールド座標 */
+  _mapCellPos(i, j) {
+    const step = WATER_REGION / MAP_N;
+    return [(i + 0.5) * step - WATER_REGION / 2, (j + 0.5) * step - WATER_REGION / 2];
+  }
+
+  mapHas(i, j) {
+    const k = j * MAP_N + i;
+    return (this.mapBits[k >> 3] >> (k & 7)) & 1;
+  }
+
+  /** その地点のまわりを測量済みにする */
+  _revealMap(x, z, radius) {
+    const step = WATER_REGION / MAP_N;
+    const half = WATER_REGION / 2;
+    const i0 = Math.max(0, Math.floor((x - radius + half) / step));
+    const i1 = Math.min(MAP_N - 1, Math.floor((x + radius + half) / step));
+    const j0 = Math.max(0, Math.floor((z - radius + half) / step));
+    const j1 = Math.min(MAP_N - 1, Math.floor((z + radius + half) / step));
+    const r2 = radius * radius;
+    let added = 0;
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        const [cx, cz] = this._mapCellPos(i, j);
+        if ((cx - x) ** 2 + (cz - z) ** 2 > r2) continue;
+        const k = j * MAP_N + i;
+        const b = k >> 3, m = 1 << (k & 7);
+        if (this.mapBits[b] & m) continue;
+        this.mapBits[b] |= m;
+        added++;
+      }
+    }
+    if (added) this._mapDirty = true;
+    return added;
+  }
+
+  /** 測量済みの割合（0〜1） */
+  mapProgress() {
+    let n = 0;
+    for (let j = 0; j < MAP_N; j++) {
+      for (let i = 0; i < MAP_N; i++) {
+        if (!this.mapHas(i, j)) continue;
+        const [x, z] = this._mapCellPos(i, j);
+        if (Math.hypot(x, z) < this.terrain.shoreRadius(x, z) + 24) n++;
+      }
+    }
+    return clamp01(n / this.mapTotal);
+  }
+
+  get mapN() { return MAP_N; }
+  get mapStep() { return WATER_REGION / MAP_N; }
 
   /* =========================================================
      地形図鑑
@@ -1097,6 +1173,18 @@ export class Game {
 
   /* ---------------- 移動 ---------------- */
   _updateMove(dt) {
+    // 歩いた所を測量（2m 動くごと）
+    if (this.mapBits) {
+      if (!this._mapFrom) {
+        // 立っている場所のまわりは最初から見えている
+        this._mapFrom = this.pos.clone();
+        this._revealMap(this.pos.x, this.pos.z, MAP_WALK_R);
+      }
+      if (this._mapFrom.distanceToSquared(this.pos) > 4) {
+        this._mapFrom.copy(this.pos);
+        if (this._revealMap(this.pos.x, this.pos.z, MAP_WALK_R)) this.saveState();
+      }
+    }
     let mx = 0, mz = 0;
     if (this.playing && !this.ui.isBlocking()) {
       if (this.keys.has('KeyW')) mz += 1;
@@ -1654,6 +1742,7 @@ export class Game {
     this.stateTime = 0;
     this.castDist = Math.hypot(x - this.pos.x, z - this.pos.z);
     this._noteTerrain(x, z);
+    this._revealMap(x, z, MAP_CAST_R);
     this.audio.splash(0.55 + this.castPower * 0.5);
     this.water.addSplash(x, this.water.surfaceY(x, z), z, 16, 0.9 + this.castPower * 0.5);
     this.water.addRipple(x, z, 1.0 + this.castPower * 0.7, 1.9);
