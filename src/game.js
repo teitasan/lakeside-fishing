@@ -1974,7 +1974,8 @@ export class Game {
       sub: jumping ? `${iconHtml('ui-warn')} 跳ねた！`
         : F.shakeOn ? `${iconHtml('ui-warn')} 首を振っている`
           : F.running ? `${iconHtml('ui-warn')} 走っている`
-            : `${P.name}｜${reeling ? '巻いている' : '待機'}`,
+            // 巻き上げの乗りは、専用のバーを増やさず既にある表示で伝える
+            : `${P.name}｜${reeling ? (F.spin > 0.55 ? '巻いている' : '巻き始め…') : '待機'}`,
       tension: tRatio,
       dist: t,
       distM: F.dist,
