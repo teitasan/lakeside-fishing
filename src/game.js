@@ -453,6 +453,9 @@ export class Game {
       dockDepth: S.dockTipDepth,
       holeDepth: S.holeDepth,
       holeWhere: dirOf(this.terrain.hole),
+      holeCount: this.terrain.lake.holes.length,
+      flatCount: this.terrain.lake.flats.length,
+      dockLen: this.terrain.lake.dock.len,
       flatDepth: S.flatDepth,
       flatWhere: dirOf(this.terrain.flat),
       shoreR: S.shoreR0,
@@ -585,14 +588,15 @@ export class Game {
     // 沖（湖心）へ向かってどれだけ落ちているか。+ が「沖へ深くなる」
     const grad = (t.depthAt(x - ux * 4, z - uz * 4) - t.depthAt(x + ux * 4, z + uz * 4)) / 8;
     const st = t.structureNear(x, z, 4.5);
-    const dh = Math.hypot(x - L.hole.x, z - L.hole.z);
-    const df = Math.hypot(x - L.flat.x, z - L.flat.z);
+    // 淵・浅い平場は複数あるので、どれかの中に居れば良い
+    const inside = (list) => list.some((o) =>
+      o.amp > 0 && (x - o.x) ** 2 + (z - o.z) ** 2 < (o.r * 0.8) ** 2);
     return {
       x, z, depth, grad,
       bed: t.bedAt(x, z).kind,
       struct: st ? st.kind : null,
-      inHole: L.hole.amp > 0 && dh < L.hole.r * 0.8 && depth >= 19,
-      inFlat: L.flat.amp > 0 && df < L.flat.r * 0.8 && depth <= 5.5,
+      inHole: depth >= 19 && inside(L.holes),
+      inFlat: depth <= 5.5 && inside(L.flats),
       dockDist: t.distToDock(x, z),
     };
   }

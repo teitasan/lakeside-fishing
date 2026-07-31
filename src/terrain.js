@@ -711,16 +711,18 @@ export class Terrain {
     reeds.instanceMatrix.needsUpdate = true;
     this.scene.add(reeds);
 
-    // 藻場にも葦を密生させる
+    // 浅い平場（藻場）にも葦を密生させる。平場は複数あるので順に回す
     const weedGeo = reedGeo.clone();
     const weeds = new THREE.InstancedMesh(weedGeo, reedMat, 240);
+    const flatList = this.lake.flats;
     let wi = 0; tries = 0;
     while (wi < 240 && tries < 4000) {
       tries++;
+      const F = flatList[tries % flatList.length];
       const ang = rng() * TAU;
-      const rad = Math.sqrt(rng()) * this.flat.r * 0.9;
-      const x = this.flat.x + Math.cos(ang) * rad;
-      const z = this.flat.z + Math.sin(ang) * rad;
+      const rad = Math.sqrt(rng()) * F.r * 0.9;
+      const x = F.x + Math.cos(ang) * rad;
+      const z = F.z + Math.sin(ang) * rad;
       const h = this.heightAt(x, z);
       if (h > -0.1 || h < -2.6) continue;
       const sc = Math.abs(h) * 0.8 + 0.4;

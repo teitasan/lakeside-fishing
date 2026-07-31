@@ -51,25 +51,38 @@ export function makeLake(seed) {
     return shoreFrom(x / r, z / r);
   };
 
-  /* ---------- 方角ごとの斜面（緩急）とブレイクライン ----------
-     指数が小さいほど岸からすぐ落ちる急斜面、大きいほど広い浅棚。
-     さらに 1 段のかけあがり（ブレイク）を入れて、のっぺりしないようにする */
-  const slopeProfile = (cx, cz) => {
-    const n = noise.fbm(cx * 0.95 + 31.7, cz * 0.95 - 17.3, 2);      // -1..1
-    const nb = noise.fbm(cx * 1.7 - 5.9, cz * 1.7 + 23.5, 2);
-    const nk = noise.fbm(cx * 2.4 + 14.2, cz * 2.4 - 31.8, 2);
-    return {
-      exp: 0.46 + 0.42 * (n + 1),                                    // 0.46（急）〜1.30（緩）
-      breakK: 0.16 + 0.13 * (nk + 1),                                // 岸から k=0.16〜0.42
-      breakAmp: Math.max(0, 1.2 + 4.6 * nb),                         // 段差 0〜5.8m
-    };
-  };
-  /** 岸から湖心へ向かう深さのプロファイル（k = 1 - r/岸線半径） */
+  /* ---------- 方角ごとの湖底プロファイル：棚とかけあがりの階段 ----------
+     なめらかな冪関数だけだと湖底が「どこも同じ傾き」になり、平場ができない。
+     深さを「なめらかな斜面（全体の 30〜40%）」＋「2〜4 段の落ち込み」に分け、
+     段のあいだを平らな棚（＝浅棚・ブレイクの上）にする。
+     段は幅が狭いので、そこだけ急なかけあがりになる。
+     配列を作らないのは heightAt が 30 万回以上呼ばれるため */
   const depthProfile = (cx, cz, k) => {
-    const P = slopeProfile(cx, cz);
-    let d = MAX_DEPTH * Math.pow(k, P.exp) * smoothstep(0, 0.075, k);
-    // かけあがり：一段落ちる
-    d += P.breakAmp * smoothstep(P.breakK - 0.04, P.breakK + 0.04, k);
+    const n = noise.fbm(cx * 0.95 + 31.7, cz * 0.95 - 17.3, 2);      // 斜面の指数
+    const nb = noise.fbm(cx * 1.7 - 5.9, cz * 1.7 + 23.5, 2);        // なめらかな分の割合
+    const nk = noise.fbm(cx * 2.4 + 14.2, cz * 2.4 - 31.8, 2);       // 段の位置と幅
+    const nc = noise.fbm(cx * 3.1 - 21.4, cz * 3.1 + 6.6, 2);        // 段の数（連続的に増減）
+    /* なめらかな分。これを下げると棚はより平らになるが、岸ぎわに
+       水深 0 付近の広い平地ができて「湖の中に陸」になるため 0.30 が下限 */
+    const smooth = 0.30 + 0.10 * (nb + 1);                            // 0.30〜0.40（残りは段）
+    const exp = 0.62 + 0.38 * (n + 1);                                // 0.62（急）〜1.38（緩）
+    const near = smoothstep(0, 0.09, k);                              // 岸ぎわで段を出さない
+    let d = MAX_DEPTH * smooth * Math.pow(k, exp) * smoothstep(0, 0.075, k);
+    /* 段（かけあがり）は 4 枠で、3・4 枠目は nc で 0 から連続的に立ち上がる。
+       枠の数を整数で切り替えると方角ごとに深さが飛んで、湖底が扇状に割れるため。
+       重みを合計で正規化するので、何段になっても総深さは変わらない */
+    const gate = [1, 1, smoothstep(-0.18, 0.18, nc), smoothstep(0.22, 0.58, nc)];
+    let sum = 0;
+    for (let i = 0; i < 4; i++) sum += (0.55 + ((i + 0.5) / 4) * 0.9) * gate[i];
+    const budget = (MAX_DEPTH * (1 - smooth)) / Math.max(sum, 1e-4);
+    for (let i = 0; i < 4; i++) {
+      if (gate[i] <= 0.001) continue;
+      const t = (i + 0.5) / 4;
+      const jitter = 0.10 * noise.fbm(cx * 5.3 + i * 13.7, cz * 5.3 - i * 8.1, 1);
+      const kk = clamp(0.10 + t * 0.78 + jitter + nk * 0.06, 0.08, 0.95);
+      const w = 0.020 + 0.030 * clamp01(0.5 + nk * 0.5) + t * 0.02;   // 段の幅（k 単位）
+      d += budget * (0.55 + t * 0.9) * gate[i] * smoothstep(kk - w, kk + w, k) * near;
+    }
     return Math.min(d, MAX_DEPTH + 6);
   };
 
@@ -101,44 +114,137 @@ export function makeLake(seed) {
     return (lo + hi) / 2;
   }
 
-  /* ---------- 桟橋の方角 ---------- */
-  const dockAngle = rng() * TAU;
+  /* ---------- 桟橋の方角 ----------
+     棚とかけあがりで方角ごとの水深がばらつくので、
+     「先端が 7〜17m になる方角」を探して決める（検証落ちを減らす） */
+  const pickDockAngle = () => {
+    const a0 = rng() * TAU;
+    let best = null;
+    for (let i = 0; i < 24; i++) {
+      const a = a0 + (i / 24) * TAU;
+      const sr = crossing(a, baseHeight);
+      const tip = -baseHeight(Math.cos(a) * (sr - DOCK_LENGTH), Math.sin(a) * (sr - DOCK_LENGTH));
+      const sc = -Math.abs(tip - 11);
+      if (tip >= 7 && tip <= 17 && (!best || sc > best.sc)) best = { a, sc };
+    }
+    return best ? best.a : a0;
+  };
+  const dockAngle = pickDockAngle();
   const dockCos = Math.cos(dockAngle), dockSin = Math.sin(dockAngle);
   const baseShoreDock = crossing(dockAngle, baseHeight);
 
-  /* ---------- 深い淵（レジェンドの層を保証する） ---------- */
+  /* ---------- 深い淵（レジェンドの層を保証する） ----------
+     1 つ目は桟橋からキャストで届く所に置く（詰み防止）。
+     残りは湖のどこかに散らす（「なんでもない水域」を減らす） */
+  const holes = [];
+  const flats = [];
+  /** 既にあるフィーチャと離れているか */
+  const farFromAll = (x, z, min) =>
+    ![...holes, ...flats].some((f) => (f.x - x) ** 2 + (f.z - z) ** 2 < min * min);
+
   const holeSign = rng() < 0.5 ? -1 : 1;
-  // 桟橋からキャストで届く範囲に置く（詰み防止）
-  const holeAngle = dockAngle + holeSign * (0.13 + rng() * 0.19);
-  const holeInset = 26 + rng() * 10;                       // 岸線から内側へ
-  const holeShore = crossing(holeAngle, baseHeight);
-  const holeR = Math.max(holeShore * 0.35, holeShore - holeInset);
-  const hole = {
-    x: Math.cos(holeAngle) * holeR,
-    z: Math.sin(holeAngle) * holeR,
-    r: HOLE_RADIUS,
-    angle: holeAngle,
-    inset: holeShore - holeR,
-    amp: 0,
-  };
-  const holeBaseDepth = -baseHeight(hole.x, hole.z);
-  hole.amp = clamp(HOLE_TARGET_DEPTH - holeBaseDepth, 0, 16);
+  {
+    // 桟橋から届く扇の中で、掘って 24m にできる（元が深すぎず浅すぎない）所を探す
+    let best = null;
+    for (let i = 0; i < 18; i++) {
+      const holeAngle = dockAngle + holeSign * (0.13 + (i % 6) * 0.032 + rng() * 0.03);
+      const holeInset = 26 + Math.floor(i / 6) * 5 + rng() * 5;
+      const holeShore = crossing(holeAngle, baseHeight);
+      const holeR = Math.max(holeShore * 0.35, holeShore - holeInset);
+      const x = Math.cos(holeAngle) * holeR, z = Math.sin(holeAngle) * holeR;
+      const base = -baseHeight(x, z);
+      const sc = -Math.abs(base - 13);
+      if (base >= 5 && base <= 24 && (!best || sc > best.sc)) {
+        best = { sc, x, z, angle: holeAngle, inset: holeShore - holeR, base };
+      }
+    }
+    if (!best) {
+      const holeAngle = dockAngle + holeSign * 0.2;
+      const holeShore = crossing(holeAngle, baseHeight);
+      const holeR = Math.max(holeShore * 0.35, holeShore - 30);
+      const x = Math.cos(holeAngle) * holeR, z = Math.sin(holeAngle) * holeR;
+      best = { x, z, angle: holeAngle, inset: holeShore - holeR, base: -baseHeight(x, z) };
+    }
+    holes.push({
+      x: best.x, z: best.z, r: HOLE_RADIUS, angle: best.angle, inset: best.inset,
+      amp: clamp(HOLE_TARGET_DEPTH - best.base, 0, 21),
+      main: true,
+    });
+  }
 
   /* ---------- 藻場（浅場の層を保証する） ---------- */
-  const flatAngle = dockAngle - holeSign * (0.5 + rng() * 0.5);
-  const flatInset = 14 + rng() * 10;
-  const flatShore = crossing(flatAngle, baseHeight);
-  const flatR = Math.max(flatShore * 0.5, flatShore - flatInset);
-  const flat = {
-    x: Math.cos(flatAngle) * flatR,
-    z: Math.sin(flatAngle) * flatR,
-    r: FLAT_RADIUS,
-    angle: flatAngle,
-    inset: flatShore - flatR,
-    amp: 0,
-  };
-  const flatBaseDepth = -baseHeight(flat.x, flat.z);
-  flat.amp = clamp(flatBaseDepth - FLAT_TARGET_DEPTH, 0, 12);
+  {
+    // 淵の反対側で、盛って 2.5m にできる（元が 3〜16m の）所を探す
+    let best = null;
+    for (let i = 0; i < 18; i++) {
+      const flatAngle = dockAngle - holeSign * (0.5 + (i % 6) * 0.09 + rng() * 0.06);
+      const flatInset = 14 + Math.floor(i / 6) * 6 + rng() * 5;
+      const flatShore = crossing(flatAngle, baseHeight);
+      const flatR = Math.max(flatShore * 0.5, flatShore - flatInset);
+      const x = Math.cos(flatAngle) * flatR, z = Math.sin(flatAngle) * flatR;
+      const base = -baseHeight(x, z);
+      const sc = -Math.abs(base - 7);
+      if (base >= 3 && base <= 16 && (!best || sc > best.sc)) {
+        best = { sc, x, z, angle: flatAngle, inset: flatShore - flatR, base };
+      }
+    }
+    if (!best) {
+      const flatAngle = dockAngle - holeSign * 0.7;
+      const flatShore = crossing(flatAngle, baseHeight);
+      const flatR = Math.max(flatShore * 0.5, flatShore - 18);
+      const x = Math.cos(flatAngle) * flatR, z = Math.sin(flatAngle) * flatR;
+      best = { x, z, angle: flatAngle, inset: flatShore - flatR, base: -baseHeight(x, z) };
+    }
+    flats.push({
+      x: best.x, z: best.z, r: FLAT_RADIUS, angle: best.angle, inset: best.inset,
+      amp: clamp(best.base - FLAT_TARGET_DEPTH, 0, 16),
+      main: true,
+    });
+  }
+
+  /* ---------- 追加の淵・浅い平場（湖のあちこちに） ----------
+     1 つずつだと「なんでもない水域」が広すぎるので、小ぶりのものを散らす。
+     掘る／盛るだけなので陸はできず、岸ぎわではフェードして土手を守る */
+  {
+    // 桟橋の先の水深を動かさないよう、桟橋からは離して置く
+    const tipR = baseShoreDock - DOCK_LENGTH;
+    const tipX = dockCos * tipR, tipZ = dockSin * tipR;
+    const extraHoles = 1 + Math.floor(rng() * 2);            // 1〜2
+    const extraFlats = 2 + Math.floor(rng() * 2);            // 2〜3
+    const place = (kind, want) => {
+      let made = 0;
+      for (let i = 0; i < want * 60 && made < want; i++) {
+        const a = rng() * TAU;
+        const sr = crossing(a, baseHeight);
+        const rr = sr * (0.22 + rng() * 0.62);
+        const x = Math.cos(a) * rr, z = Math.sin(a) * rr;
+        const r = kind === 'hole' ? 16 + rng() * 10 : 14 + rng() * 12;
+        // 岸から離す（土手を削らない）／既存のフィーチャと重ねない
+        if (sr - Math.hypot(x, z) < r * 0.8 + 6) continue;
+        if ((x - tipX) ** 2 + (z - tipZ) ** 2 < 45 * 45) continue;
+        if (!farFromAll(x, z, 44)) continue;
+        const base = -baseHeight(x, z);
+        if (kind === 'hole') {
+          const target = 18 + rng() * 8;                     // 18〜26m
+          const amp = clamp(target - base, 3, 16);
+          if (amp < 3.5) continue;                           // 元から深い所は掘らない
+          holes.push({ x, z, r, angle: a, inset: sr - Math.hypot(x, z), amp, main: false });
+        } else {
+          const target = 1.8 + rng() * 1.9;                  // 1.8〜3.7m
+          const amp = clamp(base - target, 2, 16);
+          // 元から浅い所は盛らない／深すぎる所は盛っても浅場にならない
+          if (base < 3.2 || base > 14) continue;
+          flats.push({ x, z, r, angle: a, inset: sr - Math.hypot(x, z), amp, main: false });
+        }
+        made++;
+      }
+      return made;
+    };
+    place('hole', extraHoles);
+    place('flat', extraFlats);
+  }
+  const hole = holes[0];
+  const flat = flats[0];
 
   /* ---------- 完成した高さ関数 ---------- */
   function heightAt(x, z) {
@@ -153,16 +259,20 @@ export function makeLake(seed) {
     let h = -depth + noise.fbm(x * 0.017, z * 0.017, 3) * 1.35 * k;
 
     // 深い淵：掘るだけなので陸はできない。岸際ではフェードして土手を削らない
-    if (hole.amp > 0) {
-      const dh = ((x - hole.x) ** 2 + (z - hole.z) ** 2) / (hole.r * hole.r);
-      if (dh < 9) h -= hole.amp * Math.exp(-dh * 1.1) * smoothstep(0, 0.12, k);
+    for (let i = 0; i < holes.length; i++) {
+      const o = holes[i];
+      if (o.amp <= 0) continue;
+      const dh = ((x - o.x) ** 2 + (z - o.z) ** 2) / (o.r * o.r);
+      if (dh < 9) h -= o.amp * Math.exp(-dh * 1.1) * smoothstep(0, 0.12, k);
     }
-    // 藻場：底上げするが、必ず FLAT_MIN_DEPTH の水を残す
+    // 浅い平場：底上げするが、必ず FLAT_MIN_DEPTH の水を残す
     // （岸際のフェードは軽く。水を残すクランプ自体が土手を守るため）
-    if (flat.amp > 0) {
-      const df = ((x - flat.x) ** 2 + (z - flat.z) ** 2) / (flat.r * flat.r);
+    for (let i = 0; i < flats.length; i++) {
+      const o = flats[i];
+      if (o.amp <= 0) continue;
+      const df = ((x - o.x) ** 2 + (z - o.z) ** 2) / (o.r * o.r);
       if (df < 9) {
-        const want = flat.amp * Math.exp(-df * 1.2) * smoothstep(0.01, 0.08, k);
+        const want = o.amp * Math.exp(-df * 1.2) * smoothstep(0.01, 0.08, k);
         h += Math.min(want, Math.max(0, -h - FLAT_MIN_DEPTH));
       }
     }
@@ -180,6 +290,17 @@ export function makeLake(seed) {
 
   /* ---------- 桟橋（完成した高さで岸線を取り直す） ---------- */
   const r0 = crossing(dockAngle, heightAt);
+  /* 棚とかけあがりがあるので、先端の水深が 7〜17m になる長さを選ぶ
+     （桟橋から浅場〜中深場が狙える状態を保つ） */
+  const dockLen = (() => {
+    let best = { len: DOCK_LENGTH, sc: -1e9 };
+    for (let L = 18; L <= 32; L++) {
+      const tip = -heightAt(dockCos * (r0 - L), dockSin * (r0 - L));
+      const sc = (tip >= 7 && tip <= 17 ? 100 : 0) - Math.abs(tip - 11);
+      if (sc > best.sc) best = { len: L, sc };
+    }
+    return best.len;
+  })();
   // 陸側の地面が床を突き抜けないよう、床の高さを地形に合わせる
   let landMax = 0;
   for (let i = 0; i <= 8; i++) {
@@ -195,11 +316,12 @@ export function makeLake(seed) {
     angle: dockAngle,
     r0,
     startR: r0 + DOCK_LAND,
-    endR: r0 - DOCK_LENGTH,
+    endR: r0 - dockLen,
     y: dockY,
+    len: dockLen,
     landMax,
     start: { x: dockCos * (r0 + DOCK_LAND), z: dockSin * (r0 + DOCK_LAND) },
-    end: { x: dockCos * (r0 - DOCK_LENGTH), z: dockSin * (r0 - DOCK_LENGTH) },
+    end: { x: dockCos * (r0 - dockLen), z: dockSin * (r0 - dockLen) },
     dir: { x: -dockCos, z: -dockSin },   // 岸 → 湖心
   };
 
@@ -258,7 +380,7 @@ export function makeLake(seed) {
   return {
     seed: s, noise, shoreAtAngle, shoreRadius, baseHeight, heightAt, slopeAt,
     depthAt: (x, z) => Math.max(0, -heightAt(x, z)),
-    dock, hole, flat, baseShoreDock, structures,
+    dock, hole, flat, holes, flats, baseShoreDock, structures,
     /** 底質（'mud' | 'sand' | 'rock'）。slope を渡せば計算を節約できる */
     bedAt(x, z, slope = null) {
       const v = bedValue(x, z, slope ?? slopeAt(x, z));

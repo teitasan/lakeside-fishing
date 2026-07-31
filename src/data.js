@@ -898,17 +898,17 @@ export const TERRAIN_KINDS = [
     fish: '深場の魚が浅場へ出てくる通り道。上下のタナを試す価値がある',
   },
   {
-    id: 'shelf', group: 'feature', name: '浅棚', rule: '水深 1.5〜8m で傾斜がゆるい所',
-    desc: '傾斜がゆるく、だらだらと続く浅い棚。日中は静かだが、朝夕に魚が差してくる。',
+    id: 'shelf', group: 'feature', name: '浅棚', rule: '水深 1.5〜8m でほぼ平ら（傾き 0.12 以下）',
+    desc: 'かけあがりの上にできた平らな棚。日中は静かだが、朝夕に魚が差してくる。',
     fish: '回遊してくる魚。夜と朝夕に浅場へ寄る魚がねらい目',
   },
   {
-    id: 'weedbed', group: 'feature', name: '藻場', rule: '湖に必ず 1 つある浅い平場',
-    desc: '水草が茂る浅い平場。小魚が身を隠し、それを狙う魚が待ち構える。',
+    id: 'weedbed', group: 'feature', name: '藻場', rule: '浅い平場（湖に 3〜4 か所）',
+    desc: '水草が茂る浅い平場。小魚が身を隠し、それを狙う魚が待ち構える。沖にできたものは水草の少ない盛り上がり（ハンプ）になる。',
     fish: '藻場の魚・肉食魚。表層で食う魚も多い',
   },
   {
-    id: 'hole', group: 'feature', name: '深い淵', rule: '湖に必ず 1 つある 20m 超の窪み',
+    id: 'hole', group: 'feature', name: '深い淵', rule: '19m 超の窪み（湖に 2〜3 か所）',
     desc: '湖の一番深い窪み。冷たく暗く、めったに姿を見せない大物が沈んでいる。',
     fish: 'レジェンド級。夜・雨・高級エサと重ねると確率が上がる',
   },
@@ -948,7 +948,7 @@ export function terrainMatches(ctx) {
   else if (ctx.bed === 'rock') out.push('bed-rock');
   else if (ctx.bed === 'mud') out.push('bed-mud');
   if (ctx.grad >= 0.30) out.push('break');
-  if (ctx.grad <= 0.22 && d >= 1.5 && d <= 8) out.push('shelf');
+  if (Math.abs(ctx.grad) <= 0.12 && d >= 1.5 && d <= 8) out.push('shelf');
   if (ctx.inFlat) out.push('weedbed');
   if (ctx.inHole) out.push('hole');
   if (d <= 1.5) out.push('edge');

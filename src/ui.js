@@ -427,8 +427,8 @@ export class UI {
     $('opt-seed').value = String(i.seed);
     $('lake-info').innerHTML = `
       <div><span class="k">桟橋の先</span><b>水深 ${fmt1(i.dockDepth)} m</b></div>
-      <div><span class="k">深い淵</span><b>${fmt1(i.holeDepth)} m</b>　<span style="opacity:.7">先端から ${i.holeWhere}</span></div>
-      <div><span class="k">藻場</span><b>${fmt1(i.flatDepth)} m</b>　<span style="opacity:.7">先端から ${i.flatWhere}</span></div>
+      <div><span class="k">深い淵</span><b>${fmt1(i.holeDepth)} m</b>　<span style="opacity:.7">先端から ${i.holeWhere}${i.holeCount > 1 ? `／ほかに ${i.holeCount - 1} か所` : ''}</span></div>
+      <div><span class="k">浅い平場</span><b>${fmt1(i.flatDepth)} m</b>　<span style="opacity:.7">先端から ${i.flatWhere}${i.flatCount > 1 ? `／ほかに ${i.flatCount - 1} か所` : ''}</span></div>
       <div><span class="k">狙える水深</span><b>${fmt1(i.minDepth)} 〜 ${fmt1(i.maxDepth)} m</b></div>`;
   }
 

@@ -201,8 +201,8 @@ export class Debug {
       geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(arr), 3));
       root.add(new THREE.LineSegments(geo, lineMat(color, 0.55)));
     };
-    featRing(t.hole, 0xc86bff);
-    featRing(t.flat, 0x6de08a);
+    for (const o of t.lake.holes) featRing(o, 0xc86bff);
+    for (const o of t.lake.flats) featRing(o, 0x6de08a);
 
     /* --- プレイヤーの当たり判定 --- */
     const pr = 0.34, N = 24, parr = [];
