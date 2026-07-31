@@ -38,7 +38,7 @@ function segBoxHit(p0, p1, min, max) {
  * 水中の立ち枯れ（ローポリ）。
  * 歪んだ幹・折れた梢・枝・根張りで「沈んだ枯れ木」に見せる。
  */
-function makeSnagGroup(t, woodMat, tipMat) {
+function makeSnagGroup(t, bedY, woodMat, tipMat) {
   const g = new THREE.Group();
   const h = t.h;
   const r0 = t.r * 0.52;
@@ -846,7 +846,7 @@ export class Terrain {
             if (si < sRocks.count) sRocks.setMatrixAt(si++, m);
           }
         } else {
-          snagRoot.add(makeSnagGroup(t, snagMat, snagTipMat));
+          snagRoot.add(makeSnagGroup(t, bedY, snagMat, snagTipMat));
         }
         // 当たり判定（上端は水面下なので、糸には掛からない＝キャストの邪魔をしない）
         this.addObstacle(t.x, t.z, t.r * 1.15, bedY + t.h);
