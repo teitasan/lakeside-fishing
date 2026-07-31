@@ -244,10 +244,13 @@ pull = F.pull0 * (F.running ? <span class="n">2.0</span> : <span class="n">1.0</
 shortLine = clamp(<span class="n">1.35</span> - F.dist * <span class="n">0.025</span>, <span class="n">1.0</span>, <span class="n">1.35</span>)
 
 <span class="k">if</span> (巻いている) {
+  <span class="cm">// リールの立ち上がり（慣性）。押し始めは巻けず、押し続けると乗ってくる</span>
+  F.spin  = <span class="n">1</span> - (<span class="n">1</span> - F.spin) * exp(-dt / <span class="n">0.22</span>)
   resist  = clamp(<span class="n">1.70</span> - pull * <span class="n">0.75</span>, <span class="n">0.35</span>, <span class="n">1.60</span>)   <span class="cm">// 強い魚ほど巻けない</span>
-  F.dist    -= rod.reel * <span class="n">4.2</span> * resist * (<span class="n">1</span> + F.dist * <span class="n">0.012</span>) * dt   <span class="cm">// m/s。遠いうちは速い</span>
+  F.dist    -= rod.reel * <span class="n">4.6</span> * resist * (<span class="n">1</span> + F.dist * <span class="n">0.012</span>) * <b>F.spin</b> * dt   <span class="cm">// m/s</span>
   F.tension += (<span class="n">0.08</span> + pull * <span class="n">0.55</span>) * shortLine * dt / rod.power
 } <span class="k">else</span> {
+  F.spin   *= exp(-dt / <span class="n">0.12</span>)                       <span class="cm">// 離すとリールは止まっていく</span>
   F.dist    += pull * <span class="n">0.70</span> * dt                     <span class="cm">// 出る糸は距離に関係なく m/s</span>
   F.tension -= (<span class="n">1.30</span> + pull * <span class="n">0.30</span>) * dt
   <span class="k">if</span> (F.running) F.tension += pull * <span class="n">0.30</span> * shortLine * dt   <span class="cm">// 走られると放しても張る</span>
@@ -264,13 +267,28 @@ F.stamina -= (<span class="n">0.022</span> + tRatio * <span class="n">0.17</span
 <span class="k">if</span> (F.dist &lt;= <span class="n">0.7</span>)          → 取り込み</pre>
     <p class="src">src/game.js — _updateFight()</p>
 
+    <div class="note warn">
+      <b>細かい連打は空回りします。</b>巻き取りには<b>立ち上がり（F.spin）</b>があり、押し始めは 0、
+      押し続けて <b>0.22 秒で 63%・0.66 秒で 95%</b> まで乗ります。離すと <b>0.12 秒</b>の時定数で落ちます。<br>
+      40ms 間隔で叩くと乗りは <b>30% 前後</b>で止まるので、同じ時間押し続けた場合と比べて巻き取りは
+      1/3 程度。実測（カーボン+PE・同じ 1 匹）：<b>連打 2.6 秒で −0.24m（＝逆に出された）／押し続け 2.6 秒で +7.32m</b>。<br>
+      慣性のぶん全体が間延びしないよう、巻き取りの基準速度は <b>4.2 → 4.6 m/s</b> に上げています。<br>
+      引きの強い魚は長く押せない（すぐテンションが上限に来る）ので<b>乗り切らず寄せられない</b>——
+      これが装備の壁として効きます。逆に弱い魚は長く押せるので慣性はほぼ影響しません。
+    </div>
+    <div class="note">
+      <b>張力の増え方は立ち上がりに依存させていません。</b>依存させると「連打すると張力も上がらない＝
+      高い張力を保ったまま巻き比率を上げられる」ことになり、かえって連打が有利になりました
+      （実測：張力を spin に比例させると連打の所要時間が 181 秒 → 59 秒に短縮）。
+    </div>
+
     <h4>ヒット時の初期値</h4>
     <pre>sizeF   = <span class="n">0.55</span> + (この個体の全長 / sp.len[1]) * <span class="n">0.75</span>   <span class="cm">// 0.55〜1.30</span>
 F.pull0 = sp.str * sizeF                              <span class="cm">// この個体の基礎引き</span>
 F.len0  = 掛けた地点までの距離（m）                     <span class="cm">// プレイヤー基準の水平距離</span>
 F.span  = min(F.len0 + <span class="n">16</span>, <span class="n">62</span>)                        <span class="cm">// ここまで走られたら逃走＝バーの上限</span>
                                                       <span class="cm">// （62m = 糸の長さ。遠投時は余裕が縮む）</span>
-F.dist    = F.len0   F.tension = <span class="n">0</span>   F.stamina = <span class="n">1</span>
+F.dist    = F.len0   F.tension = <span class="n">0</span>   F.stamina = <span class="n">1</span>   F.spin = <span class="n">0</span>
 F.runTimer = rand(<span class="n">1.4</span>, <span class="n">3.2</span>)                           <span class="cm">// 最初の突進までの秒数</span>
 
 <span class="cm">// 引きが強い魚（F.pull0 ≧ 1.2）は掛かった瞬間から走っている</span>
@@ -346,15 +364,19 @@ F.runDur  = rand(<span class="n">0.6</span>, <span class="n">1.2</span>) * P.run
     <div class="note q">
       <span class="qh">Q. ロッドの「竿の力（power）」「巻取（reel）」の違い？</span>
       <b>power はテンションの増加を割り算で抑える</b>値（＝竿が引きを吸収する）で、<code>tension += … / rod.power</code>。
-      <b>reel は巻き取り速度の倍率</b>で、<code>dist -= rod.reel × 4.2 × resist × (1+dist×0.012) × dt</code>（m/s）。
+      <b>reel は巻き取り速度の倍率</b>で、<code>dist -= rod.reel × 4.6 × resist × (1+dist×0.012) × F.spin × dt</code>（m/s）。
       power は「切れにくさ」、reel は「早さ」に効きます。ラインブレイクを減らしたいなら <b>line.cap と rod.power</b>、
-      ファイトを短くしたいなら <b>rod.reel</b> です。<code>attract</code> はファイトには無関係（アタリの速さと抽選）。
+      ファイトを短くしたいなら <b>rod.reel</b> です。<code>attract</code> はファイトには無関係（アタリの速さと抽選）。<br>
+      <b>power はもう一つ効きます</b>：張力の増えが遅くなる＝<b>長く押していられる</b>＝リールが乗る、という経路です。
+      チョウザメ（平均 123cm）を<b>連打</b>で獲るのに掛かる時間は 竹+ナイロン <b>108 秒</b>／グラス+フロロ <b>55 秒</b>／
+      カーボン+PE <b>37 秒</b>／伝説+ミスリル <b>21 秒</b>。案内どおりの操作なら カーボン+PE <b>32 秒</b>／伝説+ミスリル <b>22 秒</b> なので、
+      <b>装備が足りている限り連打は損</b>です。足りない装備で無理に獲るなら、2 分近く叩き続けることになります。
     </div>
 
     <div class="note warn">
       <b>逃走は「掛けた地点より 16m 走られる」ことで起きます。</b>
       放している間、距離は <code>pull × 0.70</code> m/秒で増えます。強い魚の突進中（pull が 2 倍）は
-      <b>放すだけで毎秒 4m 以上</b>取られることもあり、巻き取り（<code>rod.reel×4.2×resist</code>）が
+      <b>放すだけで毎秒 4m 以上</b>取られることもあり、巻き取り（<code>rod.reel×4.6×resist×F.spin</code>）が
       それを下回る装備だと<b>どう操作しても逃げられます</b>。これが装備の壁です。
     </div>
 
@@ -638,7 +660,7 @@ p    = <span class="n">2.1</span> − min(<span class="n">1.2</span>, bait.rare 
       ロッド・ラインは価格順の階段なので同種内の順位、エサは 1.0 を基準にしたしきい値で言葉に変換しています。
     </p>
     <h3>ロッド</h3>
-    <p><b>reel</b>＝巻き取り速度倍率（<code>dist -= reel×4.2×resist×dt</code> m/s）、<b>power</b>＝テンション増加の割り算（大きいほど切れにくい）、<b>attract</b>＝アタリの速さと抽選重み。</p>
+    <p><b>reel</b>＝巻き取り速度倍率（<code>dist -= reel×4.6×resist×F.spin×dt</code> m/s）、<b>power</b>＝テンション増加の割り算（大きいほど切れにくい）、<b>attract</b>＝アタリの速さと抽選重み。</p>
     <div class="tw" id="rodTable"></div>
 
     <h3>ライン</h3>
@@ -1083,7 +1105,7 @@ function simulate(sp, len, rod, line, policy, delay, len0 = 22, dt = 1 / 60, rec
   const pull0 = sp.str * sizeF;
   const P = fightPattern(sp);
   const span = Math.max(len0 + 4, Math.min(len0 + 16, 62));   // ここまで走られたら逃走
-  let dist = len0, tension = 0, stamina = 1, t = 0;
+  let dist = len0, tension = 0, stamina = 1, t = 0, spin = 0;
   // 引きの強い魚は掛かった瞬間から走っている
   const surge = pull0 >= 1.2 && P.runGap < 50;
   let running = surge, runTimer = rand(1.4, 3.2) * P.runGap, runDur = surge ? rand(0.6, 1.2) * P.runDur : 0;
@@ -1131,13 +1153,15 @@ function simulate(sp, len, rod, line, policy, delay, len0 = 22, dt = 1 / 60, rec
 
     const shortLine = clamp(1.35 - dist * 0.025, 1.0, 1.35);
     if (reeling) {
+      spin = 1 - (1 - spin) * Math.exp(-dt / 0.22);          // リールの立ち上がり
       const resist = clamp(1.70 - pull * 0.75, 0.35, 1.60) * (shakeBite ? P.shakeReel : 1);
-      dist -= rod.reel * 4.2 * resist * (1 + dist * 0.012) * dt;
+      dist -= rod.reel * 4.6 * resist * (1 + dist * 0.012) * spin * dt;
       let gain = (0.08 + pull * 0.55) * P.tensionGain * shortLine;
       if (shakeBite) gain *= P.shakeGain;
       if (jumpBite) gain *= P.jumpTension;
       tension += (gain * dt) / rod.power;
     } else {
+      spin *= Math.exp(-dt / 0.12);                          // 離すと止まっていく
       dist += pull * 0.70 * P.lineOut * dt;
       tension -= (1.30 + pull * 0.30) * P.tensionDecay * dt;
       if (running) tension += pull * 0.30 * shortLine * dt;
@@ -1148,7 +1172,7 @@ function simulate(sp, len, rod, line, policy, delay, len0 = 22, dt = 1 / 60, rec
     stamina = clamp01(stamina - ((0.022 + tRatio * 0.17 + (reeling ? 0.02 : 0)) * P.staminaDrain * dt) / Math.max(0.4, sp.sta));
 
     if (record && record.length < 4000) {
-      record.push({ t, tr: tRatio, d: clamp01(dist / span), s: stamina, run: running, shake: shakeOn, jump: jumping });
+      record.push({ t, tr: tRatio, d: clamp01(dist / span), s: stamina, sp: spin, run: running, shake: shakeOn, jump: jumping });
     }
 
     if (tension >= cap) return { r: 'snap', t };
@@ -1235,7 +1259,7 @@ function runSim() {
   const gainRun = (0.08 + pull0 * 2 * 0.55) / rod.power;
   const snapT = line.cap / gain;
   const resist = clamp(1.70 - pull0 * 0.75, 0.35, 1.60);
-  const reelRate = rod.reel * 4.2 * resist * (1 + simState.len0 * 0.012);
+  const reelRate = rod.reel * 4.6 * resist * (1 + simState.len0 * 0.012);   // 立ち上がり切った状態
   const lossRate = pull0 * 2 * 0.70;
 
   const out = document.getElementById('simOut');
@@ -1645,7 +1669,7 @@ function runRoll() {
       <td class="num" style="color:var(--cyan)">${r.reel}</td><td class="num" style="color:var(--good)">${r.power}</td>
       <td class="num">${r.attract}</td><td class="num">${f2(r.reel * 4.2 * 1.6)}</td>
       <td class="l" style="white-space:normal;color:var(--fg-dim)">${r.desc}</td></tr>`).join('')}</tbody>
-      <tfoot><tr><td colspan="8" class="l">巻取速度は resist が最大（1.60・ごく弱い魚）のときの寄せ速度（m/s）。実際は魚の引きに応じて 0.35〜1.60 倍で、遠いうちは <code>(1+dist×0.012)</code> ぶん速い。</td></tr></tfoot></table>`;
+      <tfoot><tr><td colspan="8" class="l">巻取速度は resist が最大（1.60・ごく弱い魚）のときの寄せ速度（m/s）。実際は魚の引きに応じて 0.35〜1.60 倍で、遠いうちは <code>(1+dist×0.012)</code> ぶん速い。<b>リールの立ち上がり（F.spin）が乗り切った状態</b>の値なので、短く押しただけではこの速度は出ません。</td></tr></tfoot></table>`;
 
   document.getElementById('lineTable').innerHTML = `<table><thead><tr>
     <th class="l">ライン</th><th class="num">価格 G</th><th class="num">解禁 Lv</th><th class="num">cap<br><span style="opacity:.6">強度</span></th>

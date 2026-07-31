@@ -191,11 +191,14 @@ h2 { display: flex; align-items: center; gap: 2px; }
 #fight-sub { font-size: 11px; opacity: .7; }
 .fp-row { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
 .fp-row label { width: 62px; font-size: 10px; opacity: .65; line-height: 1.2; text-align: right; }
-.tension-track, .dist-track, .stam-track {
+.tension-track, .dist-track, .stam-track, .spin-track {
   position: relative; flex: 1; height: 14px; border-radius: 99px; overflow: hidden;
   background: rgba(255, 255, 255, .10); border: 1px solid rgba(255, 255, 255, .12);
 }
 .dist-track, .stam-track { height: 9px; }
+.spin-track { height: 6px; }
+#spin-fill { position: absolute; inset: 0 auto 0 0; width: 0%;
+  background: linear-gradient(90deg, #ffd479, #9fe0a8); transition: width .06s linear; }
 #tension-fill { position: absolute; inset: 0 auto 0 0; width: 0%;
   background: linear-gradient(90deg, #64d99a 0%, #d8e05f 52%, #ff9a3d 76%, #ff4444 100%);
   background-size: 500% 100%; background-position: left; }

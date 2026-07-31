@@ -296,7 +296,7 @@ export class UI {
       powerBand: $('power-band'), powerMark: $('power-mark'),
       powerTrack: document.querySelector('.pm-track'), aim: $('aim'),
       fight: $('fight-panel'), fightName: $('fight-name'), fightSub: $('fight-sub'),
-      tension: $('tension-fill'), dist: $('dist-fill'), stam: $('stam-fill'),
+      tension: $('tension-fill'), dist: $('dist-fill'), stam: $('stam-fill'), spin: $('spin-fill'),
       distNum: $('dist-num'), distMark: $('dist-mark'),
       danger: $('danger-flash'), biteAlert: $('bite-alert'), toasts: $('toasts'),
       loading: $('loading'), title: $('title-screen'),
@@ -503,6 +503,7 @@ export class UI {
       this.el.distMark.style.left = hk;
       this._last.hookAt = hk;
     }
+    this.el.spin.style.width = (clamp01(d.spin ?? 0) * 100).toFixed(1) + '%';
     this.el.stam.style.width = (clamp01(d.stam) * 100).toFixed(1) + '%';
     const danger = d.tension > 0.82;
     if (danger !== this._last.danger) {

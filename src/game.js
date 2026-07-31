@@ -40,8 +40,14 @@ const MAX_LINE = 62;
    LAND_M    ここまで寄せたら取り込み */
 /* アタリを逃したときにエサが残る確率（残りはエサを持っていかれる） */
 const BAIT_KEEP_ON_MISS = 0.2;
-const REEL_MPS = 4.2;
+const REEL_MPS = 4.6;
 const LINEOUT_MPS = 0.70;
+/* リールの立ち上がり（慣性）。押し始めは糸を巻けず、押し続けるほど乗ってくる。
+   40ms 間隔で叩くと 3 割しか乗らないので、細かく叩くのは損になる
+   （そのぶん巻き取りの基準速度は 4.2 → 4.6 m/s に上げて全体の間延びを抑えた）。
+   引きの強い魚は長く押せない＝乗り切らないので、ここが装備の壁にもなる */
+const SPIN_UP = 0.22;     // 押している間の立ち上がり時定数（秒）
+const SPIN_DOWN = 0.12;   // 離したときに落ちる時定数（秒）
 const RUN_MARGIN = 16;
 const LAND_M = 0.7;
 const EYE_H = 1.62;
@@ -955,6 +961,7 @@ export class Game {
       running: surge,
       runDur: surge ? rand(0.6, 1.2) * pattern.runDur : 0,
       lateral: 0,
+      spin: 0,             // リールの乗り（0〜1）。押し続けると立ち上がる
       px: this.bobber.x,   // 前フレームの魚の位置（向きを動いている方へ向けるため）
       pz: this.bobber.z,
       face: 'player',      // いま向いている基準（player / move / jump）
@@ -1841,16 +1848,19 @@ export class Game {
     const pull = F.pull0 * P.pull * (F.running ? 2.0 * P.runPull : 1.0) * (0.5 + 0.5 * F.stamina);
 
     if (reeling) {
+      // リールが乗るまでは巻けない（押し始め 0 → 押し続けて 1）
+      F.spin = 1 - (1 - F.spin) * Math.exp(-dt / SPIN_UP);
       const resist = clamp(1.70 - pull * 0.75, 0.35, 1.60) * (shakeBite ? P.shakeReel : 1);
       // m/s。遠いうちは糸を送り込むだけなので速く、寄せるほど重くなる
-      const rate = this.rod.reel * REEL_MPS * resist * (1 + F.dist * 0.012);
+      const rate = this.rod.reel * REEL_MPS * resist * (1 + F.dist * 0.012) * F.spin;
       F.dist -= rate * dt;
       let gain = (0.08 + pull * 0.55) * P.tensionGain * shortLine;
       if (shakeBite) gain *= P.shakeGain;
       if (jumpBite) gain *= P.jumpTension;
       F.tension += gain * dt / this.rod.power;
-      this.audio.reelTick(0.7 + resist);
+      this.audio.reelTick(0.7 + resist * F.spin);
     } else {
+      F.spin *= Math.exp(-dt / SPIN_DOWN);             // 離すとリールは止まっていく
       F.dist += pull * LINEOUT_MPS * P.lineOut * dt;   // 出される糸は距離に関係なく m/s
       F.tension -= (1.30 + pull * 0.30) * P.tensionDecay * dt;
       if (F.running) F.tension += pull * 0.30 * shortLine * dt;
