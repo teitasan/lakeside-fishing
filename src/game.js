@@ -87,6 +87,8 @@ const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
 const _v4 = new THREE.Vector3();
+const _v5 = new THREE.Vector3();
+const _v6 = new THREE.Vector3();
 
 export class Game {
   constructor(canvas) {
@@ -1610,7 +1612,8 @@ export class Game {
         f.state = 'landed';
         f.mesh.position.copy(f.pos);
         f.mesh.rotation.set(0, -this.yaw + Math.PI * 0.5, lerp(0, 0.5, t));
-        this.bobber.copy(f.pos).y += 0.3;
+        // 糸（とウキ）は口に付く。持ち上げた魚は口から下がる
+        this.bobber.copy(f.mouthPos(_v5)).y += 0.06;
         bob.position.copy(this.bobber);
         this.angler.updateLine(_v1, this.bobber, 0.9, this.camera);
         if (this.stateTime > 0.8 && !this.cardShown) this._showCatchCard();
@@ -1956,15 +1959,19 @@ export class Game {
       this.water.addRipple(wx, wz, 0.5, 0.8);
     }
 
-    /* --- ウキ / 糸 --- */
-    this.bobber.copy(f.pos).lerp(this.angler.getRodTip(_v1), 0.32);
-    this.bobber.y = Math.max(this.bobber.y, surf - 0.18);
+    /* --- ウキ / 糸 ---
+       糸は竿先から「魚の口」へ。ウキはその糸が水面と交わる点に置く */
+    const tip = this.angler.getRodTip(_v4);
+    const mouth = f.mouthPos(_v5);
+    const slack = clamp01(1 - tRatio) * 0.55;
+    if (!this._lineSurfaceCross(tip, mouth, Angler.sagFor(tip.distanceTo(mouth), slack), this.bobber)) {
+      this.bobber.copy(mouth);      // 魚が水面から出ている（跳ねている）ときなど
+    }
     this.angler.bobber.visible = true;
     this.angler.bobber.position.copy(this.bobber);
     // 糸は水面で切って、水中は描かない（水中カメラ中は見せる）
-    this.angler.updateLine(this.angler.getRodTip(_v1), f.pos,
-      clamp01(1 - tRatio) * 0.55, this.camera, this._uwFx ? null : surf);
-    this.angler.updateRig(this.bobber, f.pos, this.camera, false);
+    this.angler.updateLine(tip, mouth, slack, this.camera, this._uwFx ? null : surf);
+    this.angler.updateRig(this.bobber, mouth, this.camera, false);
 
     /* --- UI --- */
     // 魚種とレア度は取り込むまで伏せる（引きの強さだけを見せる）
@@ -1983,18 +1990,41 @@ export class Game {
       stam: F.stamina,
       reeling,
     });
-    this.ui.setPrompt(jumping
-      ? '跳ねている！ <b>離して</b>糸を送れ（送れれば魚が消耗する）'
-      : F.shakeOn
-        ? '首を振っている！ <b>巻くのを止めて</b>やり過ごせ'
-        : F.running
-          ? '走っている！ テンションが上がる — <b>危なければ離せ</b>'
-          : '<b>押し続けて</b>巻き上げろ（テンションは白線の内側で）');
+    // 状態はパネルの見出し（跳ねた／首を振っている／走っている）に出るので、
+    // ファイト中は案内文を出さない
+    this.ui.setPrompt('');
 
     /* --- 決着 --- */
     if (F.tension >= cap) return this._lineSnap();
     if (F.dist >= F.span) return this._fishEscaped();
     if (F.dist <= LAND_M) return this._land();
+  }
+
+  /**
+   * 竿先 → 終点の糸（たるみ込み）が水面と交わる点を求める。
+   * updateLine と同じ曲線を使うので、見えている糸の上にちょうど乗る
+   * @returns {THREE.Vector3|null} 交点（両端が水面の同じ側なら null）
+   */
+  _lineSurfaceCross(tip, end, sag, out) {
+    const at = (t, o) => {
+      o.lerpVectors(tip, end, t);
+      o.y -= Math.sin(t * Math.PI) * sag;
+      return o;
+    };
+    const gap = (t) => {
+      at(t, _v6);
+      return _v6.y - this.water.surfaceY(_v6.x, _v6.z);
+    };
+    let lo = 0, hi = 1;
+    const gLo = gap(lo), gHi = gap(hi);
+    if (gLo === gHi || gLo * gHi > 0) return null;
+    for (let i = 0; i < 14; i++) {
+      const mid = (lo + hi) / 2;
+      if (gap(mid) * gLo > 0) lo = mid; else hi = mid;
+    }
+    at((lo + hi) / 2, out);
+    out.y = this.water.surfaceY(out.x, out.z);
+    return out;
   }
 
   _lineSnap() {

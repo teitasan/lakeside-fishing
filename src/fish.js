@@ -670,6 +670,19 @@ export class Fish {
     u.uFreq.value = shape === 'eel' ? 7 : crust ? 2.2 : 5.2;
   }
 
+  /**
+   * 糸を結ぶ点＝口の位置（ローカル +X が頭）。
+   * ゴミは向きに意味がないので中心を返す
+   * @param {THREE.Vector3} out
+   */
+  mouthPos(out) {
+    const base = (this.mesh.geometry.userData.baseLength || 0) * 0.48;
+    const mx = this.species && this.species.rarity === 0 ? 0 : base;
+    return out.set(mx * this.mesh.scale.x, 0, 0)
+      .applyQuaternion(this.mesh.quaternion)
+      .add(this.pos);
+  }
+
   _orient(dt, fwd, roll) {
     _xAxis.copy(fwd);
     _yAxis.copy(UP).addScaledVector(_xAxis, -UP.dot(_xAxis));

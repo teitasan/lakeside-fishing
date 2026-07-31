@@ -442,11 +442,16 @@ export class Angler {
    * ロッド先端 → ウキ の糸を張る（slack: 0=ピンピン 1=たるみ）
    * clipY を渡すと、その高さ（水面）より下は描画しない
    */
+  /** 糸のたるみ量（ウキを糸の上に乗せるので game 側でも使う） */
+  static sagFor(dist, slack) {
+    return Math.min(dist * 0.16, 1.2) * clamp(slack, 0, 1);
+  }
+
   updateLine(tipPos, endPos, slack, camera, clipY = null) {
     const pts = this._linePts;
     const total = pts.length;
     const dist = tipPos.distanceTo(endPos);
-    const sag = Math.min(dist * 0.16, 1.2) * clamp(slack, 0, 1);
+    const sag = Angler.sagFor(dist, slack);
     for (let i = 0; i < total; i++) {
       const t = i / (total - 1);
       pts[i].lerpVectors(tipPos, endPos, t);
