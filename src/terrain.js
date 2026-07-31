@@ -34,6 +34,106 @@ function segBoxHit(p0, p1, min, max) {
   return true;
 }
 
+/**
+ * 水中の立ち枯れ（ローポリ）。
+ * 歪んだ幹・折れた梢・枝・根張りで「沈んだ枯れ木」に見せる。
+ */
+function makeSnagGroup(t, woodMat, tipMat) {
+  const g = new THREE.Group();
+  const h = t.h;
+  const r0 = t.r * 0.52;
+  const v = t.v;
+
+  // 幹：下太・上細、途中でいびつ、梢は折れて尖る
+  const trunkPts = [];
+  for (let i = 0; i <= 11; i++) {
+    const u = i / 11;
+    let rad = r0 * lerp(1.25, 0.38, Math.pow(u, 0.85));
+    rad *= 1 + Math.sin(u * 17 + v * 9) * 0.1 + Math.sin(u * 5 + 2) * 0.05;
+    if (u > 0.82) rad *= lerp(1, 0.12 + v * 0.18, (u - 0.82) / 0.18);
+    trunkPts.push(new THREE.Vector2(Math.max(0.025, rad), u * h));
+  }
+  const trunk = new THREE.Mesh(new THREE.LatheGeometry(trunkPts, 7), woodMat);
+  g.add(trunk);
+
+  // 折れた梢の破片（斜めに刺さった感じ）
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(r0 * 0.32, h * 0.14, 5), tipMat);
+  tip.position.set(r0 * 0.08, h * 0.97, -r0 * 0.05);
+  tip.rotation.set(0.35 + v * 0.4, v * 2.1, -0.25);
+  g.add(tip);
+
+  // 枝：幹の中腹〜上から外へ伸び、先は折れている
+  const nBranch = 4 + (v > 0.55 ? 1 : 0);
+  for (let k = 0; k < nBranch; k++) {
+    const along = 0.32 + (k / Math.max(1, nBranch - 1)) * 0.52;
+    const len = h * (0.28 + (1 - k / nBranch) * 0.32 + (v % 0.3) * 0.15);
+    const br = r0 * (0.42 - k * 0.04);
+    const ba = k * (TAU / nBranch) + v * 1.7;
+    const pitch = 0.75 + (k % 3) * 0.22 + v * 0.15;
+
+    const bPts = [];
+    for (let i = 0; i <= 6; i++) {
+      const u = i / 6;
+      let rad = br * (1 - u * 0.72);
+      if (u > 0.78) rad *= 0.35; // 折れた先端
+      bPts.push(new THREE.Vector2(Math.max(0.015, rad), u * len));
+    }
+    const branch = new THREE.Mesh(new THREE.LatheGeometry(bPts, 5), woodMat);
+    const trunkR = r0 * lerp(1.1, 0.4, along);
+    branch.position.set(Math.cos(ba) * trunkR * 0.65, along * h, Math.sin(ba) * trunkR * 0.65);
+    branch.quaternion.setFromEuler(new THREE.Euler(
+      pitch,
+      ba,
+      (k % 2 === 0 ? 1 : -1) * (0.25 + v * 0.35)
+    ));
+    g.add(branch);
+
+    // 小枝（半分の枝にだけ）
+    if (k % 2 === 0) {
+      const twLen = len * (0.28 + v * 0.12);
+      const twig = new THREE.Mesh(
+        new THREE.CylinderGeometry(br * 0.18, br * 0.32, twLen, 4),
+        woodMat
+      );
+      twig.geometry.translate(0, twLen * 0.5, 0);
+      twig.position.set(0, len * (0.4 + (k % 3) * 0.08), 0);
+      twig.rotation.set(0.2, ba * 0.3, 1.05 + v * 0.4);
+      branch.add(twig);
+    }
+  }
+
+  // 根張り：底に這う短い根
+  const nRoot = 3 + (v > 0.45 ? 1 : 0);
+  for (let k = 0; k < nRoot; k++) {
+    const ra = k * (TAU / nRoot) + v * 0.8;
+    const rl = r0 * (2.0 + (k % 2) * 0.6 + v * 0.5);
+    const root = new THREE.Mesh(
+      new THREE.CylinderGeometry(r0 * 0.12, r0 * 0.38, rl, 5),
+      woodMat
+    );
+    root.geometry.translate(0, rl * 0.5, 0);
+    root.position.set(Math.cos(ra) * r0 * 0.35, r0 * 0.05, Math.sin(ra) * r0 * 0.35);
+    root.quaternion.setFromEuler(new THREE.Euler(1.05 + (k % 2) * 0.2, ra, 0.15));
+    g.add(root);
+  }
+
+  // 幹の途中に短い折れ枝の切り株
+  const stub = new THREE.Mesh(
+    new THREE.CylinderGeometry(r0 * 0.22, r0 * 0.28, r0 * 0.9, 5),
+    tipMat
+  );
+  stub.geometry.translate(0, r0 * 0.45, 0);
+  stub.position.set(-r0 * 0.55, h * (0.4 + v * 0.15), r0 * 0.1);
+  stub.quaternion.setFromEuler(new THREE.Euler(1.2, v * 3, 0.4));
+  g.add(stub);
+
+  // 全体を少し傾ける（沈んで傾いた枯れ木）
+  const lean = 0.1 + v * 0.28;
+  g.rotation.set(lean * 0.35, t.rot, lean);
+  g.position.set(t.x, bedY - r0 * 0.15, t.z);
+  return g;
+}
+
 export class Terrain {
   /**
    * @param {THREE.Scene} scene
@@ -55,10 +155,29 @@ export class Terrain {
     this._obsGrid = new Map();
 
     this._buildHeightTexture();
-    this._buildTerrainMesh();
+    this._buildTerrainMesh(opts.bedTextures || null);
     this._findDock();
     this._buildDock();
     this._buildProps();
+  }
+
+  /** 砂地・岩場・泥底のタイルテクスチャを読み込む */
+  static loadBedTextures() {
+    const loader = new THREE.TextureLoader();
+    const load = (url) => new Promise((resolve, reject) => {
+      loader.load(url, (tex) => {
+        tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.anisotropy = 4;
+        tex.needsUpdate = true;
+        resolve(tex);
+      }, undefined, reject);
+    });
+    return Promise.all([
+      load('./assets/textures/bed-sand.webp'),
+      load('./assets/textures/bed-rock.webp'),
+      load('./assets/textures/bed-mud.webp'),
+    ]).then(([sand, rock, mud]) => ({ sand, rock, mud }));
   }
 
   /* ---------------- 高さ関数（lakefield へ委譲） ---------------- */
@@ -107,12 +226,13 @@ export class Terrain {
   }
 
   /* ---------------- 地形メッシュ ---------------- */
-  _buildTerrainMesh() {
+  _buildTerrainMesh(bedTextures) {
     const segs = this.quality === 'low' ? 150 : this.quality === 'high' ? 260 : 210;
     const geo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, segs, segs);
     geo.rotateX(-Math.PI / 2);
     const pos = geo.attributes.position;
     const colors = new Float32Array(pos.count * 3);
+    const beds = new Float32Array(pos.count);
 
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), z = pos.getZ(i);
@@ -123,8 +243,10 @@ export class Terrain {
       colors[i * 3] = tmpColor.r;
       colors[i * 3 + 1] = tmpColor.g;
       colors[i * 3 + 2] = tmpColor.b;
+      beds[i] = h < 0.2 ? this.lake.bedAt(x, z, slope).v : 0.5;
     }
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geo.setAttribute('aBed', new THREE.BufferAttribute(beds, 1));
     geo.computeVertexNormals();
 
     const mat = new THREE.MeshStandardMaterial({
@@ -133,11 +255,77 @@ export class Terrain {
       metalness: 0,
       flatShading: true,
     });
+    if (bedTextures) this._applyBedTextures(mat, bedTextures);
     this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.receiveShadow = true;
     this.mesh.castShadow = false;
     this.mesh.name = 'terrain';
     this.scene.add(this.mesh);
+  }
+
+  /**
+   * 湖底だけ砂／岩／泥のタイルテクスチャをブレンドして貼る。
+   * 陸は従来どおり頂点色のまま。
+   */
+  _applyBedTextures(mat, tex) {
+    const uniforms = {
+      uBedSand: { value: tex.sand },
+      uBedRock: { value: tex.rock },
+      uBedMud: { value: tex.mud },
+      uBedScale: { value: 1 / 12 }, // 1 タイル ≈ 12 m
+    };
+    mat.userData.bedUniforms = uniforms;
+    mat.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, uniforms);
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+          attribute float aBed;
+          varying float vBed;
+          varying vec3 vBedWorldPos;`
+        )
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+          vBed = aBed;
+          vBedWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`
+        );
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+          uniform sampler2D uBedSand;
+          uniform sampler2D uBedRock;
+          uniform sampler2D uBedMud;
+          uniform float uBedScale;
+          varying float vBed;
+          varying vec3 vBedWorldPos;`
+        )
+        .replace(
+          '#include <color_fragment>',
+          `#include <color_fragment>
+          {
+            float under = smoothstep(0.12, -0.28, vBedWorldPos.y);
+            if (under > 0.001) {
+              vec2 uv = vBedWorldPos.xz * uBedScale;
+              vec3 mudC  = texture2D(uBedMud,  uv).rgb;
+              vec3 sandC = texture2D(uBedSand, uv).rgb;
+              vec3 rockC = texture2D(uBedRock, uv).rgb;
+              float v = vBed;
+              float wMud  = 1.0 - smoothstep(0.28, 0.40, v);
+              float wRock = smoothstep(0.62, 0.74, v);
+              float wSand = max(0.0, 1.0 - wMud - wRock);
+              float wSum = max(1e-4, wMud + wSand + wRock);
+              vec3 bedCol = (mudC * wMud + sandC * wSand + rockC * wRock) / wSum;
+              float d = clamp(-vBedWorldPos.y / 16.0, 0.0, 1.0);
+              bedCol *= mix(1.0, 0.38, d);
+              diffuseColor.rgb = mix(diffuseColor.rgb, bedCol, under);
+            }
+          }`
+        );
+    };
+    mat.customProgramCacheKey = () => 'terrain-bed-tex-v2';
   }
 
   _terrainColor(h, slope, x, z, out) {
@@ -155,7 +343,8 @@ export class Terrain {
       } else if (bed.kind === 'sand') {
         out.setRGB((0.52 + n * 0.07) * shade, (0.46 + n * 0.06) * shade, (0.31 + n * 0.05) * shade);
       } else {
-        out.setRGB((0.26 + n * 0.05) * shade, (0.25 + n * 0.05) * shade, (0.19 + n * 0.04) * shade);
+        // 泥底：砂より少し暗いベージュ（炭黒にしない）
+        out.setRGB((0.42 + n * 0.06) * shade, (0.36 + n * 0.05) * shade, (0.24 + n * 0.04) * shade);
       }
       // 砂と岩の境目を少し混ぜて、パッチの縁を柔らかくする
       if (bed.v > 0.62 && bed.v < 0.74) out.multiplyScalar(0.94);
@@ -633,11 +822,15 @@ export class Terrain {
         Math.max(1, this.lake.structures.length * 3)
       );
       sRocks.receiveShadow = true;
-      const snagMat = new THREE.MeshStandardMaterial({ color: 0x4a4034, roughness: 1, flatShading: true });
-      const snagGeo = new THREE.CylinderGeometry(0.16, 0.30, 1, 5);
-      snagGeo.translate(0, 0.5, 0);
-      const snags = new THREE.InstancedMesh(snagGeo, snagMat, Math.max(1, this.lake.structures.length * 5));
-      let si = 0, gi = 0;
+      const snagMat = new THREE.MeshStandardMaterial({
+        color: 0x5c4a36, roughness: 1, flatShading: true,
+      });
+      const snagTipMat = new THREE.MeshStandardMaterial({
+        color: 0x3d342a, roughness: 1, flatShading: true,
+      });
+      const snagRoot = new THREE.Group();
+      snagRoot.name = 'snags';
+      let si = 0;
       for (const t of this.lake.structures) {
         const bedY = this.heightAt(t.x, t.z);
         if (t.kind === 'rock') {
@@ -653,34 +846,15 @@ export class Terrain {
             if (si < sRocks.count) sRocks.setMatrixAt(si++, m);
           }
         } else {
-          // 立ち枯れ：幹 + 枝 3〜4 本
-          qt.setFromAxisAngle(UP, t.rot);
-          const lean = 0.12 + t.v * 0.3;
-          const q2 = new THREE.Quaternion().setFromEuler(new THREE.Euler(lean, t.rot, 0));
-          p.set(t.x, bedY, t.z);
-          s.set(t.r * 2.2, t.h, t.r * 2.2);
-          m.compose(p, q2, s);
-          if (gi < snags.count) snags.setMatrixAt(gi++, m);
-          const branches = 3 + (t.v > 0.6 ? 1 : 0);
-          for (let k = 0; k < branches; k++) {
-            const ba = t.rot + k * (TAU / branches);
-            const bh = bedY + t.h * (0.45 + 0.16 * k);
-            const bq = new THREE.Quaternion().setFromEuler(new THREE.Euler(1.0 + t.v * 0.5, ba, 0));
-            p.set(t.x, bh, t.z);
-            s.set(t.r * 1.1, t.h * (0.42 - k * 0.06), t.r * 1.1);
-            m.compose(p, bq, s);
-            if (gi < snags.count) snags.setMatrixAt(gi++, m);
-          }
+          snagRoot.add(makeSnagGroup(t, snagMat, snagTipMat));
         }
         // 当たり判定（上端は水面下なので、糸には掛からない＝キャストの邪魔をしない）
         this.addObstacle(t.x, t.z, t.r * 1.15, bedY + t.h);
         this.structures.push({ x: t.x, z: t.z, kind: t.kind, r: t.r, top: bedY + t.h, depth: t.depth });
       }
       sRocks.count = si;
-      snags.count = gi;
       sRocks.instanceMatrix.needsUpdate = true;
-      snags.instanceMatrix.needsUpdate = true;
-      this.scene.add(sRocks, snags);
+      this.scene.add(sRocks, snagRoot);
     }
 
     /* --- 葦（浅場） --- */

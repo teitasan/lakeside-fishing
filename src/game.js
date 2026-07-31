@@ -173,7 +173,14 @@ export class Game {
       this.state.seed = resolved.seed;
       Save.saveNow(this.state);
     }
-    this.terrain = new Terrain(this.scene, { quality: q, lake: resolved.lake });
+    await onProgress('湖底の質感を敷いています');
+    let bedTextures = null;
+    try {
+      bedTextures = await Terrain.loadBedTextures();
+    } catch (e) {
+      console.warn('湖底テクスチャの読み込みに失敗、頂点色で描画します', e);
+    }
+    this.terrain = new Terrain(this.scene, { quality: q, lake: resolved.lake, bedTextures });
 
     await onProgress('水を注いでいます');
     this.water = new Water(this.scene, this.terrain, { quality: q, exposure: EXPOSURE });
