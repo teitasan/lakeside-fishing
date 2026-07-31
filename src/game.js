@@ -921,6 +921,9 @@ export class Game {
     this.fs = 'flight';
     this.stateTime = 0;
     this.bobberVel.set(0, 0, 0);
+    // 水中カメラのまま回収すると、マウスが uwYaw にだけ入り
+    // 水上の視点が動かなくなる（カメラは通常視点に戻るのに flag が残る）
+    this.underwaterCam = false;
   }
 
   /* ---------------- アワセ ---------------- */
@@ -1055,7 +1058,13 @@ export class Game {
     const sens = 0.0022 * this.state.settings.sens;
     /* 水中カメラ中は、プレイヤーの向きは固定してカメラだけ回す
        （竿や糸が振り回されないし、V で戻ったときに視点が飛ばない） */
-    if (this.underwaterCam) {
+    const uwLive = this.underwaterCam
+      && (this.fs === 'wait' || this.fs === 'nibble' || this.fs === 'bite' || this.fs === 'fight');
+    if (this.underwaterCam && !uwLive) {
+      // 回収などで状態が変わったのに flag だけ残っていた場合
+      this.underwaterCam = false;
+    }
+    if (uwLive) {
       if (this.mouseDX || this.mouseDY) {
         this.uwYaw -= this.mouseDX * sens;
         this.uwPitch = clamp(this.uwPitch - this.mouseDY * sens, -1.15, 1.15);
