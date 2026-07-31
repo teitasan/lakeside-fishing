@@ -46,7 +46,19 @@ export function drawFishIcon(canvas, sp, opts = {}) {
     return;
   }
 
-  if (CRUST_SHAPES.includes(sp.shape)) { drawCrustIcon(ctx, sp, W, H); return; }
+  /* 図鑑慣習に合わせ頭を左へ（カニは正面なので反転しない） */
+  const faceLeft = sp.shape !== 'crab';
+  if (faceLeft) {
+    ctx.save();
+    ctx.translate(W, 0);
+    ctx.scale(-1, 1);
+  }
+
+  if (CRUST_SHAPES.includes(sp.shape)) {
+    drawCrustIcon(ctx, sp, W, H);
+    if (faceLeft) ctx.restore();
+    return;
+  }
 
   const prof = PROFILES[sp.shape] || PROFILES.slim;
   const B = BODY[sp.shape] || BODY.slim;
@@ -144,6 +156,8 @@ export function drawFishIcon(canvas, sp, opts = {}) {
   ctx.moveTo(nose - L * 0.02, cy + bodyH * 0.02);
   ctx.lineTo(nose - L * (sp.shape === 'gar' ? 0.14 : 0.08), cy + bodyH * 0.09);
   ctx.stroke();
+
+  if (faceLeft) ctx.restore();
 }
 
 /* ---------------- 甲殻類のシルエット（エビ・ザリガニは横から、カニは正面から） ---------------- */
@@ -191,7 +205,7 @@ function drawCrustIcon(ctx, sp, W, H) {
     return;
   }
 
-  /* エビ・ザリガニ（頭が右） */
+  /* エビ・ザリガニ（座標は頭右。呼び出し側で左右反転して左向きに） */
   const crayfish = sp.shape === 'crayfish';
   const u = Math.min(W / 86, H / 40);
   const cx = W * 0.47, cy = H * 0.5;
