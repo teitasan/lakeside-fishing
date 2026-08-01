@@ -15,7 +15,7 @@ import * as Save from './save.js';
 import {
   REAL_FISH, JUNK, GEAR, ACHIEVEMENTS, RIG_LAYERS, rigLayerOf, swimLayer, depthFit,
   bedAffinity, structureBonus, terrainMatches, TERRAIN_BY_ID,
-  weightOf, valueOf, xpOf, rollLength, fightPattern,
+  rollWeight, catchDisplayName, valueOf, xpOf, rollLength, rollAlbino, fightPattern,
 } from './data.js';
 import {
   clamp, clamp01, lerp, damp, rand, pick, weightedPick, TAU, timeBand, fmt1,
@@ -55,6 +55,10 @@ const EYE_H = 1.62;
    0.008 = Lv1・深い淵の底層・夜で エピックが約 1%（100 回のアタリに 1 回）。
    生息水深の判定が厳しくなり深場の競合が減ったので、以前より小さい値で足りる */
 const LV_FLOOR = 0.008;
+/* ウキ周辺の回遊魚：索敵は水平距離（XZ）。エサはウキ直下なので水深 30m でも
+   垂直方向は入らない。同種がこの半径内にいれば抽選重みにボーナス */
+const NEARBY_FISH_R = 18;
+const NEARBY_SPECIES_BONUS = 2.0;
 /* 湖の測量（M キーのマップ）
    WATER_REGION（440m）を MAP_N×MAP_N の格子で覆い、歩いた所・投げた所だけ開く */
 const MAP_N = 72;
@@ -261,7 +265,13 @@ export class Game {
     });
 
     c.addEventListener('mousedown', (e) => {
-      if (!this.playing || this.ui.isBlocking()) return;
+      if (!this.playing) return;
+      // 釣果カード中はポインタロック下でもクリックで進める
+      if (this.ui.openModal === 'catch') {
+        if (e.button === 0) this.dismissCatch();
+        return;
+      }
+      if (this.ui.isBlocking()) return;
       if (e.button === 2) { this.rmb = true; return; }
       if (!this.locked && document.pointerLockElement !== c) {
         const p = c.requestPointerLock();
@@ -336,6 +346,11 @@ export class Game {
         return;
       }
       if (this.ui.isBlocking()) {
+        if (this.ui.openModal === 'fishDetail'
+          && (e.code === 'Escape' || e.code === 'Space' || e.code === 'Enter')) {
+          this.ui.closeFishDetail();
+          return;
+        }
         if (e.code === 'Escape' || e.code === 'KeyQ' || e.code === 'KeyB' || e.code === 'KeyE'
           || e.code === 'KeyM') this.ui.closeAll();
         return;
@@ -733,6 +748,7 @@ export class Game {
    * opts.bait: エサ・タナ・レベルまで考慮する（アタリの抽選）。
    *            省略時は「そこに居るか」だけ（魚群の配置用）
    * opts.layer: プレイヤーが選んだ層（top|mid|bottom）
+   * opts.near: ウキ周辺を回遊中の種 id の Set（見える魚ボーナス）
    */
   rollSpecies(depth, opts = {}) {
     const band = timeBand(this.state.clock);
@@ -742,6 +758,7 @@ export class Game {
     const layerId = opts.layer ?? this.rigLayer.id;
     const bed = opts.bed ?? null;                       // 'sand' | 'rock' | 'mud'
     const nearStruct = !!opts.struct;
+    const near = opts.near || null;
     // 底質は底を釣るときほど効く
     const bottomness = layerId === 'bottom' ? 1 : layerId === 'mid' ? 0.35 : 0.1;
 
@@ -769,7 +786,7 @@ export class Game {
         if (sp.rarity >= 3) w *= bait.rare;
         w *= this.rod.attract;
         /* 序盤に強すぎる魚が来て理不尽にならないよう、レベルで解禁。
-           ただし伝説（湖の主・白龍魚）以外は解禁前も LV_FLOOR の重みで抽選に残し、
+           ただし伝説（湖の主・イトウ）以外は解禁前も LV_FLOOR の重みで抽選に残し、
            「レベルが足りないうちに掛かってしまう大物」が極低確率で起きるようにする
            （道具が足りなければ切られるが、それはそれで一つの体験） */
         const lv = this.state.level;
@@ -779,9 +796,20 @@ export class Game {
         };
         if (sp.rarity === 4) w *= gate(2, 5);
         if (sp.rarity === 5) w *= gate(5, 6);
+        if (near && near.has(sp.id)) w *= NEARBY_SPECIES_BONUS;
       }
       return w;
     });
+  }
+
+  /** ウキから水平距離 r 以内を回遊中の種 id（深さは見ない＝エサはウキ直下） */
+  _nearbyWanderSpecies(x, z, r = NEARBY_FISH_R) {
+    const ids = new Set();
+    for (const f of this.school.fishes) {
+      if (!f.active || f.state !== 'wander' || !f.species) continue;
+      if (Math.hypot(f.pos.x - x, f.pos.z - z) < r) ids.add(f.species.id);
+    }
+    return ids;
   }
 
   /* =========================================================
@@ -1784,6 +1812,7 @@ export class Game {
         bait: true, layer: this.rigLayer.id,
         bed: this.terrain.bedAt(x, z).kind,
         struct: !!this.terrain.structureNear(x, z, 4.5),
+        near: this._nearbyWanderSpecies(x, z),
       });
     }
     if (!sp) { this.biteTimer = rand(2, 4); return; }
@@ -1800,7 +1829,9 @@ export class Game {
       return;
     }
 
-    // その魚種の個体が近くにいれば呼び寄せる
+    const albino = rollAlbino(sp);
+
+    // その魚種の個体が近くにいれば呼び寄せる（水平距離・エサはウキ直下）
     let fish = null;
     let bestD = 1e9;
     {
@@ -1808,10 +1839,12 @@ export class Game {
         if (!f.active || f.species !== sp) continue;
         if (f.state !== 'wander') continue;
         const d = Math.hypot(f.pos.x - x, f.pos.z - z);
-        if (d < 18 && d < bestD) { bestD = d; fish = f; }
+        if (d < NEARBY_FISH_R && d < bestD) { bestD = d; fish = f; }
       }
     }
-    if (!fish) {
+    if (fish) {
+      if (albino) fish.spawn(sp, fish.length, fish.pos.clone(), { albino: true });
+    } else {
       // 視界の外から呼ぶ
       fish = this.school.reserve();
       const a = rand(0, TAU);
@@ -1824,7 +1857,7 @@ export class Game {
         const d = this.terrain.depthAt(px, pz);
         if (d < 0.8) continue;
         const y = -clamp(Math.min(baitDepth + rand(-1, 1), d - 0.4), 0.35, Math.max(0.4, d - 0.35));
-        fish.spawn(sp, len, _v2.set(px, y, pz));
+        fish.spawn(sp, len, _v2.set(px, y, pz), { albino });
         fish._depthBias = Math.random();
         ok = true;
         break;
@@ -2179,20 +2212,27 @@ export class Game {
     const f = this.hookFish;
     const sp = f.species;
     const len = Math.round(f.length * 10) / 10;
-    const weight = weightOf(sp, len);
+    const weight = rollWeight(sp, len);
     const value = valueOf(sp, len);
     const xp = xpOf(sp, len);
     const s = this.state;
 
     const rec = s.records[sp.id];
     const isNew = !rec;
+    const albino = !!f.albino;
+    const isNewAlbino = albino && !(rec && rec.albinoCaught);
     const record = !!rec && len > rec.maxLen;
+    const title = catchDisplayName(sp, len, weight, albino);
     if (isNew) {
-      s.records[sp.id] = { count: 1, maxLen: len, maxWeight: weight, firstAt: Date.now() };
+      s.records[sp.id] = {
+        count: 1, maxLen: len, maxWeight: weight, firstAt: Date.now(),
+        albinoCaught: albino,
+      };
     } else {
       rec.count++;
       rec.maxLen = Math.max(rec.maxLen, len);
       rec.maxWeight = Math.max(rec.maxWeight, weight);
+      if (albino) rec.albinoCaught = true;
     }
     // 釣れた地形にも記録する（地形図鑑の「ここで釣れた魚」）
     for (const id of this.spotTerrain || []) {
@@ -2208,7 +2248,8 @@ export class Game {
     this._gainXp(xp);
 
     this.fs = 'card';
-    this.ui.showCatch({ sp, len, weight, value, xp, record, isNew });
+    this._exitLock(); // カーソルを戻し、カードをマウスで操作できるようにする
+    this.ui.showCatch({ sp, len, weight, value, xp, record, isNew, albino, isNewAlbino, title });
     this._checkAchievements();
     Save.saveNow(s);
   }

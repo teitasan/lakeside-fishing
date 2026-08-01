@@ -2,7 +2,7 @@
    セーブデータ（localStorage）
    =========================================================== */
 
-import { BAITS, BAIT_ALIAS, RIG_LAYERS } from './data.js';
+import { BAITS, BAIT_ALIAS, RIG_LAYERS, SPECIES_BY_ID } from './data.js';
 
 const KEY = 'lakeside-fishing-save-v1';
 
@@ -29,7 +29,7 @@ export function defaultState() {
     owned: { rod: ['bamboo'], line: ['nylon'], bait: ['worm'] },
     // エサの在庫（id -> 個数）。魚が触ると減る。ミミズは 0G なので詰まらない
     baitStock: { worm: 10 },
-    records: {}, // id -> {count, maxLen, maxWeight}
+    records: {}, // id -> {count, maxLen, maxWeight, albinoCaught?}
     terrain: {}, // 地形図鑑: id -> {casts, depth, fish[]}（初めて投げた時に登録）
     map: { seed: null, cells: '' }, // 湖の測量（M キー）: 歩いた／投げた所だけ地形が分かる
     achievements: [],
@@ -66,6 +66,9 @@ export function load() {
       bait: uniq([...base.owned.bait, ...((data.owned && data.owned.bait) || [])]),
     };
     out.records = (data.records && typeof data.records === 'object') ? data.records : {};
+    for (const id of Object.keys(out.records)) {
+      if (!SPECIES_BY_ID[id]) delete out.records[id]; // 削除された種（例: 白龍魚）
+    }
     out.map = (data.map && typeof data.map === 'object'
       && typeof data.map.cells === 'string') ? data.map : { seed: null, cells: '' };
     out.terrain = (data.terrain && typeof data.terrain === 'object') ? data.terrain : {};
@@ -73,7 +76,7 @@ export function load() {
       if (!v || typeof v !== 'object') { delete out.terrain[k]; continue; }
       v.casts = typeof v.casts === 'number' && isFinite(v.casts) ? v.casts : 1;
       v.depth = typeof v.depth === 'number' && isFinite(v.depth) ? v.depth : 0;
-      v.fish = Array.isArray(v.fish) ? v.fish : [];
+      v.fish = Array.isArray(v.fish) ? v.fish.filter((id) => SPECIES_BY_ID[id]) : [];
     }
     out.achievements = Array.isArray(data.achievements) ? data.achievements : [];
     for (const k of ['money', 'xp', 'level', 'totalCaught', 'totalEarned', 'maxLen', 'clock']) {

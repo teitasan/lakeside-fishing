@@ -142,6 +142,15 @@ export const SPECIES = [
 
   /* ---------------- コモン ---------------- */
   {
+    id: 'medaka', name: 'メダカ', rarity: 1, tags: ['mid', 'weed'], shape: 'slim',
+    len: [2.5, 5], wc: 1.6, depth: [0.2, 0.9], spawn: 38, times: T.dayish, weather: W.any,
+    str: 0.2, sta: 0.25, agg: 0.15, value: 8, perCm: 0.8,
+    fight: 'dash',
+    layer: { top: 1.0, mid: 0.45, bottom: 0.05 }, // 岸ぎわの水面だけ
+    colors: { top: '#5a6a48', mid: '#a8b878', belly: '#f0eed8', fin: '#c4c090' },
+    flavor: '水面をきらめく豆粒ほどの魚。昔ながらの池の住人。',
+  },
+  {
     id: 'moroko', name: 'モロコ', rarity: 1, tags: ['bottom', 'mid'], shape: 'slim',
     len: [7, 16], wc: 1.4, depth: [0.5, 3.5], spawn: 34, times: T.dayish, weather: W.any,
     str: 0.35, sta: 0.4, agg: 0.2, value: 14, perCm: 1.2,
@@ -426,21 +435,6 @@ export const SPECIES = [
     colors: { top: '#3c4433', mid: '#7c8560', belly: '#d6d3ab', fin: '#4a5238' },
     flavor: 'ワニのような顎。誰が湖に放したのか、誰も知らない。',
   },
-  {
-    id: 'itou', name: 'イトウ', rarity: 4, tags: ['trout', 'predator', 'deep'], shape: 'slim',
-    len: [70, 150], wc: 1.1, depth: [6, 20], spawn: 2.2, times: T.twilight, weather: W.rain,
-    str: 2.45, sta: 2.5, agg: 1.5, value: 2200, perCm: 20,
-    fight: 'jumper',
-    layer: { // 朝夕に浅場の表層で待ち伏せ、日中は深場の底へ
-      dawn: { top: 1.0, mid: 0.9, bottom: 0.3 },
-      day: { top: 0.3, mid: 0.9, bottom: 1.0 },
-      dusk: { top: 1.0, mid: 0.9, bottom: 0.3 },
-      night: { top: 0.6, mid: 1.0, bottom: 0.6 },
-    },
-    diel: { dawn: -0.8, day: 0.5, dusk: -0.8, night: -0.2 }, // 時間帯で生息水深も動く
-    colors: { top: '#41504e', mid: '#9aa8a2', belly: '#f2ecdc', fin: '#b6837a' },
-    flavor: '幻の巨大魚。深場の縁でゆっくりと大きな尾を振る。',
-  },
 
   /* ---------------- レジェンド ---------------- */
   {
@@ -459,18 +453,19 @@ export const SPECIES = [
     flavor: '湖底の岩屋に潜む巨大ナマズ。村の古老が「あれには触るな」と言った。',
   },
   {
-    id: 'dragonfish', name: '白龍魚', rarity: 5, tags: ['deep', 'legend'], shape: 'gar',
-    len: [118, 268], wc: 0.75, depth: [17, 30], spawn: 0.45, times: T.dawnOnly, weather: W.clear,
-    str: 3.8, sta: 3.6, agg: 2.0, value: 12000, perCm: 46,
+    id: 'itou', name: 'イトウ', rarity: 5, tags: ['trout', 'predator', 'deep', 'legend'], shape: 'slim',
+    len: [95, 210], wc: 1.1, depth: [10, 26], spawn: 0.38, times: T.twilight, weather: W.rain,
+    str: 3.5, sta: 3.5, agg: 1.7, value: 9500, perCm: 42,
     fight: 'jumper',
-    layer: { // 夜明けだけ水面を割る。それ以外は深層
+    layer: { // 朝夕に浅場の表層で待ち伏せ、日中は深場の底へ
       dawn: { top: 1.0, mid: 0.9, bottom: 0.3 },
-      day: { top: 0.15, mid: 0.8, bottom: 1.0 },
-      dusk: { top: 0.4, mid: 1.0, bottom: 0.9 },
-      night: { top: 0.25, mid: 1.0, bottom: 0.95 },
+      day: { top: 0.3, mid: 0.9, bottom: 1.0 },
+      dusk: { top: 1.0, mid: 0.9, bottom: 0.3 },
+      night: { top: 0.6, mid: 1.0, bottom: 0.6 },
     },
-    colors: { top: '#c9d6e2', mid: '#eef4fb', belly: '#ffffff', fin: '#9fd0e8' },
-    flavor: '夜明けの霧の中、白い影が水面を割る。龍の子ともいわれる。',
+    diel: { dawn: -0.8, day: 0.5, dusk: -0.8, night: -0.2 }, // 時間帯で生息水深も動く
+    colors: { top: '#41504e', mid: '#9aa8a2', belly: '#f2ecdc', fin: '#b6837a' },
+    flavor: '幻の巨大魚。深場の縁でゆっくりと大きな尾を振る。',
   },
 ];
 
@@ -818,9 +813,23 @@ export const ACHIEVEMENTS = [
    計算ヘルパー
    =========================================================== */
 
-/** 全長(cm) から重さ(kg) */
+/** 全長(cm) から標準体重(kg) */
 export function weightOf(sp, len) {
   return (sp.wc * len * len * len) / 100000;
+}
+
+/**
+ * 標準体重に対してぶれを付けた体重。
+ * 端が出ると釣果カードで「痩せた／太った」が付く。
+ */
+export function rollWeight(sp, len) {
+  const base = weightOf(sp, len);
+  const u = Math.random();
+  let f;
+  if (u < 0.14) f = 0.78 + Math.random() * 0.10;       // 痩せ寄り 0.78–0.88
+  else if (u > 0.86) f = 1.12 + Math.random() * 0.16;  // 太り寄り 1.12–1.28
+  else f = 0.90 + Math.random() * 0.20;                  // ふつう 0.90–1.10
+  return Math.round(base * f * 1000) / 1000;
 }
 
 /** 売値 */
@@ -840,6 +849,47 @@ export function rollLength(sp, luck = 0) {
   const bias = Math.pow(Math.random(), 2.1 - Math.min(1.2, luck));
   const [a, b] = sp.len;
   return Math.round((a + (b - a) * bias) * 10) / 10;
+}
+
+/**
+ * 釣果カード用の接頭詞付き名前（図鑑は素の名前のまま）。
+ * 体長帯・標準体重比・アルビノから自動付与。
+ * 例: 「小さなニジマス」「巨大な太ったブラックバス」「アルビノ大きなイワナ」
+ */
+export function catchDisplayName(sp, len, weight, albino = false) {
+  const parts = [];
+  if (albino) parts.push('アルビノ');
+
+  const [lo, hi] = sp.len;
+  const t = hi > lo ? (len - lo) / (hi - lo) : 0.5;
+  if (t >= 0.92) parts.push('巨大な');       // 種内上位 roughly 8%
+  else if (t >= 0.75) parts.push('大きな'); // 上位 25%（巨大を除く）
+  else if (t <= 0.22) parts.push('小さな'); // 下位 roughly 22%
+
+  if (sp.rarity > 0) {
+    const base = weightOf(sp, len);
+    const ratio = base > 1e-9 ? weight / base : 1;
+    if (ratio >= 1.14) parts.push('太った');
+    else if (ratio <= 0.88) parts.push('痩せた');
+  }
+
+  return parts.join('') + sp.name;
+}
+
+/** 同種のレア個体（アルビノ）。魚種確定後に 1% */
+export const ALBINO_CHANCE = 0.01;
+export const ALBINO_COLORS = {
+  top: '#f2f0ea', mid: '#faf9f5', belly: '#ffffff', fin: '#ebe6dc',
+};
+export const ALBINO_EYE = '#c41e3a';
+
+export function rollAlbino(sp) {
+  if (!sp || sp.rarity === 0) return false;
+  return Math.random() < ALBINO_CHANCE;
+}
+
+export function colorsOf(sp, albino = false) {
+  return albino ? ALBINO_COLORS : sp.colors;
 }
 
 export const rarityInfo = (sp) => RARITY[sp.rarity];

@@ -333,11 +333,31 @@ kbd {
 .card-ribbon.r4 { color: #d3a4ff; border-color: rgba(211, 164, 255, .65); box-shadow: 0 0 20px rgba(211, 164, 255, .3); }
 .card-ribbon.r5 { color: #ffd479; border-color: rgba(255, 212, 121, .8); box-shadow: 0 0 26px rgba(255, 190, 60, .45); }
 .card-ribbon.r0 { color: #9aa5b1; }
-#fish-icon { width: 100%; max-width: 320px; height: auto; margin: 22px auto 2px; display: block; }
+#fish-icon { width: 100%; max-width: 320px; height: auto; margin: 0 auto; display: block; }
+.fish-art {
+  position: relative; width: 100%; max-width: 320px; margin: 22px auto 2px;
+}
+.fish-art canvas { width: 100%; height: auto; display: block; }
+.albino-badge {
+  appearance: none; position: absolute; right: 4px; bottom: 4px; z-index: 2;
+  font-family: inherit; font-size: 9px; font-weight: 700; letter-spacing: .06em;
+  padding: 3px 7px; border-radius: 6px; cursor: pointer;
+  color: #c41e3a; background: rgba(255, 255, 255, .88);
+  border: 1px solid rgba(196, 30, 58, .45);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .25);
+}
+.albino-badge:hover { background: #fff; }
+.albino-badge.on {
+  color: #fff; background: #c41e3a; border-color: #c41e3a;
+}
+.albino-badge.hidden { display: none !important; }
+.newfish.albino-new { color: #ff8aa0; }
+.jcard .fish-art { margin: 0; max-width: none; }
+.jcard .albino-badge { font-size: 8px; padding: 2px 5px; right: 2px; bottom: 2px; }
 .card h2 { font-size: 26px; letter-spacing: .06em; margin-bottom: 14px; }
 @media (max-height: 560px) {
   .card { padding: 16px 20px 14px; }
-  #fish-icon { max-width: 220px; margin-top: 16px; }
+  .fish-art { max-width: 220px; margin-top: 16px; }
   .card h2 { font-size: 20px; margin-bottom: 9px; }
   .flavor { display: none; }
   .title-desc { margin: 14px 0 10px; line-height: 1.8; }
@@ -401,6 +421,8 @@ kbd {
 }
 .jcard { background: rgba(255, 255, 255, .04); border: 1px solid rgba(255, 255, 255, .08);
   border-radius: 12px; padding: 10px; }
+.jcard.clickable { cursor: pointer; transition: border-color .15s, transform .12s, filter .15s; }
+.jcard.clickable:hover { border-color: rgba(245, 207, 107, .55); transform: translateY(-1px); filter: brightness(1.14); }
 .jcard.unknown { opacity: .38; }
 .jcard .jt { font-size: 9px; opacity: .55; letter-spacing: .08em; }
 .jcard .jfish { font-size: 9.5px; opacity: .75; margin-top: 3px; display: flex; flex-wrap: wrap; gap: 3px; }
@@ -410,10 +432,70 @@ kbd {
 .jcard canvas { width: 100%; height: 54px; display: block; }
 .jcard .jn { font-size: 12.5px; font-weight: 700; margin-top: 4px; display: flex; justify-content: space-between; align-items: baseline; }
 .jcard .jr { font-size: 9px; opacity: .7; letter-spacing: .1em; }
-.jcard .jm { font-size: 10px; opacity: .6; margin-top: 3px; line-height: 1.5; }
-.jcard.r5 { border-color: rgba(255, 212, 121, .5); box-shadow: 0 0 18px rgba(255, 190, 60, .12) inset; }
-.jcard.r4 { border-color: rgba(211, 164, 255, .4); }
-.jcard.r3 { border-color: rgba(126, 200, 255, .35); }
+.jcard .jm { font-size: 10.5px; font-weight: 700; opacity: .75; margin-top: 3px; line-height: 1.5;
+  display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
+.jcard .jsz { text-align: left; }
+.jcard .jcnt { text-align: right; margin-left: auto; }
+.jcard.r0 {
+  background: linear-gradient(160deg, rgba(154, 165, 177, .22) 0%, rgba(18, 24, 32, .55) 58%, rgba(8, 12, 18, .7) 100%);
+  border-color: rgba(154, 165, 177, .3);
+}
+.jcard.r1 {
+  background: linear-gradient(160deg, rgba(207, 224, 240, .2) 0%, rgba(18, 28, 40, .5) 55%, rgba(8, 14, 22, .7) 100%);
+  border-color: rgba(207, 224, 240, .28);
+}
+.jcard.r2 {
+  background: linear-gradient(160deg, rgba(126, 224, 164, .24) 0%, rgba(14, 32, 24, .55) 55%, rgba(8, 14, 22, .7) 100%);
+  border-color: rgba(126, 224, 164, .35);
+}
+.jcard.r3 {
+  background: linear-gradient(160deg, rgba(126, 200, 255, .28) 0%, rgba(12, 28, 48, .55) 55%, rgba(8, 14, 22, .7) 100%);
+  border-color: rgba(126, 200, 255, .4);
+}
+.jcard.r4 {
+  background: linear-gradient(160deg, rgba(211, 164, 255, .3) 0%, rgba(32, 18, 48, .55) 55%, rgba(8, 14, 22, .7) 100%);
+  border-color: rgba(211, 164, 255, .45);
+}
+.jcard.r5 {
+  background: linear-gradient(160deg, rgba(255, 212, 121, .34) 0%, rgba(48, 36, 12, .55) 55%, rgba(8, 14, 22, .7) 100%);
+  border-color: rgba(255, 212, 121, .55);
+  box-shadow: 0 0 18px rgba(255, 190, 60, .14) inset;
+}
+
+/* ---------- 図鑑・魚の詳細 ---------- */
+#fish-detail { z-index: 22; background: rgba(3, 7, 12, .72); }
+.detail-card { width: min(440px, 94vw); text-align: left; padding-top: 28px; }
+.detail-card .card-ribbon { left: 20px; transform: none; }
+.detail-close { position: absolute; top: 12px; right: 12px; }
+.detail-card h2 { text-align: center; margin-top: 4px; }
+.detail-card .fish-art { max-width: 300px; margin: 28px auto 2px; }
+.detail-card #fd-icon { width: 100%; max-width: 300px; height: auto; margin: 0; display: block; }
+.detail-card .flavor { text-align: center; margin: 2px 0 12px; }
+.fd-badges {
+  display: flex; flex-wrap: wrap; gap: 6px; justify-content: center;
+  margin: 0 0 14px;
+}
+.fd-badge {
+  display: inline-flex; flex-direction: column; align-items: center; gap: 1px;
+  padding: 5px 10px; border-radius: 9px; font-size: 12px; font-weight: 600;
+  background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .12);
+  line-height: 1.3; text-align: center;
+}
+.fd-badge small {
+  font-size: 9.5px; font-weight: 500; letter-spacing: .06em; opacity: .55;
+}
+.fd-badge.layer { color: #7ec8ff; border-color: rgba(126, 200, 255, .35); background: rgba(126, 200, 255, .08); }
+.fd-badge.time { color: #ffd479; border-color: rgba(255, 212, 121, .35); background: rgba(255, 212, 121, .08); }
+.fd-badge.weather { color: #7ee0a4; border-color: rgba(126, 224, 164, .35); background: rgba(126, 224, 164, .08); }
+.fd-badge.fight { color: #d3a4ff; border-color: rgba(211, 164, 255, .4); background: rgba(211, 164, 255, .08); }
+.detail-card .card-stats { grid-template-columns: 1fr 1fr; gap: 6px 10px; margin-bottom: 14px; }
+.detail-card .card-stats > div { font-size: 12px; flex-direction: column; align-items: flex-start; gap: 2px; }
+.detail-card .card-stats span { font-size: 10.5px; }
+.detail-card .card-stats b { font-weight: 600; text-align: left; max-width: 100%; line-height: 1.35; }
+@media (max-width: 420px) {
+  .detail-card .card-stats { grid-template-columns: 1fr; }
+}
+.detail-card .btn { display: block; width: 100%; }
 
 /* ---------- 設定 ---------- */
 .settings { margin: 18px 0; display: flex; flex-direction: column; gap: 12px; }

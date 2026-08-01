@@ -120,7 +120,10 @@
   <div id="catch-card" class="modal">
     <div class="card">
       <div class="card-ribbon" id="card-rarity">レア</div>
-      <canvas id="fish-icon" width="320" height="150"></canvas>
+      <div class="fish-art" id="card-fish-art">
+        <canvas id="fish-icon" width="320" height="150"></canvas>
+        <button type="button" class="albino-badge hidden" id="card-albino-badge">アルビノ</button>
+      </div>
       <h2 id="card-name">ニジマス</h2>
       <div class="card-stats">
         <div><span>全長</span><b id="card-len">42.1 cm</b></div>
@@ -130,8 +133,9 @@
       </div>
       <div id="card-record" class="record hidden"><img class="ico" src="./assets/icons/ui-trophy.webp" alt="" width="16" height="16"> 自己最高記録！</div>
       <div id="card-new" class="newfish hidden"><img class="ico" src="./assets/icons/ui-sparkle.webp" alt="" width="16" height="16"> 図鑑に新規登録！</div>
+      <div id="card-albino-new" class="newfish albino-new hidden">アルビノを初捕獲！</div>
       <p id="card-flavor" class="flavor"></p>
-      <button id="btn-card-ok" class="btn">よし、次！ <small>(Space)</small></button>
+      <button id="btn-card-ok" class="btn">よし、次！ <small>(クリック / Space)</small></button>
     </div>
   </div>
 
@@ -167,6 +171,23 @@
       </nav>
       <div class="journal-grid" id="journal-grid"></div>
       <footer class="shop-foot" id="journal-ach"></footer>
+    </div>
+  </div>
+
+  <!-- ============ 図鑑・魚の詳細 ============ -->
+  <div id="fish-detail" class="modal">
+    <div class="card detail-card">
+      <button class="close detail-close" id="btn-fish-detail-close" aria-label="閉じる"><img class="ico" src="./assets/icons/ui-close.webp" alt="×" width="18" height="18"></button>
+      <div class="card-ribbon" id="fd-rarity">レア</div>
+      <div class="fish-art" id="fd-fish-art">
+        <canvas id="fd-icon" width="320" height="150"></canvas>
+        <button type="button" class="albino-badge hidden" id="fd-albino-badge">アルビノ</button>
+      </div>
+      <h2 id="fd-name">ニジマス</h2>
+      <p id="fd-flavor" class="flavor"></p>
+      <div class="fd-badges" id="fd-badges"></div>
+      <div class="card-stats" id="fd-stats"></div>
+      <button id="btn-fish-detail-ok" class="btn ghost">戻る <small>(Esc)</small></button>
     </div>
   </div>
 

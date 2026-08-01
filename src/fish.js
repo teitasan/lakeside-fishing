@@ -3,7 +3,7 @@
    =========================================================== */
 import * as THREE from 'three';
 import { clamp, clamp01, lerp, rand, smoothstep, TAU, damp } from './util.js';
-import { depthBandAt } from './data.js';
+import { depthBandAt, colorsOf } from './data.js';
 
 /** 見やすさのための視覚倍率（実寸だと小さすぎるため） */
 export const VIS_SCALE = 1.4;
@@ -102,7 +102,8 @@ const hash3 = (x, y, z) => {
 /* ===========================================================
    魚メッシュ生成
    =========================================================== */
-export function createFishGeometry(sp) {
+export function createFishGeometry(sp, opts = {}) {
+  const albino = !!opts.albino;
   const lenM = (sp.len[1] * 0.85) / 100 * VIS_SCALE; // 代表サイズで作り、後でスケール
   const shape = PROFILES[sp.shape] ? sp.shape : 'slim';
   const B = BODY[shape];
@@ -120,11 +121,13 @@ export function createFishGeometry(sp) {
   body.rotateZ(-Math.PI / 2);
   body.scale(lenM, H, Wd);
 
-  const top = new THREE.Color(sp.colors.top);
-  const mid = new THREE.Color(sp.colors.mid);
-  const belly = new THREE.Color(sp.colors.belly);
-  const finC = new THREE.Color(sp.colors.fin);
-  const pattern = sp.rarity >= 2 ? (sp.tags.includes('trout') ? 'spots' : sp.tags.includes('predator') ? 'stripe' : 'bars') : 'none';
+  const cols = colorsOf(sp, albino);
+  const top = new THREE.Color(cols.top);
+  const mid = new THREE.Color(cols.mid);
+  const belly = new THREE.Color(cols.belly);
+  const finC = new THREE.Color(cols.fin);
+  const pattern = albino ? 'none'
+    : sp.rarity >= 2 ? (sp.tags.includes('trout') ? 'spots' : sp.tags.includes('predator') ? 'stripe' : 'bars') : 'none';
 
   paint(body, (x, y, z, c) => {
     const v = clamp01((y / (H * 0.5) + 1) * 0.5); // 0=腹 1=背
@@ -144,7 +147,7 @@ export function createFishGeometry(sp) {
       if (b > 0.78 && v > 0.4) c.multiplyScalar(0.72);
     }
     // 口元を暗く
-    if (tx > 0.955) c.multiplyScalar(0.5);
+    if (tx > 0.955) c.multiplyScalar(albino ? 0.82 : 0.5);
   });
 
   const parts = [body];
@@ -197,7 +200,8 @@ export function createFishGeometry(sp) {
     eye.translate(lenM * (shape === 'gar' ? 0.30 : 0.355), H * 0.13, s * Wd * 0.42);
     parts.push(paint(eye, (x, y, z, c) => {
       const front = z * s > Wd * 0.44;
-      c.setRGB(front ? 0.03 : 0.5, front ? 0.03 : 0.45, front ? 0.05 : 0.4);
+      if (albino) c.setRGB(front ? 0.72 : 0.95, front ? 0.08 : 0.35, front ? 0.12 : 0.38);
+      else c.setRGB(front ? 0.03 : 0.5, front ? 0.03 : 0.45, front ? 0.05 : 0.4);
     }));
     const glint = new THREE.SphereGeometry(eyeR * 0.42, 6, 4);
     glint.translate(lenM * (shape === 'gar' ? 0.31 : 0.365), H * 0.19, s * Wd * 0.5);
@@ -277,12 +281,17 @@ export function createJunkGeometry(sp) {
    =========================================================== */
 export const CRUST_SHAPES = ['shrimp', 'crayfish', 'crab'];
 
-export function createCrustGeometry(sp) {
+export function createCrustGeometry(sp, opts = {}) {
+  const albino = !!opts.albino;
   const lenM = (sp.len[1] * 0.85) / 100 * VIS_SCALE;
-  const shell = new THREE.Color(sp.colors.mid);
-  const dark = new THREE.Color(sp.colors.top);
-  const pale = new THREE.Color(sp.colors.belly);
-  const limb = new THREE.Color(sp.colors.fin);
+  const cols = colorsOf(sp, albino);
+  const shell = new THREE.Color(cols.mid);
+  const dark = new THREE.Color(cols.top);
+  const pale = new THREE.Color(cols.belly);
+  const limb = new THREE.Color(cols.fin);
+  const eyePaint = albino
+    ? (x, y, z, c) => c.setRGB(0.72, 0.08, 0.12)
+    : (x, y, z, c) => c.setRGB(0.04, 0.04, 0.05);
   const parts = [];
   const V = (x, y, z) => new THREE.Vector3(x, y, z);
 
@@ -328,7 +337,7 @@ export function createCrustGeometry(sp) {
       const tip = rod(base, V(0.55, 0.75, s * 0.25), W * 0.1, W * 0.028, W * 0.024, limb);
       const eye = new THREE.SphereGeometry(W * 0.042, 6, 5);
       eye.translate(tip.x, tip.y, tip.z);
-      parts.push(paint(eye, (x, y, z, c) => c.setRGB(0.04, 0.04, 0.05)));
+      parts.push(paint(eye, eyePaint));
     }
     // 歩脚：片側 4 本。甲羅の下から外へ伸ばし、関節で下へ折る
     for (const s of [1, -1]) {
@@ -392,7 +401,7 @@ export function createCrustGeometry(sp) {
     // 目
     const eye = new THREE.SphereGeometry(bodyR * 0.22, 6, 5);
     eye.translate(lenM * 0.33, bodyR * 0.45, s * bodyR * 0.42);
-    parts.push(paint(eye, (x, y, z, c) => c.setRGB(0.04, 0.04, 0.05)));
+    parts.push(paint(eye, eyePaint));
     // 歩脚 4 本（下へ・少し外へ）
     for (let i = 0; i < 4; i++) {
       const base = V(lenM * (0.3 - i * 0.09), -bodyR * 0.55, s * bodyR * 0.42);
@@ -473,6 +482,7 @@ export class Fish {
     this.state = 'idle';
     this.species = null;
     this.length = 30;
+    this.albino = false;
     this.phase = rand(0, 10);
     this.timer = 0;
     this.roll = 0;
@@ -481,15 +491,17 @@ export class Fish {
   }
 
   /** 魚種と個体サイズを設定 */
-  spawn(sp, length, pos) {
+  spawn(sp, length, pos, opts = {}) {
     this.species = sp;
     this.length = length;
-    let geo = this.geoCache.get(sp.id);
+    this.albino = !!opts.albino && sp.rarity > 0;
+    const key = this.albino ? `${sp.id}:albino` : sp.id;
+    let geo = this.geoCache.get(key);
     if (!geo) {
       geo = sp.rarity === 0 ? createJunkGeometry(sp)
-        : CRUST_SHAPES.includes(sp.shape) ? createCrustGeometry(sp)
-          : createFishGeometry(sp);
-      this.geoCache.set(sp.id, geo);
+        : CRUST_SHAPES.includes(sp.shape) ? createCrustGeometry(sp, { albino: this.albino })
+          : createFishGeometry(sp, { albino: this.albino });
+      this.geoCache.set(key, geo);
     }
     this.mesh.geometry = geo;
     const base = geo.userData.baseLength || 1;

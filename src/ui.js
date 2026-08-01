@@ -3,8 +3,8 @@
    =========================================================== */
 import {
   SPECIES, RARITY, GEAR, GEAR_LABEL, ACHIEVEMENTS, RIG_LAYERS,
-  valueOf, gearStats, swimLayer, swimLayerLabel, depthFit, dielNote, BED_LABEL,
-  TERRAIN_KINDS, TERRAIN_GROUPS, SPECIES_BY_ID,
+  valueOf, fightPattern, gearStats, swimLayer, depthFit, BED_LABEL,
+  colorsOf, ALBINO_EYE, TERRAIN_KINDS, TERRAIN_GROUPS, SPECIES_BY_ID,
 } from './data.js';
 import { PROFILES, BODY, profileAt, CRUST_SHAPES } from './fish.js';
 import { fmtInt, fmt1, fmtWeight, fmtClock, timeBand, timeBandLabel, clamp01, lerp as lerpN } from './util.js';
@@ -12,6 +12,39 @@ import { xpForLevel } from './save.js';
 import { iconHtml, iconLabel, loadIcon, preloadIcons, JUNK_ICONS } from './icons.js';
 
 const $ = (id) => document.getElementById(id);
+
+/* ゲーム内の時間帯区分（dawn/day/dusk/night）に対応する短い表記 */
+const TIME_SHORT = { dawn: '朝', day: '昼', dusk: '夕', night: '夜' };
+const WEATHER_SHORT = { clear: '晴', cloudy: '曇', rain: '雨' };
+const LAYER_SHORT = [['top', '表'], ['mid', '中'], ['bottom', '底']];
+
+/* 図鑑詳細の段階解禁（釣った数）。デバッグ全表示時は即解禁
+   サイズ・売値を先に開き、釣り判断に直結する生息水深を最後にする */
+const DETAIL_UNLOCK = {
+  minLen: 1,  // 最小サイズ
+  maxLen: 2,  // 最大サイズ
+  value: 3,   // 売値の目安
+  depth: 5,   // 生息水深
+};
+
+/** 好みのキーだけ短いラベルでつなぐ（差が小さければ always） */
+function preferShort(map, names, always = 'いつでも') {
+  const keys = Object.keys(names);
+  const vals = keys.map((k) => map[k] ?? 1);
+  const hi = Math.max(...vals), lo = Math.min(...vals);
+  if (hi - lo < 0.15) return always;
+  return keys.filter((k) => (map[k] ?? 1) >= hi - 0.05).map((k) => names[k]).join('・');
+}
+
+/** 遊泳層を短いラベルで表示（居る層だけ） */
+function swimLayerMarks(sp) {
+  const L = swimLayer(sp);
+  let on = LAYER_SHORT.filter(([id]) => L[id] >= 0.8);
+  if (!on.length) {
+    on = [LAYER_SHORT.reduce((a, x) => (L[x[0]] > L[a[0]] ? x : a))];
+  }
+  return on.map(([, label]) => label).join('・');
+}
 
 preloadIcons([
   ...Object.values(JUNK_ICONS),
@@ -55,11 +88,12 @@ export function drawFishIcon(canvas, sp, opts = {}) {
   }
 
   if (CRUST_SHAPES.includes(sp.shape)) {
-    drawCrustIcon(ctx, sp, W, H);
+    drawCrustIcon(ctx, sp, W, H, opts);
     if (faceLeft) ctx.restore();
     return;
   }
 
+  const cols = colorsOf(sp, opts.albino);
   const prof = PROFILES[sp.shape] || PROFILES.slim;
   const B = BODY[sp.shape] || BODY.slim;
   const pad = W * 0.08;
@@ -86,18 +120,18 @@ export function drawFishIcon(canvas, sp, opts = {}) {
   }
   ctx.closePath();
   const grad = ctx.createLinearGradient(0, cy - bodyH * 0.5, 0, cy + bodyH * 0.5);
-  grad.addColorStop(0, sp.colors.top);
-  grad.addColorStop(0.42, sp.colors.mid);
-  grad.addColorStop(1, sp.colors.belly);
+  grad.addColorStop(0, cols.top);
+  grad.addColorStop(0.42, cols.mid);
+  grad.addColorStop(1, cols.belly);
   ctx.fillStyle = grad;
   ctx.fill();
-  if (sp.rarity >= 4) {
+  if (sp.rarity >= 4 && !opts.albino) {
     ctx.strokeStyle = sp.rarity === 5 ? 'rgba(255,224,150,.95)' : 'rgba(214,170,255,.8)';
     ctx.lineWidth = 1.4;
     ctx.stroke();
   }
 
-  ctx.fillStyle = sp.colors.fin;
+  ctx.fillStyle = cols.fin;
 
   // 尾びれ
   const th = bodyH * (0.62 + B.fork * 0.55);
@@ -142,11 +176,11 @@ export function drawFishIcon(canvas, sp, opts = {}) {
   const er = Math.max(1.8, bodyH * 0.05);
   ctx.beginPath();
   ctx.arc(ex, ey, er, 0, Math.PI * 2);
-  ctx.fillStyle = '#fbfbf8';
+  ctx.fillStyle = opts.albino ? '#ffe8ea' : '#fbfbf8';
   ctx.fill();
   ctx.beginPath();
   ctx.arc(ex + er * 0.22, ey, er * 0.55, 0, Math.PI * 2);
-  ctx.fillStyle = '#0e0e12';
+  ctx.fillStyle = opts.albino ? ALBINO_EYE : '#0e0e12';
   ctx.fill();
 
   // 口
@@ -161,8 +195,9 @@ export function drawFishIcon(canvas, sp, opts = {}) {
 }
 
 /* ---------------- 甲殻類のシルエット（エビ・ザリガニは横から、カニは正面から） ---------------- */
-function drawCrustIcon(ctx, sp, W, H) {
-  const c = sp.colors;
+function drawCrustIcon(ctx, sp, W, H, opts = {}) {
+  const c = colorsOf(sp, opts.albino);
+  const eyeCol = opts.albino ? ALBINO_EYE : '#101014';
   const seg = (pts, w, col) => {
     ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.beginPath();
@@ -201,7 +236,7 @@ function drawCrustIcon(ctx, sp, W, H) {
     ell(cx, cy - ch * 0.75, cw * 0.95, ch * 0.8, 0, c.top);     // 甲の上半分を濃く
     ctx.restore();
     // 目
-    for (const sg of [1, -1]) ell(cx + sg * cw * 0.34, cy + ch * 0.1, 1.9 * u, 1.9 * u, 0, '#101014');
+    for (const sg of [1, -1]) ell(cx + sg * cw * 0.34, cy + ch * 0.1, 1.9 * u, 1.9 * u, 0, eyeCol);
     return;
   }
 
@@ -273,7 +308,7 @@ function drawCrustIcon(ctx, sp, W, H) {
   }
   // 額角と目
   seg([[nose - bl * 0.02, cy - bh * 0.35], [nose + bl * (crayfish ? 0.14 : 0.2), cy - bh * 0.95]], 1.7 * u, c.top);
-  ell(nose - bl * 0.12, cy - bh * 0.38, 2.1 * u, 2.1 * u, 0, '#101014');
+  ell(nose - bl * 0.12, cy - bh * 0.38, 2.1 * u, 2.1 * u, 0, eyeCol);
 }
 
 /* ===========================================================
@@ -285,6 +320,7 @@ export class UI {
     this._last = {};
     this._toasts = [];
     this.openModal = null;
+    this.journalShowAlbino = Object.create(null); // sp.id -> bool（図鑑でアルビノ表示中）
 
     this.el = {
       body: document.body,
@@ -301,7 +337,7 @@ export class UI {
       danger: $('danger-flash'), biteAlert: $('bite-alert'), toasts: $('toasts'),
       loading: $('loading'), title: $('title-screen'),
       catchCard: $('catch-card'), shop: $('shop'), journal: $('journal'), pause: $('pause'),
-      rigWin: $('rig-window'),
+      rigWin: $('rig-window'), fishDetail: $('fish-detail'),
     };
 
     this._bind();
@@ -313,10 +349,20 @@ export class UI {
     $('btn-start').addEventListener('click', () => g.start(false));
     $('btn-continue').addEventListener('click', () => g.start(true));
     $('btn-card-ok').addEventListener('click', () => g.dismissCatch());
+    // カード全体・背景クリックでも次へ（Space と同じ）
+    this.el.catchCard.addEventListener('click', (e) => {
+      if (e.target.closest('#card-albino-badge')) return;
+      g.dismissCatch();
+    });
     $('btn-resume').addEventListener('click', () => this.closeAll());
     $('btn-rest').addEventListener('click', () => g.rest());
     $('btn-rig-close').addEventListener('click', () => this.closeAll());
     $('btn-map-close').addEventListener('click', () => this.closeAll());
+    $('btn-fish-detail-close').addEventListener('click', () => this.closeFishDetail());
+    $('btn-fish-detail-ok').addEventListener('click', () => this.closeFishDetail());
+    this.el.fishDetail.addEventListener('click', (e) => {
+      if (e.target === this.el.fishDetail) this.closeFishDetail();
+    });
     /* 3 つの層のボタンを作る（クリックで選択） */
     const col = $('rig-col');
     for (const L of RIG_LAYERS) {
@@ -584,12 +630,14 @@ export class UI {
 
   /* ---------------- 釣果カード ---------------- */
   showCatch(info) {
-    const { sp, len, weight, value, xp, record, isNew } = info;
+    const { sp, len, weight, value, xp, record, isNew, albino, isNewAlbino, title } = info;
     const r = RARITY[sp.rarity];
     const rib = $('card-rarity');
     rib.textContent = r.label;
     rib.className = 'card-ribbon r' + sp.rarity;
-    $('card-name').textContent = sp.name;
+    // 釣果カードだけ接頭詞付き（図鑑は素の名前）
+    $('card-name').textContent = title
+      || (albino ? `${sp.name}（アルビノ）` : sp.name);
     $('card-len').textContent = `${fmt1(len)} cm`;
     $('card-weight').textContent = fmtWeight(weight);
     $('card-value').textContent = `${fmtInt(value)} G`;
@@ -597,7 +645,14 @@ export class UI {
     $('card-flavor').textContent = sp.flavor;
     $('card-record').classList.toggle('hidden', !record);
     $('card-new').classList.toggle('hidden', !isNew);
-    drawFishIcon($('fish-icon'), sp);
+    const albinoNew = $('card-albino-new');
+    if (albinoNew) albinoNew.classList.toggle('hidden', !isNewAlbino);
+    drawFishIcon($('fish-icon'), sp, { albino: !!albino });
+    const badge = $('card-albino-badge');
+    if (badge) {
+      badge.classList.toggle('hidden', !albino);
+      badge.classList.toggle('on', !!albino);
+    }
     this.el.catchCard.classList.add('open');
     this.openModal = 'catch';
   }
@@ -696,33 +751,60 @@ export class UI {
     const order = [...SPECIES].sort((a, b) =>
       (a.rarity === 0 ? 9 : a.rarity) - (b.rarity === 0 ? 9 : b.rarity) || a.len[1] - b.len[1]);
     for (const sp of order) {
-      const rec = s.records[sp.id] || (reveal ? { count: 0, maxLen: sp.len[0], maxWeight: 0, dbg: true } : null);
+      const rec = s.records[sp.id] || (reveal
+        ? { count: 0, maxLen: sp.len[0], maxWeight: 0, dbg: true }
+        : null);
       if (sp.rarity > 0) totalFish++;
       if (rec && !rec.dbg) { known++; if (sp.rarity > 0) knownFish++; }
       const d = document.createElement('div');
       d.className = 'jcard r' + sp.rarity + (rec ? '' : ' unknown');
+      const art = document.createElement('div');
+      art.className = 'fish-art';
       const cv = document.createElement('canvas');
       cv.width = 200; cv.height = 68;
-      d.appendChild(cv);
+      art.appendChild(cv);
+      const hasAlbino = !!(rec && sp.rarity > 0 && (rec.albinoCaught || reveal));
+      const showAlbino = !!(hasAlbino && this.journalShowAlbino[sp.id]);
+      if (hasAlbino) {
+        const badge = document.createElement('button');
+        badge.type = 'button';
+        badge.className = 'albino-badge' + (showAlbino ? ' on' : '');
+        badge.textContent = 'アルビノ';
+        badge.title = 'クリックでアルビノ表示を切替';
+        badge.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.journalShowAlbino[sp.id] = !this.journalShowAlbino[sp.id];
+          const on = !!this.journalShowAlbino[sp.id];
+          badge.classList.toggle('on', on);
+          drawFishIcon(cv, sp, { albino: on });
+          this.game.audio.click();
+        });
+        art.appendChild(badge);
+      }
+      d.appendChild(art);
       const info = document.createElement('div');
-      if (rec) {
+      if (rec && !rec.dbg) {
         info.innerHTML = `
           <div class="jn"><span>${sp.name}</span><span class="jr" style="color:${RARITY[sp.rarity].color}">${RARITY[sp.rarity].label}</span></div>
-          <div class="jm">${rec.dbg ? '<span style="color:var(--gold)">未発見（デバッグ表示）</span>' : `${rec.count} 匹 / 最大 ${fmt1(rec.maxLen)} cm<br>${fmtWeight(rec.maxWeight)}・${fmtInt(valueOf(sp, rec.maxLen))} G`}<br><span style="opacity:.55">水深 ${sp.depth[0]}〜${sp.depth[1]} m・${swimLayerLabel(sp)}${
-            dielNote(sp) ? `<br>🕒 ${dielNote(sp)}` : ''}</span></div>`;
-      } else if (sp.rarity === 0) {
+          <div class="jm"><span class="jsz">最大 ${fmt1(rec.maxLen)} cm</span><span class="jcnt">${rec.count} 匹</span></div>`;
+      } else if (rec) {
         info.innerHTML = `
-          <div class="jn"><span>???</span><span class="jr">${RARITY[0].label}</span></div>
-          <div class="jm">未発見<br>&nbsp;</div>`;
+          <div class="jn"><span>${sp.name}</span><span class="jr" style="color:${RARITY[sp.rarity].color}">${RARITY[sp.rarity].label}</span></div>
+          <div class="jm"><span class="jsz">—</span><span class="jcnt">—</span></div>`;
       } else {
         info.innerHTML = `
-          <div class="jn"><span>???</span><span class="jr">${RARITY[sp.rarity].label}</span></div>
-          <div class="jm">未発見<br>水深 ${sp.depth[0]}〜${sp.depth[1]} m・${swimLayerLabel(sp)}</div>`;
+          <div class="jn"><span>???</span><span class="jr" style="color:${RARITY[sp.rarity].color}">${RARITY[sp.rarity].label}</span></div>
+          <div class="jm">未発見</div>`;
       }
       d.appendChild(info);
+      if (rec) {
+        d.classList.add('clickable');
+        d.title = 'クリックで詳細';
+        d.addEventListener('click', () => this.openFishDetail(sp, rec));
+      }
       grid.appendChild(d);
       // デバッグ表示のときは姿も見せる（未発見のマークは文言で分かる）
-      drawFishIcon(cv, sp, { unknown: !rec });
+      drawFishIcon(cv, sp, { unknown: !rec, albino: showAlbino });
     }
     $('journal-progress').innerHTML =
       `魚 ${knownFish}/${totalFish}・その他 ${known - knownFish}/${SPECIES.length - totalFish}`
@@ -736,6 +818,79 @@ export class UI {
       }).join('');
     this.el.journal.classList.add('open');
     this.openModal = 'journal';
+  }
+
+  /* ---------------- 図鑑・魚の詳細 ---------------- */
+  openFishDetail(sp, rec) {
+    const r = RARITY[sp.rarity];
+    const rib = $('fd-rarity');
+    rib.textContent = r.label;
+    rib.className = 'card-ribbon r' + sp.rarity;
+    const reveal = !!(rec && rec.dbg) || !!this.game.revealAll;
+    const hasAlbino = !!(rec && sp.rarity > 0 && (rec.albinoCaught || this.game.revealAll));
+    const albinoView = !!(hasAlbino && this.journalShowAlbino[sp.id]);
+    $('fd-name').textContent = albinoView ? `${sp.name}（アルビノ）` : sp.name;
+    $('fd-flavor').textContent = sp.flavor || '';
+
+    const [lo, hi] = sp.len;
+    const vLo = valueOf(sp, lo), vHi = valueOf(sp, hi);
+    const fp = fightPattern(sp);
+    const caught = (rec && !rec.dbg) ? (rec.count || 0) : 0;
+    const unlock = (need) => reveal || caught >= need;
+    const locked = (need) =>
+      `???<small style="opacity:.55;font-weight:500">（あと${need - caught}匹でアンロック）</small>`;
+
+    $('fd-badges').innerHTML = [
+      ['layer', '遊泳層', swimLayerMarks(sp)],
+      ['time', '時間帯', preferShort(sp.times, TIME_SHORT)],
+      ['weather', '天候', preferShort(sp.weather, WEATHER_SHORT)],
+      ['fight', 'ファイト', fp.name],
+    ].map(([cls, k, v]) =>
+      `<span class="fd-badge ${cls}"><small>${k}</small>${v}</span>`
+    ).join('');
+
+    const rows = [
+      ['釣った数', `${caught} 匹`],
+      ['最大記録', caught > 0 ? `${fmt1(rec.maxLen)} cm / ${fmtWeight(rec.maxWeight)}` : '—'],
+      ['最小サイズ', unlock(DETAIL_UNLOCK.minLen)
+        ? `${fmt1(lo)} cm` : locked(DETAIL_UNLOCK.minLen)],
+      ['最大サイズ', unlock(DETAIL_UNLOCK.maxLen)
+        ? `${fmt1(hi)} cm` : locked(DETAIL_UNLOCK.maxLen)],
+      ['売値の目安', unlock(DETAIL_UNLOCK.value)
+        ? `${fmtInt(vLo)} 〜 ${fmtInt(vHi)} G` : locked(DETAIL_UNLOCK.value)],
+      ['生息水深', unlock(DETAIL_UNLOCK.depth)
+        ? `${sp.depth[0]} 〜 ${sp.depth[1]} m` : locked(DETAIL_UNLOCK.depth)],
+    ];
+
+    $('fd-stats').innerHTML = rows.map(([k, v]) =>
+      `<div><span>${k}</span><b>${v}</b></div>`
+    ).join('');
+
+    drawFishIcon($('fd-icon'), sp, { albino: albinoView });
+    const badge = $('fd-albino-badge');
+    if (badge) {
+      const can = hasAlbino;
+      badge.classList.toggle('hidden', !can);
+      badge.classList.toggle('on', albinoView);
+      badge.onclick = (e) => {
+        e.stopPropagation();
+        if (!can) return;
+        this.journalShowAlbino[sp.id] = !this.journalShowAlbino[sp.id];
+        this.openFishDetail(sp, rec);
+      };
+    }
+    this.el.fishDetail.classList.add('open');
+    this.openModal = 'fishDetail';
+    this.game.audio.click();
+  }
+
+  closeFishDetail() {
+    if (!this.el.fishDetail.classList.contains('open')) return;
+    this.el.fishDetail.classList.remove('open');
+    if (this.openModal === 'fishDetail') {
+      this.openModal = this.el.journal.classList.contains('open') ? 'journal' : null;
+    }
+    this.game.audio.click();
   }
 
   /* ---------------- マップ（測量図） ---------------- */
@@ -967,7 +1122,7 @@ export class UI {
   }
 
   closeAll() {
-    for (const k of ['shop', 'journal', 'pause', 'rigWin', 'map']) this.el[k].classList.remove('open');
+    for (const k of ['shop', 'journal', 'pause', 'rigWin', 'map', 'fishDetail']) this.el[k].classList.remove('open');
     if (this.openModal !== 'catch') this.openModal = null;
     this.game.audio.click();
   }

@@ -466,7 +466,7 @@ d0 ≦ 水深 ≦ d1              → <span class="n">1.00</span>
 
 <span class="cm">// ⑩ レベル解禁（伝説タグ以外は下限 0.008 = 解禁前でも極低確率で掛かる）</span>
 レア度4（エピック）  × max(<span class="n">0.008</span>, clamp01((Lv − <span class="n">2</span>) / <span class="n">5</span>))  <span class="cm">// Lv3 から出始め Lv7 で全開</span>
-レア度5（レジェンド）× clamp01((Lv − <span class="n">5</span>) / <span class="n">6</span>)           <span class="cm">// 湖の主・白龍魚は tags に legend → 下限なし</span></pre>
+レア度5（レジェンド）× clamp01((Lv − <span class="n">5</span>) / <span class="n">6</span>)           <span class="cm">// 湖の主・イトウは tags に legend → 下限なし</span></pre>
 
     <div class="note">
       <b>エサ相性（⑤）</b>は、魚の <code>tags</code> のうちエサの <code>aff</code> に載っているものの<b>平均</b>です。
@@ -509,14 +509,14 @@ d0 ≦ 水深 ≦ d1              → <span class="n">1.00</span>
         <tr><td class="l name">藻場の肉食魚</td><td class="num" style="color:var(--good)">1.00</td><td class="num">0.85</td><td class="num">0.30</td>
             <td class="l">ライギョ・ブラックバス</td></tr>
         <tr><td class="l name">鱒</td><td class="num">0.80</td><td class="num" style="color:var(--good)">1.00</td><td class="num">0.45</td>
-            <td class="l">ニジマス・ヤマメ・イトウ</td></tr>
+            <td class="l">ニジマス・ヤマメ</td></tr>
         <tr><td class="l name">中層の小物</td><td class="num">0.90</td><td class="num" style="color:var(--good)">1.00</td><td class="num">0.35</td>
-            <td class="l">ウグイ・オイカワ・タナゴ・ワカサギ・ブルーギル・ハス</td></tr>
+            <td class="l">メダカ・ウグイ・オイカワ・タナゴ・ワカサギ・ブルーギル・ハス</td></tr>
         <tr><td class="l name">深場の大型肉食魚</td><td class="num">0.30</td><td class="num">0.85</td><td class="num" style="color:var(--good)">1.00</td>
             <td class="l">湖の主</td></tr>
       </tbody>
-      <tfoot><tr><td colspan="5" class="l">タグと合わない魚だけ個別に指定しています：モロコ・イワナ・ソウギョ（水面の水草）・
-        ビワマス・サクラマス・アリゲーターガー（水面で空気を吸う）・白龍魚。下の魚データ表に実際の値が出ます。</td></tr></tfoot>
+      <tfoot><tr><td colspan="5" class="l">タグと合わない魚だけ個別に指定しています：メダカ・モロコ・イワナ・ソウギョ（水面の水草）・
+        ビワマス・サクラマス・アリゲーターガー（水面で空気を吸う）・イトウ。下の魚データ表に実際の値が出ます。</td></tr></tfoot>
     </table></div>
     <p class="src">src/data.js — swimLayer() / depthFit() / RIG_LAYERS　src/game.js — rigLayer / rollSpecies()</p>
     <div class="note">
@@ -538,7 +538,7 @@ d0 ≦ 水深 ≦ d1              → <span class="n">1.00</span>
       <li><b>朝夕のマズメ</b>：鱒類・ブラックバスは水温と光量が落ちる朝夕に浅い層へ差して水面を意識し、日中は深い層・カバーの底に落ちる</li>
       <li><b>夜の接岸</b>：ナマズ・ウナギ・コイ・エビ・カニは夜になると浅場へ出て餌を探し、日中は深場の底や穴に潜む</li>
       <li><b>逆パターン</b>：ライギョは変温動物で日中の高水温を好み、<b>昼に水面のカバーで浮いている</b>。夜は沈む</li>
-      <li><b>夜明けの一瞬</b>：白龍魚（架空）は夜明けだけ水面を割る、というフレーバーをそのまま実装に落としている</li>
+      <li><b>朝夕の待ち伏せ</b>：イトウは朝夕に浅場の表層で待ち伏せ、日中は深場の底へ落ちる</li>
     </ul>
     <p>
       実装は 2 つの入口を用意しています。<b>層が入れ替わる魚</b>は <code>layer</code> を時間帯ごとの表にし、
@@ -591,7 +591,7 @@ d0 ≦ 水深 ≦ d1              → <span class="n">1.00</span>
         78 m 以上離れる／水深 0.35 m 未満に乗り上げると 26〜58 m 先へ入れ替わります。</p></div>
       <div class="card tight"><h4>ただし条件は違う</h4><p>泳いでいる魚の抽選には<b>エサ・タナ・ロッド・レベル解禁が掛かりません</b>。
         つまり Lv1 でも<b>レジェンドが泳いでいるのは見えます</b>。アタリの抽選ではレア度 4 が Lv3〜7、
-        レア度 5 が Lv6〜11 で解禁されますが、<b>伝説（湖の主・白龍魚）以外は解禁前も重み 0.008 で残る</b>ので、
+        レア度 5 が Lv6〜11 で解禁されますが、<b>伝説（湖の主・イトウ）以外は解禁前も重み 0.008 で残る</b>ので、
         Lv1 でもエピックが掛かることがあります。</p></div>
     </div>
 
@@ -790,9 +790,9 @@ y(t) = lerp(先端, 着水点, t) − sin(πt) × min(距離×<span class="n">0.
     <div class="tw"><table>
       <thead><tr><th class="l">時間帯タグ</th><th class="l">ゲーム内時刻</th><th class="l">主な魚</th></tr></thead>
       <tbody>
-        <tr><td class="l name">dawn（朝）</td><td class="l num">4:30 – 7:30</td><td class="l">ヤマメ・イワナ・白龍魚（×2.4）</td></tr>
-        <tr><td class="l name">day（昼）</td><td class="l num">7:30 – 16:30</td><td class="l">モロコ・ブルーギル・ライギョ・ソウギョ</td></tr>
-        <tr><td class="l name">dusk（夕）</td><td class="l num">16:30 – 19:30</td><td class="l">ニジマス・ブラックバス・ビワマス（×1.8）</td></tr>
+        <tr><td class="l name">dawn（朝）</td><td class="l num">4:30 – 7:30</td><td class="l">ヤマメ・イワナ・イトウ（×1.9）</td></tr>
+        <tr><td class="l name">day（昼）</td><td class="l num">7:30 – 16:30</td><td class="l">メダカ・モロコ・ブルーギル・ライギョ・ソウギョ</td></tr>
+        <tr><td class="l name">dusk（夕）</td><td class="l num">16:30 – 19:30</td><td class="l">ニジマス・ブラックバス・ビワマス・イトウ（×1.8）</td></tr>
         <tr><td class="l name">night（夜）</td><td class="l num">19:30 – 4:30</td><td class="l">ナマズ・チョウザメ・ガー・湖の主（×1.7）</td></tr>
       </tbody>
     </table></div>
@@ -936,7 +936,7 @@ v = clamp01(<span class="n">0.52</span> + ノイズ×<span class="n">0.62</span>
         さらに<b>長さを 18〜32 m の中から選んで</b>先端の水深を 11 m 前後に寄せます（平均 21 m）。桟橋から浅場も中深場も狙える状態を保つためです。</p></div>
       <div class="card tight"><h4>ドロップオフ</h4><p>岸線からすぐ落ち込む急深型です（岸から 1 m で約 2 m、8 m で約 8 m）。<b>浅場の魚は岸すぐ、深場の魚は遠投</b>で狙い分けます。キャスト中の予測リングと水深表示がそのまま指標になります。</p></div>
       <div class="card tight"><h4>深い淵（ホール）— 平均 2.5 か所</h4><p><b>1 つ目</b>は桟橋から見て左右どちらかの前方、岸から 26〜40 m 内側に半径 30 m。
-        <b>必ず水深 24 m 前後</b>になるよう掘る量が決まるので、どの湖でもレジェンドの層（湖の主 14〜28 m / 白龍魚 17〜30 m）が成立します。<br>
+        <b>必ず水深 24 m 前後</b>になるよう掘る量が決まるので、どの湖でもレジェンドの層（湖の主 14〜28 m / イトウ 10〜26 m）が成立します。<br>
         <b>追加で 1〜2 か所</b>、半径 16〜26 m・水深 18〜26 m のものを湖のどこかに置きます（1 つだけだと「なんでもない水域」が広すぎるため）。</p></div>
       <div class="card tight"><h4>浅い平場（藻場）— 平均 3.5 か所</h4><p><b>1 つ目</b>は淵の反対側、岸から 14〜30 m 内側。<b>必ず水深 2.5 m 前後</b>。
         weed タグ（ライギョ・ブルーギル・バス）を中層〜底層で狙う場所（水深 2.5 m なので底層でも 2.2 m）。葦が密生します。<br>
@@ -1097,7 +1097,7 @@ const DIEL_DESC = {
   snakehead: '日中は水面のカバーで浮く。夜は沈む（他と逆）',
   itou: '朝夕に浅場の表層で待ち伏せ、日中は深場の底',
   nushi: '夜は中層まで上がってくる。日中は淵の底',
-  dragonfish: '夜明けだけ水面を割る',
+  medaka: '岸ぎわの水面だけ',
   namazu: '夜にシャローへ差す。日中は深場の底',
   unagi: '日中は底の穴、夜に浅場へ出る',
   koi: '夜〜朝マズメに浅場へ入って餌を漁る',
@@ -1674,7 +1674,7 @@ function runRoll() {
     </tr></thead><tbody>${rows2}</tbody></table>`;
 
   // 計算例
-  const samples = ['moroko', 'funa', 'rainbow', 'koi', 'iwana', 'sturgeon', 'nushi', 'dragonfish'];
+  const samples = ['medaka', 'funa', 'rainbow', 'koi', 'iwana', 'sturgeon', 'nushi', 'itou'];
   const rows3 = samples.map((id) => {
     const sp = SPECIES.find((s) => s.id === id);
     const cells = [sp.len[0], avgLen(sp), sp.len[0] + (sp.len[1] - sp.len[0]) * 0.8, sp.len[1]].map((L) =>
@@ -1867,7 +1867,7 @@ function runLake() {
     const d = lake.depthAt(x, z);
     const near = lake.structures.find((t) => (t.x - x) ** 2 + (t.z - z) ** 2 < 5 * 5);
     rows.push(`<tr><td class="l">先端から ${dd} m</td>
-      <td class="num" style="color:${d >= 17 ? 'var(--violet)' : d >= 12 ? 'var(--cyan)' : 'inherit'}">${d > 0 ? f1(d) + ' m' : '—'}</td>
+      <td class="num" style="color:${d >= 14 ? 'var(--violet)' : d >= 10 ? 'var(--cyan)' : 'inherit'}">${d > 0 ? f1(d) + ' m' : '—'}</td>
       <td class="num" style="font-size:11px">${d > 0.4 ? BED_LABEL[lake.bedAt(x, z).kind] : '—'}</td>
       <td class="num" style="font-size:11px;color:#ff9a5a">${near ? (near.kind === 'rock' ? '岩' : '枯木') : ''}</td></tr>`);
   }
@@ -1880,7 +1880,7 @@ function runLake() {
     const cells = [5, 10, 20, 30].map((dd) => {
       const r = sr - dd;
       const d = lake.depthAt(ca * r, sa * r);
-      const col = d >= 17 ? 'var(--violet)' : d >= 12 ? 'var(--cyan)' : d < 3 ? 'var(--good)' : 'inherit';
+      const col = d >= 14 ? 'var(--violet)' : d >= 10 ? 'var(--cyan)' : d < 3 ? 'var(--good)' : 'inherit';
       return `<td class="num" style="color:${col}">${f1(d)}</td>`;
     }).join('');
     const d20 = lake.depthAt(ca * (sr - 20), sa * (sr - 20));
@@ -1890,7 +1890,7 @@ function runLake() {
   document.getElementById('lakeProfile').innerHTML =
     `<table><thead><tr><th class="l">桟橋から正面へ</th><th class="num">水深</th><th class="num">水底</th><th class="num">構造</th></tr></thead>
      <tbody>${rows.join('')}</tbody>
-     <tfoot><tr><td colspan="4" class="l">紫 = 白龍魚(17m+) / 水色 = 湖の主(14m+) が成立する水深。構造物は 5 m 以内にあるもの</td></tr></tfoot></table>`;
+     <tfoot><tr><td colspan="4" class="l">水色 = イトウ(10m+) / 紫 = 湖の主(14m+) が成立する水深。構造物は 5 m 以内にあるもの</td></tr></tfoot></table>`;
   document.getElementById('lakeDirs').innerHTML =
     `<table><thead><tr><th class="l">方角</th><th class="num">岸線<br>半径m</th>
      <th class="num">岸から<br>5m</th><th class="num">10m</th><th class="num">20m</th><th class="num">30m</th><th class="l">斜面</th></tr></thead>
