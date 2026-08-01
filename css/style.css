@@ -354,7 +354,13 @@ kbd {
 .newfish.albino-new { color: #ff8aa0; }
 .jcard .fish-art { margin: 0; max-width: none; }
 .jcard .albino-badge { font-size: 8px; padding: 2px 5px; right: 2px; bottom: 2px; }
-.card h2 { font-size: 26px; letter-spacing: .06em; margin-bottom: 14px; }
+.card h2 { font-size: 26px; letter-spacing: .06em; margin-bottom: 14px; font-weight: 700; }
+.card h2 .catch-prefix {
+  font-weight: 300;
+  opacity: 0.82;
+  letter-spacing: 0.02em;
+  margin-right: 0.12em;
+}
 @media (max-height: 560px) {
   .card { padding: 16px 20px 14px; }
   .fish-art { max-width: 220px; margin-top: 16px; }
@@ -429,7 +435,8 @@ kbd {
 .jcard .jfish i { font-style: normal; background: rgba(255, 255, 255, .07); border-radius: 4px; padding: 1px 5px; }
 .jtabs { padding: 0 4px; }
 .jgroup { grid-column: 1 / -1; font-size: 10px; letter-spacing: .14em; opacity: .5; margin: 6px 0 -2px; }
-.jcard canvas { width: 100%; height: 54px; display: block; }
+.jcard canvas { width: 100%; height: auto; aspect-ratio: 12 / 5; display: block; }
+.tcard canvas { aspect-ratio: 8 / 3; border-radius: 4px; object-fit: cover; }
 .jcard .jn { font-size: 12.5px; font-weight: 700; margin-top: 4px; display: flex; justify-content: space-between; align-items: baseline; }
 .jcard .jr { font-size: 9px; opacity: .7; letter-spacing: .1em; }
 .jcard .jm { font-size: 10.5px; font-weight: 700; opacity: .75; margin-top: 3px; line-height: 1.5;

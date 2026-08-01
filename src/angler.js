@@ -3,6 +3,7 @@
    =========================================================== */
 import * as THREE from 'three';
 import { clamp, lerp, damp, TAU } from './util.js';
+import { createBaitMesh, disposeBaitMesh, updateBaitMesh, createHookMesh } from './baitMesh.js';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -262,34 +263,50 @@ export class Angler {
     // 仕掛け（オモリ・ハリ・エサ）
     const rig = new THREE.Group();
     const metal = new THREE.MeshStandardMaterial({ color: 0x8b8b93, metalness: 0.7, roughness: 0.35 });
-    const sinker = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), metal);
-    sinker.scale.y = 1.5;
-    const hook = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.006, 4, 10, Math.PI * 1.4), metal);
-    hook.position.y = -0.09;
-    hook.rotation.y = Math.PI / 2;
-    const baitBall = new THREE.Mesh(
-      new THREE.SphereGeometry(0.045, 10, 8),
-      new THREE.MeshStandardMaterial({ color: 0xc2705a, roughness: 0.8 })
-    );
-    baitBall.position.y = -0.075;
-    baitBall.scale.set(1, 1.3, 1);
-    this.baitMat = baitBall.material;
-    rig.add(sinker, hook, baitBall);
+    const sinker = new THREE.Mesh(new THREE.SphereGeometry(0.028, 8, 6), metal);
+    sinker.scale.set(1, 1.55, 1);
+    sinker.position.y = 0.01;
+    // ハリ：軸＋ふところ＋針先（エサと同じ座標系で作る）
+    const hookG = createHookMesh(metal);
+    // エサ（種別に差し替え）。ハリと同じ原点なので、エサ側が刺さる位置を持つ
+    const baitRoot = new THREE.Group();
+    this.baitRoot = baitRoot;
+    this.baitMesh = null;
+    this.baitId = null;
+    this._baitTime = 0;
+    rig.add(sinker, hookG, baitRoot);
     rig.visible = false;
     this.rig = rig;
     this.scene.add(rig);
+    this.setBait('worm');
 
     this.lineLower = new LineRibbon(this.scene, 6);
     this._lowerPts = [];
     for (let i = 0; i < 7; i++) this._lowerPts.push(new THREE.Vector3());
   }
 
+  /** 装備中のエサメッシュを差し替える */
+  setBait(id) {
+    const next = id || 'worm';
+    if (this.baitId === next && this.baitMesh) return;
+    if (this.baitMesh) {
+      this.baitRoot.remove(this.baitMesh);
+      disposeBaitMesh(this.baitMesh);
+      this.baitMesh = null;
+    }
+    this.baitMesh = createBaitMesh(next);
+    this.baitRoot.add(this.baitMesh);
+    this.baitId = next;
+  }
+
   /** ウキ → 仕掛け（水中）の糸と、仕掛けの表示。水中カメラの時だけ見せる */
-  updateRig(bobberPos, baitPos, camera, show) {
+  updateRig(bobberPos, baitPos, camera, show, dt = 0.016) {
     this.rig.visible = show;
     this.lineLower.mesh.visible = show;
     if (!show) return;
     this.rig.position.copy(baitPos);
+    this._baitTime += dt;
+    this._animateBait(this._baitTime);
     const pts = this._lowerPts;
     const n = pts.length;
     for (let i = 0; i < n; i++) {
@@ -298,6 +315,11 @@ export class Angler {
       pts[i].x += Math.sin(t * 2.2) * 0.04;
     }
     this.lineLower.update(pts, camera);
+  }
+
+  /** 種別ごとの弱いうねり・揺れ（関節ごとの動きは baitMesh 側が持つ） */
+  _animateBait(t) {
+    updateBaitMesh(this.baitMesh, t);
   }
 
   /* ---------------- 更新 ---------------- */

@@ -6,8 +6,10 @@ import {
   valueOf, fightPattern, gearStats, swimLayer, depthFit, BED_LABEL,
   colorsOf, ALBINO_EYE, TERRAIN_KINDS, TERRAIN_GROUPS, SPECIES_BY_ID,
 } from './data.js';
-import { PROFILES, BODY, profileAt, CRUST_SHAPES } from './fish.js';
-import { fmtInt, fmt1, fmtWeight, fmtClock, timeBand, timeBandLabel, clamp01, lerp as lerpN } from './util.js';
+import { PROFILES, BODY, profileAt, CRUST_SHAPES, lookOf } from './fish.js';
+import { textureTypeFor, fishTextureImage } from './fishTextures.js';
+import { terrainIconImage } from './terrainIcons.js';
+import { fmtInt, fmt1, fmtWeight, fmtClock, timeBand, timeBandLabel, clamp01, lerp as lerpN, smoothstep } from './util.js';
 import { xpForLevel } from './save.js';
 import { iconHtml, iconLabel, loadIcon, preloadIcons, JUNK_ICONS } from './icons.js';
 
@@ -44,6 +46,22 @@ function swimLayerMarks(sp) {
     on = [LAYER_SHORT.reduce((a, x) => (L[x[0]] > L[a[0]] ? x : a))];
   }
   return on.map(([, label]) => label).join('・');
+}
+
+/**
+ * 図鑑アイコンの相対サイズ。
+ * キャンバスいっぱいに揃えるとメダカも大型も同じに見えるので、
+ * 代表体長（または opts.len）で 0.34〜1.0 に落とす。
+ */
+function iconSizeScale(sp, opts = {}) {
+  const cm = opts.len != null
+    ? opts.len
+    : (sp.len ? (sp.len[0] + sp.len[1]) * 0.5 : 30);
+  const lo = 4;
+  const hi = 150;
+  const t = clamp01((cm - lo) / (hi - lo));
+  // 中型が潰れすぎないよう少し緩やかに
+  return lerpN(0.34, 1, Math.pow(t, 0.72));
 }
 
 preloadIcons([
@@ -94,86 +112,204 @@ export function drawFishIcon(canvas, sp, opts = {}) {
   }
 
   const cols = colorsOf(sp, opts.albino);
+  const look = lookOf(sp);
   const prof = PROFILES[sp.shape] || PROFILES.slim;
   const B = BODY[sp.shape] || BODY.slim;
-  const pad = W * 0.08;
-  const L = W - pad * 2;
-  const bodyH = Math.min(H * 0.62, L * B.h * 1.18);
-  const cx = pad, cy = H * 0.52;
-  const nose = cx + L * 0.99;
-  const tailX = cx + L * 0.16;
+  const fork = look.fork != null ? look.fork : B.fork;
+  const sizeScale = iconSizeScale(sp, opts);
 
-  // 体（上下対称の輪郭）
-  ctx.beginPath();
-  const N = 34;
-  for (let i = 0; i <= N; i++) {
-    const t = i / N;
-    const x = tailX + (nose - tailX) * t;
-    const y = cy - profileAt(prof, t) * bodyH * 0.5;
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  /* 体型比を保ってキャンバスに収め、さらに種の体長で相対サイズを付ける。
+     背びれ高を unitH にフル加算すると deep/コイ系の胴が極端に短くなるので、
+     ヒレは一部だけ見積もる（はみ出しは許容） */
+  const bodyAspect = B.h * look.h;                         // 体長に対する体高
+  const snoutU = look.snout * 0.16;
+  const tailU = B.tail * look.tailLen * (0.7 + fork * 0.35);
+  const finU = B.dorsal * look.dorsalH * 0.85;
+  const unitW = 1 + snoutU + tailU;
+  const unitH = bodyAspect + finU * 0.4;
+  const fit = Math.min((W * 0.92) / unitW, (H * 0.88) / Math.max(0.14, unitH)) * sizeScale;
+  const bodyLen = fit;                                     // 胴の長さ
+  const bodyH = fit * bodyAspect;
+  const snoutPad = fit * snoutU;
+  const tailReach = fit * tailU;
+  const totalW = bodyLen + snoutPad + tailReach;
+  const left = (W - totalW) * 0.5;
+  const cy = H * 0.52;
+  const tailX = left + tailReach * 0.62;
+  const nose = tailX + bodyLen + snoutPad;
+  const span = bodyLen + snoutPad;                         // 口まわりの相対寸法用
+  const cx = left;                                         // 尾びれ先端側
+  const xAt = (t) => tailX + (nose - tailX) * t;
+  const dorsalAt = (t) => cy - profileAt(prof, t) * bodyH * 0.5 * (1 - look.headFlat * 0.15 * t);
+
+  // 体（上下対称の輪郭。snout で口先を細く長く）
+  const bodyPath = () => {
+    ctx.beginPath();
+    const N = 36;
+    for (let i = 0; i <= N; i++) {
+      const t = i / N;
+      let r = profileAt(prof, t);
+      if (look.snout > 0 && t > 0.78) r *= 1 - smoothstep(0.78, 1, t) * look.snout * 0.45;
+      const x = xAt(t);
+      const y = cy - r * bodyH * 0.5;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    for (let i = N; i >= 0; i--) {
+      const t = i / N;
+      let r = profileAt(prof, t);
+      if (look.snout > 0 && t > 0.78) r *= 1 - smoothstep(0.78, 1, t) * look.snout * 0.45;
+      const x = xAt(t);
+      const y = cy + r * bodyH * 0.5 * 0.92 * (1 - look.headFlat * 0.2 * Math.max(0, t - 0.5));
+      ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+  };
+  // AI 生成テクスチャを体に貼る（3D と同じ向き・主役。未ロード時は種色グラデ）
+  const texType = textureTypeFor(sp, look, !!opts.albino);
+  const texImg = texType ? fishTextureImage(texType) : null;
+  const hasTex = !!(texImg && texImg.complete && texImg.naturalWidth);
+  bodyPath();
+  if (hasTex) {
+    // 3D の頂点色ティント（白寄り）に合わせて下地を薄くし、テクスチャをそのまま載せる
+    ctx.fillStyle = '#f2f0ea';
+    ctx.fill();
+    ctx.save();
+    bodyPath();
+    ctx.clip();
+    const bodyTop = cy - bodyH * 0.55;
+    const bodyBot = cy + bodyH * 0.55;
+    ctx.drawImage(texImg, tailX, bodyTop, Math.max(1, nose - tailX), Math.max(1, bodyBot - bodyTop));
+    ctx.restore();
+  } else {
+    const grad = ctx.createLinearGradient(0, cy - bodyH * 0.5, 0, cy + bodyH * 0.5);
+    grad.addColorStop(0, cols.top);
+    grad.addColorStop(0.42, cols.mid);
+    grad.addColorStop(1, cols.belly);
+    ctx.fillStyle = grad;
+    ctx.fill();
   }
-  for (let i = N; i >= 0; i--) {
-    const t = i / N;
-    const x = tailX + (nose - tailX) * t;
-    const y = cy + profileAt(prof, t) * bodyH * 0.5 * 0.92;
-    ctx.lineTo(x, y);
-  }
-  ctx.closePath();
-  const grad = ctx.createLinearGradient(0, cy - bodyH * 0.5, 0, cy + bodyH * 0.5);
-  grad.addColorStop(0, cols.top);
-  grad.addColorStop(0.42, cols.mid);
-  grad.addColorStop(1, cols.belly);
-  ctx.fillStyle = grad;
-  ctx.fill();
+
   if (sp.rarity >= 4 && !opts.albino) {
+    bodyPath();
     ctx.strokeStyle = sp.rarity === 5 ? 'rgba(255,224,150,.95)' : 'rgba(214,170,255,.8)';
     ctx.lineWidth = 1.4;
     ctx.stroke();
   }
 
+  // エラ蓋斑（ブルーギル）— テクスチャでは表現しづらいので残す
+  if (!opts.albino && look.cheek) {
+    ctx.fillStyle = '#1a1824';
+    ctx.beginPath();
+    ctx.arc(xAt(0.84), cy - bodyH * 0.02, bodyH * 0.08, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   ctx.fillStyle = cols.fin;
 
-  // 尾びれ
-  const th = bodyH * (0.62 + B.fork * 0.55);
+  // 尾びれ（種類別）
+  const th = bodyH * (0.55 + fork * 0.55) * look.tailLen;
   ctx.beginPath();
-  ctx.moveTo(tailX + 1, cy - bodyH * 0.06);
-  ctx.lineTo(cx, cy - th * 0.5);
-  ctx.lineTo(cx + L * 0.085, cy);
-  ctx.lineTo(cx, cy + th * 0.5);
-  ctx.lineTo(tailX + 1, cy + bodyH * 0.06);
+  if (look.tail === 'round' || look.tail === 'ribbon') {
+    ctx.moveTo(tailX + 1, cy - bodyH * 0.08);
+    ctx.quadraticCurveTo(cx - span * 0.02, cy - th * 0.55, cx, cy);
+    ctx.quadraticCurveTo(cx - span * 0.02, cy + th * 0.55, tailX + 1, cy + bodyH * 0.08);
+  } else if (look.tail === 'truncate') {
+    ctx.moveTo(tailX + 1, cy - bodyH * 0.1);
+    ctx.lineTo(cx + span * 0.02, cy - th * 0.45);
+    ctx.lineTo(cx + span * 0.02, cy + th * 0.45);
+    ctx.lineTo(tailX + 1, cy + bodyH * 0.1);
+  } else if (look.tail === 'hetero') {
+    // 3D と同様、上葉長め・下葉短め（帆のように大きくしない）
+    ctx.moveTo(tailX + 1, cy - bodyH * 0.05);
+    ctx.lineTo(cx + span * 0.02, cy - th * 0.42);
+    ctx.lineTo(cx, cy - th * 0.22);
+    ctx.lineTo(cx + span * 0.03, cy + th * 0.22);
+    ctx.lineTo(tailX + 1, cy + bodyH * 0.06);
+  } else {
+    const notch = look.tail === 'softfork' ? 0.1 : 0.085;
+    ctx.moveTo(tailX + 1, cy - bodyH * 0.06);
+    ctx.lineTo(cx, cy - th * 0.5);
+    ctx.lineTo(cx + span * notch, cy);
+    ctx.lineTo(cx, cy + th * 0.5);
+    ctx.lineTo(tailX + 1, cy + bodyH * 0.06);
+  }
   ctx.closePath();
   ctx.fill();
 
-  // 背びれ（背中の輪郭に沿わせる）
-  const dorsalAt = (t) => cy - profileAt(prof, t) * bodyH * 0.5;
-  const t0 = 0.34, t1 = 0.62;
-  ctx.beginPath();
-  ctx.moveTo(tailX + (nose - tailX) * t0, dorsalAt(t0) + 1);
-  ctx.lineTo(tailX + (nose - tailX) * ((t0 + t1) / 2), cy - bodyH * (0.5 + B.dorsal * 1.35));
-  ctx.lineTo(tailX + (nose - tailX) * t1, dorsalAt(t1) + 1);
-  ctx.closePath();
-  ctx.fill();
+  // 背びれ
+  if (look.ribbon) {
+    ctx.beginPath();
+    ctx.moveTo(xAt(0.75), dorsalAt(0.75));
+    ctx.lineTo(xAt(0.55), cy - bodyH * 0.62);
+    ctx.lineTo(xAt(0.2), cy - bodyH * 0.55);
+    ctx.lineTo(xAt(0.12), dorsalAt(0.12));
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(xAt(0.65), cy + bodyH * 0.35);
+    ctx.lineTo(xAt(0.4), cy + bodyH * 0.55);
+    ctx.lineTo(xAt(0.15), cy + bodyH * 0.45);
+    ctx.lineTo(xAt(0.12), cy + bodyH * 0.28);
+    ctx.closePath();
+    ctx.fill();
+  } else {
+    const t0 = clamp01(0.42 + look.dorsalX * 0.5);
+    const t1 = clamp01(t0 + 0.22 * look.dorsalLen);
+    const tip = t0 + (t1 - t0) * (1 - look.dorsalTip * 0.5);
+    ctx.beginPath();
+    ctx.moveTo(xAt(t0), dorsalAt(t0) + 1);
+    ctx.lineTo(xAt(tip), cy - bodyH * (0.5 + B.dorsal * 1.35 * look.dorsalH));
+    ctx.lineTo(xAt(t1), dorsalAt(t1) + 1);
+    ctx.closePath();
+    ctx.fill();
 
-  // 尻びれ
-  ctx.beginPath();
-  ctx.moveTo(tailX + (nose - tailX) * 0.22, cy + bodyH * 0.30);
-  ctx.lineTo(tailX + (nose - tailX) * 0.30, cy + bodyH * (0.42 + B.dorsal * 0.7));
-  ctx.lineTo(tailX + (nose - tailX) * 0.40, cy + bodyH * 0.33);
-  ctx.closePath();
-  ctx.fill();
+    // 尻びれ
+    ctx.beginPath();
+    ctx.moveTo(xAt(0.22), cy + bodyH * 0.30);
+    ctx.lineTo(xAt(0.30), cy + bodyH * (0.42 + B.dorsal * 0.7 * look.analH));
+    ctx.lineTo(xAt(0.40), cy + bodyH * 0.33);
+    ctx.closePath();
+    ctx.fill();
+
+    // 脂びれ
+    if (look.adipose) {
+      ctx.beginPath();
+      ctx.moveTo(xAt(0.28), dorsalAt(0.28));
+      ctx.lineTo(xAt(0.24), cy - bodyH * 0.58);
+      ctx.lineTo(xAt(0.20), dorsalAt(0.20));
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
 
   // 胸びれ
   ctx.beginPath();
-  ctx.moveTo(tailX + (nose - tailX) * 0.70, cy + bodyH * 0.10);
-  ctx.lineTo(tailX + (nose - tailX) * 0.60, cy + bodyH * 0.36);
-  ctx.lineTo(tailX + (nose - tailX) * 0.72, cy + bodyH * 0.22);
+  ctx.moveTo(xAt(0.70), cy + bodyH * 0.10);
+  ctx.lineTo(xAt(0.70 - 0.1 * look.pec), cy + bodyH * 0.36 * look.pec);
+  ctx.lineTo(xAt(0.72), cy + bodyH * 0.22);
   ctx.closePath();
   ctx.fill();
 
+  // ヒゲ
+  if (look.whiskers > 0) {
+    ctx.strokeStyle = cols.mid;
+    ctx.lineWidth = Math.max(1, bodyH * 0.03);
+    ctx.lineCap = 'round';
+    for (let k = 0; k < look.whiskers; k++) {
+      ctx.beginPath();
+      ctx.moveTo(xAt(0.9), cy + bodyH * (0.05 + k * 0.06));
+      ctx.quadraticCurveTo(
+        xAt(0.96), cy + bodyH * (0.18 + k * 0.1) * look.whiskerLen,
+        xAt(0.88), cy + bodyH * (0.28 + k * 0.12) * look.whiskerLen
+      );
+      ctx.stroke();
+    }
+  }
+
   // 目
-  const ex = tailX + (nose - tailX) * (sp.shape === 'gar' ? 0.80 : 0.86);
-  const ey = cy - bodyH * 0.15;
-  const er = Math.max(1.8, bodyH * 0.05);
+  const ex = xAt(look.eyeX + 0.5);
+  const ey = cy - bodyH * (look.eyeY + 0.02);
+  const er = Math.max(1.6, bodyH * 0.055 * look.eye);
   ctx.beginPath();
   ctx.arc(ex, ey, er, 0, Math.PI * 2);
   ctx.fillStyle = opts.albino ? '#ffe8ea' : '#fbfbf8';
@@ -184,12 +320,25 @@ export function drawFishIcon(canvas, sp, opts = {}) {
   ctx.fill();
 
   // 口
-  ctx.strokeStyle = 'rgba(0,0,0,.35)';
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(0,0,0,.4)';
+  ctx.lineWidth = look.mouth === 'wide' || look.mouth === 'beak' ? 1.6 : 1;
   ctx.beginPath();
-  ctx.moveTo(nose - L * 0.02, cy + bodyH * 0.02);
-  ctx.lineTo(nose - L * (sp.shape === 'gar' ? 0.14 : 0.08), cy + bodyH * 0.09);
-  ctx.stroke();
+  if (look.mouth === 'beak') {
+    ctx.moveTo(nose - span * 0.01, cy);
+    ctx.lineTo(nose - span * (0.12 + look.snout * 0.06), cy + bodyH * 0.06);
+    ctx.stroke();
+  } else if (look.mouth === 'up') {
+    ctx.moveTo(nose - span * 0.02, cy - bodyH * 0.02);
+    ctx.lineTo(nose - span * 0.08, cy - bodyH * 0.1);
+    ctx.stroke();
+  } else if (look.mouth === 'sucker') {
+    ctx.arc(nose - span * 0.03, cy + bodyH * 0.06, bodyH * 0.06, 0, Math.PI * 2);
+    ctx.stroke();
+  } else {
+    ctx.moveTo(nose - span * 0.02, cy + bodyH * 0.02);
+    ctx.lineTo(nose - span * (look.mouth === 'wide' ? 0.1 : 0.07), cy + bodyH * 0.09);
+    ctx.stroke();
+  }
 
   if (faceLeft) ctx.restore();
 }
@@ -209,9 +358,11 @@ function drawCrustIcon(ctx, sp, W, H, opts = {}) {
     ctx.beginPath(); ctx.ellipse(x, y, rx, ry, rot, 0, Math.PI * 2); ctx.fill();
   };
 
+  const sizeScale = iconSizeScale(sp, opts);
+
   if (sp.shape === 'crab') {
     /* 正面から見たカニ（横に広い甲羅・左右に脚・前にハサミ） */
-    const u = Math.min(W / 78, H / 44);            // 基準寸法
+    const u = Math.min(W / 78, H / 44) * sizeScale;
     const cx = W * 0.5, cy = H * 0.54;
     const cw = 20 * u, ch = 11 * u;
     // 脚（甲羅の後ろに描く）
@@ -242,7 +393,7 @@ function drawCrustIcon(ctx, sp, W, H, opts = {}) {
 
   /* エビ・ザリガニ（座標は頭右。呼び出し側で左右反転して左向きに） */
   const crayfish = sp.shape === 'crayfish';
-  const u = Math.min(W / 86, H / 40);
+  const u = Math.min(W / 86, H / 40) * sizeScale;
   const cx = W * 0.47, cy = H * 0.5;
   const bl = 30 * u;                                   // 頭から尾までの半分ほど
   const bh = (crayfish ? 6.2 : 5.2) * u;               // 胴の太さ
@@ -602,7 +753,8 @@ export class UI {
       this.el.rig.textContent = rigStr;
       this._last.rig = rigStr;
     }
-    const aimStr = g.hudAim > 0 ? `${fmt1(g.hudAim)} m` : '—';
+    // 狙い距離／竿の飛距離。頭打ちなら「これ以上は届かない」が分かる
+    const aimStr = g.hudAim > 0 ? `${fmt1(g.hudAim)} / ${g.castRange} m` : `— / ${g.castRange} m`;
     if (this._last.aim !== aimStr) {
       this.el.aim.textContent = aimStr;
       this._last.aim = aimStr;
@@ -630,14 +782,17 @@ export class UI {
 
   /* ---------------- 釣果カード ---------------- */
   showCatch(info) {
-    const { sp, len, weight, value, xp, record, isNew, albino, isNewAlbino, title } = info;
+    const { sp, len, weight, value, xp, record, isNew, albino, isNewAlbino, title, titlePrefix } = info;
     const r = RARITY[sp.rarity];
     const rib = $('card-rarity');
     rib.textContent = r.label;
     rib.className = 'card-ribbon r' + sp.rarity;
-    // 釣果カードだけ接頭詞付き（図鑑は素の名前）
-    $('card-name').textContent = title
-      || (albino ? `${sp.name}（アルビノ）` : sp.name);
+    // 釣果カードだけ接頭詞付き（図鑑は素の名前）。接頭詞は細字
+    const prefix = titlePrefix || '';
+    const base = sp.name;
+    $('card-name').innerHTML = prefix
+      ? `<span class="catch-prefix">${prefix}</span>${base}`
+      : (title || (albino ? `${base}（アルビノ）` : base));
     $('card-len').textContent = `${fmt1(len)} cm`;
     $('card-weight').textContent = fmtWeight(weight);
     $('card-value').textContent = `${fmtInt(value)} G`;
@@ -647,7 +802,7 @@ export class UI {
     $('card-new').classList.toggle('hidden', !isNew);
     const albinoNew = $('card-albino-new');
     if (albinoNew) albinoNew.classList.toggle('hidden', !isNewAlbino);
-    drawFishIcon($('fish-icon'), sp, { albino: !!albino });
+    drawFishIcon($('fish-icon'), sp, { albino: !!albino, len });
     const badge = $('card-albino-badge');
     if (badge) {
       badge.classList.toggle('hidden', !albino);
@@ -761,7 +916,7 @@ export class UI {
       const art = document.createElement('div');
       art.className = 'fish-art';
       const cv = document.createElement('canvas');
-      cv.width = 200; cv.height = 68;
+      cv.width = 240; cv.height = 100;
       art.appendChild(cv);
       const hasAlbino = !!(rec && sp.rarity > 0 && (rec.albinoCaught || reveal));
       const showAlbino = !!(hasAlbino && this.journalShowAlbino[sp.id]);
@@ -1035,7 +1190,7 @@ export class UI {
       const d = document.createElement('div');
       d.className = 'jcard tcard' + (show ? '' : ' unknown');
       const cv = document.createElement('canvas');
-      cv.width = 200; cv.height = 68;
+      cv.width = 320; cv.height = 120;
       d.appendChild(cv);
       const info = document.createElement('div');
       const fish = seen ? rec.fish.map((id) => SPECIES_BY_ID[id]).filter(Boolean) : [];
@@ -1131,25 +1286,41 @@ export class UI {
 }
 
 /* ===========================================================
-   地形図鑑のサムネイル（断面図）
-   水面と湖底の断面を描いて、その地形の特徴を一目で見せる
+   地形図鑑のサムネイル（AI 生成断面イラスト）
+   未ロード時は簡易断面をフォールバック描画
    =========================================================== */
 export function drawTerrainIcon(canvas, id, opts = {}) {
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
   ctx.clearRect(0, 0, W, H);
   const un = !!opts.unknown;
-  const SURF = 12;                       // 水面の y
-  // 空（水面より上）
+  const img = terrainIconImage(id);
+  if (img && img.complete && img.naturalWidth) {
+    ctx.drawImage(img, 0, 0, W, H);
+    if (un) {
+      ctx.fillStyle = 'rgba(12, 18, 28, 0.58)';
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = 'rgba(255,255,255,.32)';
+      ctx.font = `bold ${Math.floor(H * 0.28)}px system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('?', W / 2, H / 2);
+    }
+    return;
+  }
+  // フォールバック：簡易断面
+  drawTerrainIconFallback(ctx, W, H, id, un);
+}
+
+function drawTerrainIconFallback(ctx, W, H, id, un) {
+  const SURF = Math.floor(H * 0.18);
   ctx.fillStyle = un ? '#1a2230' : '#243447';
   ctx.fillRect(0, 0, W, SURF);
-  // 水
   const wg = ctx.createLinearGradient(0, SURF, 0, H);
   if (un) { wg.addColorStop(0, '#1d2836'); wg.addColorStop(1, '#151d28'); }
   else { wg.addColorStop(0, '#2f6f86'); wg.addColorStop(1, '#123043'); }
   ctx.fillStyle = wg;
   ctx.fillRect(0, SURF, W, H - SURF);
-  // 水面のライン
   ctx.strokeStyle = un ? 'rgba(255,255,255,.10)' : 'rgba(190,235,255,.55)';
   ctx.lineWidth = 1;
   ctx.beginPath();
@@ -1157,7 +1328,6 @@ export function drawTerrainIcon(canvas, id, opts = {}) {
   ctx.stroke();
 
   const bedCol = { sand: '#8d7c56', rock: '#6d7370', mud: '#4a463a', def: '#5d6a63' };
-  /** 底の形（x → y）を塗る */
   const fillBed = (fn, col) => {
     ctx.beginPath();
     ctx.moveTo(0, H);
@@ -1166,127 +1336,31 @@ export function drawTerrainIcon(canvas, id, opts = {}) {
     ctx.closePath();
     ctx.fillStyle = un ? '#20262e' : col;
     ctx.fill();
-    ctx.strokeStyle = un ? 'rgba(255,255,255,.06)' : 'rgba(0,0,0,.30)';
-    ctx.beginPath();
-    for (let x = 0; x <= W; x += 2) ctx.lineTo(x, fn(x));
-    ctx.stroke();
   };
-  const rock = (x, y, r, col = '#6d7370') => {
-    ctx.fillStyle = un ? '#262c34' : col;
-    ctx.beginPath();
-    for (let i = 0; i < 7; i++) {
-      const a = (i / 7) * Math.PI * 2;
-      const rr = r * (0.72 + ((i * 37) % 11) / 22);
-      ctx[i ? 'lineTo' : 'moveTo'](x + Math.cos(a) * rr, y + Math.sin(a) * rr * 0.72);
-    }
-    ctx.closePath();
-    ctx.fill();
-  };
-  const weeds = (x0, x1, base, h) => {
-    ctx.strokeStyle = un ? 'rgba(255,255,255,.10)' : '#4f7a3c';
-    ctx.lineWidth = 1.6;
-    for (let x = x0; x < x1; x += 7) {
-      ctx.beginPath();
-      ctx.moveTo(x, base);
-      ctx.quadraticCurveTo(x + 3, base - h * 0.6, x + ((x % 3) - 1) * 4, base - h);
-      ctx.stroke();
-    }
-  };
-  const dots = (fn, col) => {
-    ctx.fillStyle = un ? 'rgba(255,255,255,.05)' : col;
-    for (let i = 0; i < 60; i++) {
-      const x = (i * 37) % W;
-      const y = fn(x) + 3 + ((i * 13) % 9);
-      if (y < H) ctx.fillRect(x, y, 1.4, 1.4);
-    }
-  };
-
-  const flat = (y) => () => y;
+  const sy = H / 68; // 旧 68px 座標からのスケール
+  const fDeep = () => H - 5 * sy;
   switch (id) {
-    /* --- 水深帯 --- */
-    case 'shallow': { const f = (x) => 30 + Math.sin(x * 0.05) * 2; fillBed(f, bedCol.sand); dots(f, 'rgba(255,240,200,.35)'); break; }
-    case 'midwater': { const f = (x) => 46 + Math.sin(x * 0.04) * 2.5; fillBed(f, bedCol.def); break; }
-    case 'deep': { const f = flat(H - 5); fillBed(f, bedCol.mud); break; }
-    /* --- 底質 --- */
-    case 'bed-sand': { const f = (x) => 44 + Math.sin(x * 0.09) * 1.6; fillBed(f, bedCol.sand); dots(f, 'rgba(255,240,200,.45)'); break; }
-    case 'bed-rock': {
-      const f = (x) => 46 + Math.sin(x * 0.07) * 2;
-      fillBed(f, bedCol.rock);
-      for (let i = 0; i < 9; i++) rock(10 + i * 22 + ((i * 7) % 6), f(10 + i * 22) - 1, 3 + ((i * 5) % 4));
-      break;
-    }
-    case 'bed-mud': { const f = (x) => 48 + Math.sin(x * 0.03) * 1.2; fillBed(f, bedCol.mud); dots(f, 'rgba(120,110,80,.5)'); break; }
-    /* --- 地形 --- */
-    case 'break': {
-      const f = (x) => 24 + 34 / (1 + Math.exp(-(x - 96) * 0.16));
-      fillBed(f, bedCol.def);
-      ctx.strokeStyle = un ? 'rgba(255,255,255,.10)' : 'rgba(255,220,140,.7)';
-      ctx.setLineDash([3, 3]);
-      ctx.beginPath(); ctx.moveTo(96, 20); ctx.lineTo(96, H - 2); ctx.stroke();
-      ctx.setLineDash([]);
-      break;
-    }
-    case 'shelf': {
-      const f = (x) => (x < 150 ? 32 + Math.sin(x * 0.06) * 1.2 : 32 + (x - 150) * 0.62);
-      fillBed(f, bedCol.sand);
-      dots(f, 'rgba(255,240,200,.35)');
-      break;
-    }
-    case 'weedbed': {
-      const f = (x) => 40 + Math.sin(x * 0.05) * 2;
-      fillBed(f, '#5a6a44');
-      weeds(6, W - 4, 40, 22);
-      break;
-    }
-    case 'hole': {
-      const f = (x) => 26 + 34 * Math.exp(-((x - 100) ** 2) / 2600);
-      ctx.save();
-      fillBed((x) => H - 2, bedCol.mud);
-      ctx.restore();
-      fillBed(f, bedCol.mud);
-      break;
-    }
-    case 'edge': {
-      const f = (x) => 58 - Math.max(0, (60 - x)) * 1.1;
-      ctx.fillStyle = un ? '#20262e' : '#6a6a4a';
-      ctx.beginPath(); ctx.moveTo(0, H); ctx.lineTo(0, 4); ctx.lineTo(46, 4); ctx.lineTo(62, SURF + 2);
-      for (let x = 62; x <= W; x += 2) ctx.lineTo(x, Math.min(H - 2, 20 + (x - 62) * 0.22));
-      ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
-      weeds(6, 74, 12, 16);
-      break;
-    }
-    /* --- ストラクチャー --- */
-    case 'sunkrock': {
-      const f = (x) => 50 + Math.sin(x * 0.05) * 1.5;
-      fillBed(f, bedCol.rock);
-      rock(88, 46, 11); rock(112, 49, 8); rock(72, 50, 7);
-      break;
-    }
-    case 'snag': {
-      const f = (x) => 54 + Math.sin(x * 0.05) * 1.5;
-      fillBed(f, bedCol.def);
-      ctx.strokeStyle = un ? '#2a3038' : '#5a4a36';
-      ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(100, 54); ctx.lineTo(96, 22); ctx.stroke();
-      ctx.lineWidth = 2.4;
-      for (const [dx, dy] of [[16, -6], [-15, -4], [12, 8]]) {
-        ctx.beginPath(); ctx.moveTo(97, 30 - dy); ctx.lineTo(97 + dx, 24 - dy - 4); ctx.stroke();
-      }
-      break;
-    }
-    case 'dock': {
-      const f = (x) => 52 + Math.sin(x * 0.05) * 1.5;
-      fillBed(f, bedCol.def);
-      ctx.fillStyle = un ? '#2a3038' : '#7a5b3c';
-      ctx.fillRect(0, 2, W, 7);
-      for (const px of [30, 96, 162]) ctx.fillRect(px, 9, 5, 44);
-      break;
-    }
-    default: { fillBed(flat(50), bedCol.def); break; }
+    case 'shallow': fillBed((x) => (30 + Math.sin(x * 0.05) * 2) * sy, bedCol.sand); break;
+    case 'midwater': fillBed((x) => (46 + Math.sin(x * 0.04) * 2.5) * sy, bedCol.def); break;
+    case 'deep': fillBed(fDeep, bedCol.mud); break;
+    case 'bed-sand': fillBed((x) => (44 + Math.sin(x * 0.09) * 1.6) * sy, bedCol.sand); break;
+    case 'bed-rock': fillBed((x) => (46 + Math.sin(x * 0.07) * 2) * sy, bedCol.rock); break;
+    case 'bed-mud': fillBed((x) => (48 + Math.sin(x * 0.03) * 1.2) * sy, bedCol.mud); break;
+    case 'break': fillBed((x) => (24 + 34 / (1 + Math.exp(-(x - W * 0.48) * 0.16))) * sy, bedCol.def); break;
+    case 'shelf': fillBed((x) => (x < W * 0.75 ? 32 + Math.sin(x * 0.06) * 1.2 : 32 + (x - W * 0.75) * 0.4) * sy, bedCol.sand); break;
+    case 'weedbed': fillBed((x) => (40 + Math.sin(x * 0.05) * 2) * sy, '#5a6a44'); break;
+    case 'hole': fillBed((x) => (26 + 34 * Math.exp(-((x - W * 0.5) ** 2) / (W * W * 0.065))) * sy, bedCol.mud); break;
+    case 'edge': fillBed((x) => Math.min(H - 2, (20 + Math.max(0, x - W * 0.3) * 0.22) * sy), bedCol.sand); break;
+    case 'sunkrock': fillBed((x) => (50 + Math.sin(x * 0.05) * 1.5) * sy, bedCol.rock); break;
+    case 'snag': fillBed((x) => (54 + Math.sin(x * 0.05) * 1.5) * sy, bedCol.def); break;
+    case 'dock': fillBed((x) => (52 + Math.sin(x * 0.05) * 1.5) * sy, bedCol.def); break;
+    default: fillBed(() => H * 0.72, bedCol.def); break;
   }
   if (un) {
     ctx.fillStyle = 'rgba(255,255,255,.30)';
-    ctx.font = 'bold 15px system-ui, sans-serif';
+    ctx.font = `bold ${Math.floor(H * 0.28)}px system-ui, sans-serif`;
     ctx.textAlign = 'center';
-    ctx.fillText('?', W / 2, H / 2 + 5);
+    ctx.textBaseline = 'middle';
+    ctx.fillText('?', W / 2, H / 2);
   }
 }

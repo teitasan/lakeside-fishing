@@ -263,8 +263,11 @@ F.stamina -= (<span class="n">0.022</span> + tRatio * <span class="n">0.17</span
 
 <span class="cm">// 決着</span>
 <span class="k">if</span> (F.tension &gt;= line.cap) → ラインブレイク
-<span class="k">if</span> (F.dist &gt;= F.span)     → 逃走（F.span = 掛けた距離 + <span class="n">16</span>m）
-<span class="k">if</span> (F.dist &lt;= <span class="n">0.7</span>)          → 取り込み</pre>
+<span class="k">if</span> (F.dist &gt;= F.span)     → 逃走（F.span = 掛けた距離 + <span class="n">16</span>m、上限は糸の長さ）
+<span class="k">if</span> (F.dist &lt;= <span class="n">0.7</span>)          → 取り込み（= LAND_M）
+
+<span class="cm">// バー表示は 0.7m 分だけ内側に詰めて見せる（0% ちょうどで取り込みになるように）</span>
+表示比率 = clamp01((F.dist − LAND_M) / (F.span − LAND_M))</pre>
     <p class="src">src/game.js — _updateFight()</p>
 
     <div class="note warn">
@@ -299,8 +302,8 @@ F.stamina -= (<span class="n">0.022</span> + tRatio * <span class="n">0.17</span
     <pre>sizeF   = <span class="n">0.55</span> + (この個体の全長 / sp.len[1]) * <span class="n">0.75</span>   <span class="cm">// 0.55〜1.30</span>
 F.pull0 = sp.str * sizeF                              <span class="cm">// この個体の基礎引き</span>
 F.len0  = 掛けた地点までの距離（m）                     <span class="cm">// プレイヤー基準の水平距離</span>
-F.span  = min(F.len0 + <span class="n">16</span>, <span class="n">62</span>)                        <span class="cm">// ここまで走られたら逃走＝バーの上限</span>
-                                                      <span class="cm">// （62m = 糸の長さ。遠投時は余裕が縮む）</span>
+F.span  = clamp(F.len0 + <span class="n">16</span>, F.len0 + <span class="n">4</span>, 糸の長さ)         <span class="cm">// ここまで走られたら逃走＝バーの上限</span>
+                                                      <span class="cm">// 糸の長さ = rod.cast + 16 + 8m（竿ごと）。目一杯投げると余裕が縮む</span>
 F.dist    = F.len0   F.tension = <span class="n">0</span>   F.stamina = <span class="n">1</span>   F.spin = <span class="n">0</span>
 F.runTimer = rand(<span class="n">1.4</span>, <span class="n">3.2</span>)                           <span class="cm">// 最初の突進までの秒数</span>
 
@@ -375,7 +378,16 @@ F.runDur  = rand(<span class="n">0.6</span>, <span class="n">1.2</span>) * P.run
     </div>
 
     <div class="note q">
-      <span class="qh">Q. ロッドの「竿の力（power）」「巻取（reel）」の違い？</span>
+      <span class="qh">Q. ロッドの「飛距離（cast）」「竿の力（power）」「巻取（reel）」の違い？</span>
+      <b>cast は狙える最大距離（m）そのもの</b>で、竹 10 → グラス 38 → カーボン 52 → 名匠 68 → 伝説 84。
+      初速の上限はこの値から弾道で逆算されます。<b>最初の竹竿は意図的にごく短く</b>、ほぼ足元しか狙えません。
+      岸沿いの水深は距離とともに伸びていく（38 m で中央値 約8 m、65 m で 約19 m）ので、中層〜深場・深淵は
+      竹竿では基本的に手が届かず、より長い竿を買って初めて狙えるようになります。<br>
+      <b>最弱キャスト（約1.7 m）も竿によらず同じ</b>なので、足元狙いが不利になることはありません
+      （むしろ竹竿は「足元しか狙えない」竿なので、この短さそのものが個性です）。<br>
+      桟橋の先端は元々「先端だけで深場が狙える」設計（水深 6〜19m）の構造物なので、竹竿でもそこから
+      わずかに投げれば中層〜深場に届くことがあります（実測：ほぼ確実に深場止まり、深淵まで届く湖は
+      2%程度）。深場の魚を安定して狙うにはレベルによる解禁も必要です。<br>
       <b>power はテンションの増加を割り算で抑える</b>値（＝竿が引きを吸収する）で、<code>tension += … / rod.power</code>。
       <b>reel は巻き取り速度の倍率</b>で、<code>dist -= rod.reel × 4.6 × resist × (1+dist×0.012) × F.spin × dt</code>（m/s）。
       power は「切れにくさ」、reel は「早さ」に効きます。ラインブレイクを減らしたいなら <b>line.cap と rod.power</b>、
@@ -724,11 +736,13 @@ p    = <span class="n">2.1</span> − min(<span class="n">1.2</span>, bait.rare 
       メーターの<b>緑の帯</b>はその距離に必要なパワーの位置。帯の中で離すと狙い通りに落ちます。
     </p>
     <pre><span class="cm">// ① 狙い点：視線と水面(y=0)の交点。見下ろすほど近く、水平で遠く</span>
-狙い距離 = clamp(視線が y=0 に達する水平距離, 最短キャスト, <span class="n">50</span>) m
+狙い距離 = clamp(視線が y=0 に達する水平距離, 最短キャスト, <span class="n">rod.cast</span>) m
+           <span class="cm">// 上限は竿ごと（竹 26 / グラス 38 / カーボン 52 / 名匠 68 / 伝説 84 m）</span>
 
 <span class="cm">// ② 目印：その距離に落ちるパワーを弾道の逆算（二分探索12回）で求める</span>
 仰角成分 = clamp(<span class="n">0.46</span> + pitch × <span class="n">0.55</span>, <span class="n">0.16</span>, <span class="n">0.95</span>)
-初速     = lerp(<span class="n">4.5</span>, <span class="n">28.5</span>, power) m/s
+初速     = lerp(<span class="n">0.5</span>, 初速上限, power) m/s
+           <span class="cm">// 初速上限は rod.cast × 1.07 が出る速さを弾道から逆算（竹 9.6 〜 伝説 40.6 m/s）</span>
 毎フレーム: v.y −= <span class="n">9.8</span>·dt ;  v ×= (<span class="n">1</span> − <span class="n">0.0055</span>·|v|·dt)    <span class="cm">// 重力 + 空気抵抗</span>
 
 <span class="cm">// ③ 判定：長押し中は 1.05 /秒で 0↔1 を往復（ピンポン）</span>
@@ -736,20 +750,25 @@ p    = <span class="n">2.1</span> − min(<span class="n">1.2</span>, bait.rare 
   → パワーを目印に補正して発射（＝小さな誤差は吸収され、狙い点にきっちり落ちる）
 外した   → そのパワーの距離に着水（手前に落ちる／飛ばし過ぎる）
 
-糸の最大長 = <span class="n">62</span> m（超えるとその場で着水／待機中に超えると強制回収）</pre>
+糸の最大長 = rod.cast + <span class="n">16</span>（走られる余裕）+ <span class="n">8</span> m
+             <span class="cm">// 竹 34 m 〜 伝説 108 m。超えるとその場で着水／待機中に超えると強制回収</span>
+
+<span class="cm">// 最弱キャスト（初速 0.5 m/s）は竿によらず約 1.7m。ロッド先端が足元より</span>
+<span class="cm">// 約1.25m 前に出ているので、初速を絞ってもそれ未満にはならない</span></pre>
     <p class="src">src/game.js — _updateAim(), _solveTargetPower(), _castVelocity(), _releaseCast()</p>
 
     <div class="tw"><table>
       <thead><tr><th class="num">視点(pitch)</th><th class="num">狙い距離</th><th class="num">必要パワー</th><th class="num">実際の着水</th><th class="l">用途</th></tr></thead>
       <tbody>
-        <tr><td class="num">−1.0 〜 −0.45</td><td class="num">5.6 m</td><td class="num">0.00</td><td class="num">5.6 m</td><td class="l">足元。浅場の小物・岸際</td></tr>
-        <tr><td class="num">−0.30</td><td class="num">9.0 m</td><td class="num">0.11</td><td class="num">9.0 m</td><td class="l">近距離</td></tr>
-        <tr><td class="num">−0.20</td><td class="num">13.7 m</td><td class="num">0.24</td><td class="num">13.7 m</td><td class="l">中距離</td></tr>
-        <tr><td class="num">−0.12</td><td class="num">23.0 m</td><td class="num">0.44</td><td class="num">22.3 m</td><td class="l">ドロップオフ・淵</td></tr>
-        <tr><td class="num">−0.05</td><td class="num">50.0 m</td><td class="num">0.90</td><td class="num">50.0 m</td><td class="l">最大飛距離</td></tr>
+        <tr><td class="num">−1.0</td><td class="num">1.8 m</td><td class="num">0.35</td><td class="num">1.7 m</td><td class="l">真下・足元</td></tr>
+        <tr><td class="num">−0.45</td><td class="num">5.7 m</td><td class="num">0.39</td><td class="num">5.6 m</td><td class="l">竹竿の中距離</td></tr>
+        <tr><td class="num">−0.30</td><td class="num">9.0 m</td><td class="num">0.72</td><td class="num">9.0 m</td><td class="l">竹竿でギリギリ届く距離</td></tr>
+        <tr><td class="num">−0.20 以上</td><td class="num">rod.cast</td><td class="num">〜0.8</td><td class="num">同左</td><td class="l">最大飛距離（竿で決まる。竹は 10m で頭打ち）</td></tr>
       </tbody>
-      <tfoot><tr><td colspan="5" class="l">桟橋の先端・カーボンロッドでの実測。狙いと着水の誤差は <b>0.0〜0.7 m</b>。
-        最短キャストは初速 4.5 m/s の弾道で決まり、立ち位置とロッドの高さでわずかに変わります。</td></tr></tfoot>
+      <tfoot><tr><td colspan="5" class="l">桟橋の先端・竹竿での実測。狙いと着水の誤差は <b>0.1〜0.5 m</b>。
+        最短キャストは初速 0.5 m/s の弾道＋ロッド先端のオフセットで決まり、立ち位置とロッドの高さでわずかに変わります。<br>
+        竹竿は狙い距離が 10m で頭打ちになるため、必要パワーは 0.8 前後で収まる（「狙い通り」を出す余地は残る）が、
+        より遠くを見ても狙い距離自体は伸びない。</td></tr></tfoot>
     </table></div>
     <div class="grid c2">
       <div class="card tight"><h4>2つの輪</h4><p><span style="color:#9ff0ff">水色</span>＝狙い点、<span style="color:#fff0b0">黄色</span>＝いまのパワーでの着水予測。
@@ -888,16 +907,20 @@ v = clamp01(<span class="n">0.52</span> + ノイズ×<span class="n">0.62</span>
         <tr><td class="l name">桟橋の水深</td><td class="l">先端が 6〜19 m</td><td class="l">浅すぎて何も来ない／深すぎて小物が来ない</td></tr>
         <tr><td class="l name">桟橋のクリアランス</td><td class="l">全長・全幅で床が地面より 0.25 m 以上上</td><td class="l">桟橋が斜面に埋まる・地面を突き抜ける</td></tr>
         <tr><td class="l name">付け根の勾配</td><td class="l">勾配 ≤ 1.4</td><td class="l">崖で桟橋から岸に上がれない</td></tr>
-        <tr><td class="l name"><b>水深帯の網羅</b></td><td class="l">キャストで届く範囲に <b>1〜4 m / 5〜10 m / 12〜18 m / 20 m 以上</b> がすべて存在</td><td class="l">特定の層の魚が永久に釣れない</td></tr>
-        <tr><td class="l name"><b>全魚種の到達性</b></td><td class="l">18 魚種すべてについて、生息層（fit=1 の窓）に入る水深が届く範囲にある</td><td class="l">図鑑がコンプできない</td></tr>
-        <tr><td class="l name">淵</td><td class="l">水深 20〜34 m・岸から 18 m 以上内側・桟橋の先端から 44 m 以内</td><td class="l">レジェンドが狙えない／淵が土手を削る</td></tr>
+        <tr><td class="l name"><b>水深帯の網羅</b></td><td class="l">一番よく飛ぶ竿（84m）で届く範囲に <b>1〜4 m / 5〜10 m / 12〜18 m / 20 m 以上</b> がすべて存在</td><td class="l">特定の層の魚が永久に釣れない</td></tr>
+        <tr><td class="l name"><b>全魚種の到達性</b></td><td class="l">18 魚種すべてについて、生息層（fit=1 の窓）に入る水深が、一番よく飛ぶ竿で届く範囲にある</td><td class="l">図鑑がコンプできない</td></tr>
+        <tr><td class="l name"><b>最初の竿の上限</b></td><td class="l">最初の竿（10m）の範囲で深淵(20m+)に当たるサンプルが 6% 未満（ごく稀）</td><td class="l">竹竿だけで深淵まで安定して届いてしまう</td></tr>
+        <tr><td class="l name">淵</td><td class="l">水深 20〜34 m・岸から 18 m 以上内側・桟橋の先端から <b>24〜68 m</b>（最初の竿+14m 〜 最遠の竿−16m）</td><td class="l">レジェンドが狙えない／最初の竿で届いてしまう／淵が土手を削る</td></tr>
         <tr><td class="l name">藻場</td><td class="l">水深 1.4〜4.6 m・岸から 6 m 以上内側・淵から 45 m 以上離れる</td><td class="l">浅場が成立しない／2つの地形が潰し合う</td></tr>
-        <tr><td class="l name"><b>ストラクチャー</b></td><td class="l">水中に 7 個以上、うち<b>桟橋の先端から届く所に 2 個以上</b></td><td class="l">スタート地点の近くに狙う目標がない</td></tr>
+        <tr><td class="l name"><b>ストラクチャー</b></td><td class="l">水中に 7 個以上、うち<b>最初の竿で桟橋から届く所に 2 個以上</b></td><td class="l">スタート地点の近くに狙う目標がない</td></tr>
       </tbody>
       <tfoot><tr><td colspan="3" class="l">
-        「届く範囲」= 桟橋の先端と岸線 64 地点から、キャスト距離 7〜46 m・±43° の扇形。
-        ランダムなシード 300 個で <b>97% がそのまま合格</b>（落ちるのはほぼ「桟橋先端の水深」）。
-        不合格ならシードを +1 して再生成するため<b>すべて最終的に合格</b>します（平均 1.05 回の引き直し）。
+        「届く範囲」= 桟橋の先端と岸線 64 地点から、キャスト距離 4.5〜84 m・±43° の扇形（竿の cast 一覧の最大値・最小値を自動で使う）。
+        淵は<b>最初の竿では届かず、良い竿なら届く</b>帯に置くことで「竿を買い替える理由」を作っています。
+        <b>桟橋の先端は元々「そこだけで深場が狙える」構造物</b>（水深 6〜19m）なので、竹竿でも桟橋からわずかに投げるだけで
+        中層〜深場には届きますが、深淵(20m+)まで届いてしまう湖は 2% 程度に抑えています（詳しくは §6 参照）。<br>
+        ランダムなシード 300 個で <b>82% がそのまま合格</b>（落ちるのは主に「淵と藻場が近すぎる」）。
+        不合格ならシードを +1 して再生成するため<b>すべて最終的に合格</b>します（平均 1.2 回の引き直し・最大 40 回まで）。
       </td></tr></tfoot>
     </table></div>
 

@@ -90,7 +90,7 @@ export class Debug {
       row('#ffe08a', '歩ける限界 −0.55') + row('#c86bff', '淵') +
       row('#6de08a', '藻場') + row('#ffffff', 'プレイヤー r0.34') +
       row('#ff4dd2', 'エサ') + '</div>'
-      + '<div style="font-size:9px;opacity:.5;margin-top:3px">障害物は 48m 以内・等高線は 140m 以内のみ表示</div>';
+      + '<div style="font-size:9px;opacity:.5;margin-top:3px">障害物は 48m 以内・等高線は 140m 以内のみ表示<br>ON中は湖底まで歩ける（OFFで桟橋に戻る）</div>';
     function row(c, t) {
       return `<span class="dbg-lg"><i style="background:${c}"></i>${t}</span>`;
     }
@@ -301,8 +301,25 @@ export class Debug {
     const g = this.game;
     g.state.settings.debug = this.enabled;
     g.saveState();
+    // OFF 時に水中に残ると通常操作で動けなくなるので桟橋へ戻す
+    if (!this.enabled) {
+      const h = g.terrain.heightAt(g.pos.x, g.pos.z);
+      const onDock = g.terrain.onDock(g.pos.x, g.pos.z);
+      if (onDock === null && h < -0.55) {
+        const d = g.terrain.dockEnd;
+        g.pos.set(d.x, g.terrain.dockY, d.z);
+        g.visY = g.terrain.dockY;
+        g.angler.setPosition(g.pos.x, g.visY, g.pos.z);
+        g._setUnderwaterFx(false);
+      }
+    }
     if (g.ui) {
-      g.ui.toast(this.enabled ? `${iconHtml('ui-debug')} デバッグ表示 ON（F3 で切替）` : `${iconHtml('ui-debug')} デバッグ表示 OFF`, 'good');
+      g.ui.toast(
+        this.enabled
+          ? `${iconHtml('ui-debug')} デバッグ ON（水中も歩行可／F3 で切替）`
+          : `${iconHtml('ui-debug')} デバッグ表示 OFF`,
+        'good'
+      );
       const cb = document.getElementById('opt-debug');
       if (cb) cb.checked = this.enabled;
     }

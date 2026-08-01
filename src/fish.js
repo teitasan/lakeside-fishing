@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { clamp, clamp01, lerp, rand, smoothstep, TAU, damp } from './util.js';
 import { depthBandAt, colorsOf } from './data.js';
+import { textureTypeFor, fishTexture, FIN_UV } from './fishTextures.js';
 
 /** 見やすさのための視覚倍率（実寸だと小さすぎるため） */
 export const VIS_SCALE = 1.4;
@@ -25,9 +26,225 @@ export const BODY = {
   deep: { h: 0.40, w: 0.125, dorsal: 0.26, tail: 0.19, fork: 0.45 },
   wide: { h: 0.27, w: 0.16, dorsal: 0.19, tail: 0.20, fork: 0.40 },
   eel: { h: 0.17, w: 0.155, dorsal: 0.10, tail: 0.17, fork: 0.15 },
-  gar: { h: 0.155, w: 0.13, dorsal: 0.11, tail: 0.16, fork: 0.25 },
-  sturgeon: { h: 0.20, w: 0.16, dorsal: 0.14, tail: 0.22, fork: 0.60 },
+  gar: { h: 0.155, w: 0.13, dorsal: 0.11, tail: 0.12, fork: 0.18 },
+  sturgeon: { h: 0.20, w: 0.16, dorsal: 0.14, tail: 0.16, fork: 0.35 },
 };
+
+/* ===========================================================
+   種ごとの見た目（look）
+   shape の粗い体型に、ヒレ形・口・模様・ヒゲなどを上乗せする
+   =========================================================== */
+const LOOK_BASE = {
+  h: 1, w: 1, snout: 0,
+  eye: 1, eyeX: 0.355, eyeY: 0.13,
+  dorsalH: 1, dorsalX: 0.08, dorsalLen: 1, dorsalTip: 0.55,
+  analH: 1, pec: 1,
+  adipose: false, pelvic: true,
+  tail: 'fork', fork: null, tailLen: 1,
+  pattern: null,
+  whiskers: 0, whiskerLen: 1,
+  mouth: 'normal', // small | normal | wide | beak | up | sucker
+  cheek: false, lateral: 0, ribbon: false, scutes: false,
+  headFlat: 0, // ナマズ系の頭の扁平さ（体幅前方だけ広げる）
+};
+
+/** タグ・体型からの既定 look */
+function defaultLook(sp) {
+  const L = { ...LOOK_BASE };
+  const t = sp.tags || [];
+  if (t.includes('trout')) {
+    L.adipose = true;
+    L.pattern = 'spots';
+    L.tail = 'softfork';
+    L.h = 1.05;
+    L.dorsalH = 0.85;
+  }
+  if (t.includes('carp')) {
+    L.tail = 'fork';
+    L.dorsalH = 1.15;
+    L.dorsalLen = 1.35;
+    L.mouth = 'sucker';
+    L.whiskers = sp.shape === 'deep' || sp.shape === 'wide' ? 1 : 0;
+    L.pattern = 'none';
+  }
+  if (t.includes('predator') && !t.includes('trout')) {
+    L.pattern = L.pattern || 'blotch';
+    L.mouth = 'wide';
+    L.eye = 0.9;
+  }
+  if (sp.shape === 'eel') {
+    L.tail = 'round';
+    L.fork = 0.12;
+    L.pattern = L.pattern || 'mottle';
+    L.pelvic = false;
+  }
+  if (sp.shape === 'gar') {
+    L.snout = 1;
+    L.mouth = 'beak';
+    L.eyeX = 0.30;
+    L.dorsalX = -0.12;
+    L.pattern = 'none';
+  }
+  if (sp.shape === 'sturgeon') {
+    L.snout = 0.55;
+    L.tail = 'hetero';
+    L.scutes = true;
+    L.whiskers = 2;
+    L.whiskerLen = 0.55;
+    L.mouth = 'sucker';
+    L.eyeX = 0.28;
+    L.pattern = 'none';
+  }
+  if (sp.shape === 'deep') {
+    L.h = 1.08;
+    L.dorsalH = 1.2;
+  }
+  if (sp.rarity === 1 && !L.pattern) L.pattern = 'none';
+  return L;
+}
+
+/** 種 ID ごとの上書き（ここが「細かく分ける」本体） */
+const SPECIES_LOOK = {
+  medaka: {
+    h: 0.78, w: 0.85, eye: 1.55, eyeX: 0.38, eyeY: 0.22,
+    dorsalH: 0.55, dorsalLen: 0.7, analH: 0.55, pec: 0.7,
+    tail: 'softfork', fork: 0.7, pattern: 'none', mouth: 'small',
+  },
+  moroko: {
+    h: 0.88, w: 0.9, eye: 1.15, dorsalH: 0.75, dorsalLen: 0.85,
+    tail: 'fork', fork: 0.65, pattern: 'none', mouth: 'small',
+  },
+  bluegill: {
+    h: 1.22, w: 0.95, eye: 1.1, eyeX: 0.37,
+    dorsalH: 1.55, dorsalLen: 1.45, dorsalTip: 0.35, analH: 1.25,
+    tail: 'softfork', fork: 0.35, pattern: 'bars', cheek: true, mouth: 'small',
+  },
+  funa: {
+    h: 1.12, w: 1.05, eye: 0.95, dorsalH: 1.35, dorsalLen: 1.55,
+    tail: 'fork', fork: 0.4, pattern: 'none', mouth: 'sucker', whiskers: 0,
+  },
+  ugui: {
+    h: 0.95, w: 0.92, eye: 1.05, dorsalH: 0.9,
+    tail: 'fork', fork: 0.62, pattern: 'stripe', lateral: 0.55, mouth: 'normal',
+  },
+  dojo: {
+    h: 0.72, w: 0.95, snout: 0.15, eye: 0.7, eyeX: 0.34, eyeY: 0.08,
+    dorsalH: 0.45, dorsalLen: 0.9, analH: 0.5, pec: 0.55,
+    tail: 'round', fork: 0.08, pattern: 'mottle', whiskers: 3, whiskerLen: 0.55,
+    mouth: 'small', pelvic: false, headFlat: 0.15,
+  },
+  oikawa: {
+    h: 0.92, w: 0.88, eye: 1.1, dorsalH: 1.05, dorsalLen: 0.95,
+    tail: 'fork', fork: 0.68, pattern: 'none', mouth: 'small',
+  },
+  tanago: {
+    h: 1.28, w: 0.9, eye: 1.2, eyeX: 0.36,
+    dorsalH: 1.15, dorsalLen: 0.85, analH: 1.1, pec: 0.75,
+    tail: 'softfork', fork: 0.4, pattern: 'none', mouth: 'small',
+  },
+  rainbow: {
+    h: 1.02, w: 0.95, adipose: true, pattern: 'spots', lateral: 0.85,
+    dorsalH: 0.9, tail: 'softfork', fork: 0.55, mouth: 'normal',
+  },
+  bass: {
+    h: 1.15, w: 1.2, eye: 0.95, eyeX: 0.34,
+    dorsalH: 1.35, dorsalLen: 1.4, dorsalTip: 0.4, analH: 1.1, pec: 1.15,
+    tail: 'softfork', fork: 0.35, pattern: 'blotch', mouth: 'wide', headFlat: 0.2,
+  },
+  yamame: {
+    h: 1.0, w: 0.92, adipose: true, pattern: 'parr',
+    dorsalH: 0.85, tail: 'softfork', fork: 0.5, mouth: 'normal',
+  },
+  namazu: {
+    h: 0.85, w: 1.25, snout: 0.1, eye: 0.55, eyeX: 0.32, eyeY: 0.18,
+    dorsalH: 0.55, dorsalLen: 0.7, analH: 0.9, pec: 1.2,
+    tail: 'truncate', fork: 0.1, pattern: 'mottle', whiskers: 2, whiskerLen: 1.35,
+    mouth: 'wide', pelvic: false, headFlat: 0.55, ribbon: false,
+  },
+  koi: {
+    // wide 基準でやや胴長。deep+高背びれだと図鑑でも水中でも寸詰まりに見える
+    h: 1.2, w: 1.08, snout: 0.12, eye: 0.85, eyeX: 0.34,
+    dorsalH: 1.28, dorsalLen: 1.5, dorsalX: 0.06, analH: 0.95, pec: 1.05,
+    tail: 'fork', fork: 0.42, tailLen: 1.08,
+    pattern: 'none', mouth: 'sucker', whiskers: 1, whiskerLen: 0.75,
+  },
+  wakasagi: {
+    h: 0.7, w: 0.75, eye: 1.45, eyeX: 0.37, eyeY: 0.18,
+    dorsalH: 0.65, dorsalLen: 0.7, analH: 0.6, pec: 0.7,
+    tail: 'fork', fork: 0.82, tailLen: 1.15, pattern: 'none', mouth: 'small',
+  },
+  nigoi: {
+    h: 0.95, w: 0.95, snout: 0.35, eye: 0.9, eyeX: 0.33,
+    dorsalH: 1.05, dorsalLen: 1.2, tail: 'fork', fork: 0.5,
+    pattern: 'none', mouth: 'sucker',
+  },
+  hasu: {
+    h: 0.85, w: 0.85, snout: 0.2, eye: 1.15, eyeY: 0.2,
+    dorsalH: 0.9, tail: 'fork', fork: 0.7, pattern: 'none', mouth: 'up',
+  },
+  iwana: {
+    h: 1.05, w: 0.95, adipose: true, pattern: 'lightspots',
+    dorsalH: 0.9, tail: 'softfork', fork: 0.48, mouth: 'normal',
+  },
+  snakehead: {
+    h: 0.95, w: 1.1, snout: 0.2, eye: 0.85, eyeX: 0.33,
+    dorsalH: 1.1, dorsalLen: 1.7, dorsalX: 0.18, analH: 1.05, pec: 0.9,
+    tail: 'round', fork: 0.12, pattern: 'mottle', mouth: 'wide',
+    pelvic: true, headFlat: 0.25, whiskers: 0,
+  },
+  grasscarp: {
+    h: 0.92, w: 1.0, snout: 0.15, eye: 0.85, eyeX: 0.34,
+    dorsalH: 0.95, dorsalLen: 1.1, tail: 'fork', fork: 0.45,
+    pattern: 'none', mouth: 'sucker', whiskers: 0,
+  },
+  biwatrout: {
+    h: 1.0, w: 0.92, adipose: true, pattern: 'spots', lateral: 0.4,
+    dorsalH: 0.88, tail: 'softfork', fork: 0.55, mouth: 'normal',
+  },
+  unagi: {
+    h: 0.65, w: 0.9, snout: 0.08, eye: 0.55, eyeX: 0.36, eyeY: 0.1,
+    dorsalH: 0.35, analH: 0.35, pec: 0.45,
+    tail: 'ribbon', fork: 0.05, pattern: 'none', mouth: 'small',
+    whiskers: 0, pelvic: false, ribbon: true, headFlat: 0.1,
+  },
+  sakuramasu: {
+    h: 1.02, w: 0.94, adipose: true, pattern: 'spots', lateral: 0.5,
+    dorsalH: 0.9, tail: 'softfork', fork: 0.58, mouth: 'normal',
+  },
+  aouo: {
+    h: 1.2, w: 1.35, eye: 0.7, eyeX: 0.33,
+    dorsalH: 1.1, dorsalLen: 1.25, pec: 1.2,
+    tail: 'fork', fork: 0.32, pattern: 'none', mouth: 'sucker', headFlat: 0.15,
+  },
+  sturgeon: {
+    h: 0.95, w: 1.1, snout: 0.6, eye: 0.65, eyeX: 0.27, eyeY: 0.08,
+    dorsalH: 0.7, dorsalX: -0.08, dorsalLen: 0.75,
+    tail: 'hetero', fork: 0.35, tailLen: 0.75, pattern: 'none', scutes: true,
+    whiskers: 2, whiskerLen: 0.5, mouth: 'sucker', pelvic: true,
+  },
+  gar: {
+    h: 0.9, w: 0.95, snout: 1.15, eye: 0.75, eyeX: 0.29, eyeY: 0.1,
+    dorsalH: 0.7, dorsalX: -0.18, dorsalLen: 0.75, analH: 0.75,
+    tail: 'round', fork: 0.12, tailLen: 0.55, pattern: 'none', mouth: 'beak',
+  },
+  nushi: {
+    h: 0.95, w: 1.4, snout: 0.12, eye: 0.45, eyeX: 0.30, eyeY: 0.2,
+    dorsalH: 0.5, dorsalLen: 0.65, analH: 1.0, pec: 1.35,
+    tail: 'truncate', fork: 0.08, pattern: 'mottle',
+    whiskers: 2, whiskerLen: 1.6, mouth: 'wide', pelvic: false, headFlat: 0.7,
+  },
+  itou: {
+    h: 1.12, w: 1.05, adipose: true, pattern: 'spots', lateral: 0.25,
+    dorsalH: 1.0, dorsalLen: 1.05, pec: 1.1, analH: 1.05,
+    tail: 'softfork', fork: 0.5, tailLen: 1.1, mouth: 'wide', eye: 0.85,
+  },
+};
+
+/** 完成した look（3D・図鑑アイコン共通） */
+export function lookOf(sp) {
+  if (!sp) return { ...LOOK_BASE };
+  return { ...defaultLook(sp), ...(SPECIES_LOOK[sp.id] || {}) };
+}
 
 export function profileAt(list, t) {
   for (let i = 0; i < list.length - 1; i++) {
@@ -40,23 +257,63 @@ export function profileAt(list, t) {
   return list[list.length - 1][1];
 }
 
+/** ヒレ等：テクスチャの明るい腹側をサンプリング（模様をほぼ乗せるな） */
+function setFinUV(geo) {
+  const n = geo.attributes.position.count;
+  const uv = new Float32Array(n * 2);
+  for (let i = 0; i < n; i++) {
+    uv[i * 2] = FIN_UV.u;
+    uv[i * 2 + 1] = FIN_UV.v;
+  }
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  return geo;
+}
+
+/** 胴体：U=尾→頭、V=腹→背（画像は上が背・下が腹。図鑑 2D と同じ向き） */
+function setBodyUV(geo, bodyLen, H) {
+  const p = geo.attributes.position;
+  const uv = new Float32Array(p.count * 2);
+  const h = Math.max(1e-6, H);
+  const len = Math.max(1e-6, bodyLen);
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i);
+    const y = p.getY(i);
+    // 円周成分を混ぜると横帯がねじれるので、頭尾×背腹だけにする
+    // flipY=true 時 v=1 が画像上端（背）になる
+    uv[i * 2] = clamp01(x / len + 0.5);
+    uv[i * 2 + 1] = clamp01(y / h + 0.5);
+  }
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  return geo;
+}
+
 /* ---------------- ジオメトリ結合（addons 不要の簡易版） ---------------- */
 function mergeGeos(list) {
-  const geos = list.map((g) => (g.index ? g.toNonIndexed() : g));
+  const geos = list.map((g) => {
+    if (!g.attributes.uv) setFinUV(g);
+    return g.index ? g.toNonIndexed() : g;
+  });
   let total = 0;
   for (const g of geos) total += g.attributes.position.count;
   const pos = new Float32Array(total * 3);
   const nor = new Float32Array(total * 3);
   const col = new Float32Array(total * 3);
+  const uvs = new Float32Array(total * 2);
   let o = 0;
   for (const g of geos) {
     const p = g.attributes.position;
     const n = g.attributes.normal;
     const c = g.attributes.color;
+    const u = g.attributes.uv;
     pos.set(p.array.subarray(0, p.count * 3), o * 3);
     if (n) nor.set(n.array.subarray(0, p.count * 3), o * 3);
     if (c) col.set(c.array.subarray(0, p.count * 3), o * 3);
     else col.fill(1, o * 3, (o + p.count) * 3);
+    if (u) uvs.set(u.array.subarray(0, p.count * 2), o * 2);
+    else for (let i = 0; i < p.count; i++) {
+      uvs[(o + i) * 2] = FIN_UV.u;
+      uvs[(o + i) * 2 + 1] = FIN_UV.v;
+    }
     o += p.count;
     g.dispose();
   }
@@ -64,6 +321,7 @@ function mergeGeos(list) {
   out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
   out.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  out.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
   return out;
 }
 
@@ -91,7 +349,7 @@ function finGeo(points) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(verts), 3));
   g.computeVertexNormals();
-  return g;
+  return setFinUV(g);
 }
 
 const hash3 = (x, y, z) => {
@@ -99,131 +357,377 @@ const hash3 = (x, y, z) => {
   return s - Math.floor(s);
 };
 
+/** 模様を頂点色に載せる */
+function applyPattern(c, pattern, tx, v, x, y, z, top, mid, albino) {
+  if (albino || !pattern || pattern === 'none') return;
+  if (pattern === 'spots') {
+    const h = hash3(Math.floor(x * 200), Math.floor(y * 200), Math.floor(z * 100));
+    if (h > 0.91 && v > 0.32) c.multiplyScalar(0.52);
+    else if (h > 0.87 && v > 0.48) c.lerp(top, 0.45);
+  } else if (pattern === 'lightspots') {
+    // イワナ：暗い地に白い斑点
+    const h = hash3(Math.floor(x * 170), Math.floor(y * 170), Math.floor(z * 80));
+    if (h > 0.88 && v > 0.28) c.lerp(new THREE.Color('#f2efe4'), 0.72);
+  } else if (pattern === 'parr') {
+    // ヤマメ：パーマーク（縦長の楕円斑）
+    const slot = Math.floor(tx * 9);
+    const cx = (slot + 0.5) / 9;
+    const dx = (tx - cx) * 14;
+    const dy = (v - 0.52) * 5;
+    if (dx * dx + dy * dy < 0.55 && tx > 0.18 && tx < 0.78) c.multiplyScalar(0.55);
+  } else if (pattern === 'stripe') {
+    if (Math.abs(v - 0.52) < 0.08 + Math.sin(tx * 18) * 0.02) c.multiplyScalar(0.48);
+  } else if (pattern === 'bars') {
+    const b = Math.sin(tx * 28) * 0.5 + 0.5;
+    if (b > 0.76 && v > 0.35) c.multiplyScalar(0.68);
+  } else if (pattern === 'blotch') {
+    const h = hash3(Math.floor(tx * 14), Math.floor(v * 8), 3);
+    if (h > 0.62 && v > 0.3 && v < 0.85) c.lerp(top, 0.55).multiplyScalar(0.75);
+  } else if (pattern === 'mottle') {
+    const h = hash3(Math.floor(x * 90), Math.floor(y * 70), Math.floor(z * 60));
+    if (h > 0.55) c.lerp(top, 0.35 + (h - 0.55) * 0.5);
+  }
+}
+
+/** 尾びれの点列（種類別） */
+function tailPoints(kind, fork, baseX, tl, th) {
+  if (kind === 'ribbon') {
+    return [
+      [baseX, th * 0.35],
+      [baseX - tl * 0.55, th * 0.15],
+      [baseX - tl * 0.7, 0],
+      [baseX - tl * 0.55, -th * 0.15],
+      [baseX, -th * 0.35],
+    ];
+  }
+  if (kind === 'round') {
+    return [
+      [baseX, th * 0.12],
+      [baseX - tl * 0.45, th * 0.62],
+      [baseX - tl * 0.85, th * 0.28],
+      [baseX - tl * 0.95, 0],
+      [baseX - tl * 0.85, -th * 0.28],
+      [baseX - tl * 0.45, -th * 0.62],
+      [baseX, -th * 0.12],
+    ];
+  }
+  if (kind === 'truncate') {
+    return [
+      [baseX, th * 0.2],
+      [baseX - tl * 0.85, th * 0.75],
+      [baseX - tl, th * 0.55],
+      [baseX - tl, -th * 0.55],
+      [baseX - tl * 0.85, -th * 0.75],
+      [baseX, -th * 0.2],
+    ];
+  }
+  if (kind === 'hetero') {
+    // チョウザメ：上葉が胴の延長、下葉は短い（旧座標は帆のように巨大化していた）
+    return [
+      [baseX, th * 0.12],
+      [baseX - tl * 0.22, th * 0.42],
+      [baseX - tl * 0.9, th * 0.62],
+      [baseX - tl * 0.45, th * 0.08],
+      [baseX - tl * 0.55, -th * 0.32],
+      [baseX - tl * 0.18, -th * 0.18],
+      [baseX, -th * 0.06],
+    ];
+  }
+  // fork / softfork
+  const notch = kind === 'softfork' ? 0.45 : 0.62;
+  const inset = tl * (1 - fork * notch);
+  return [
+    [baseX, th * 0.08],
+    [baseX - tl, th],
+    [baseX - inset, 0],
+    [baseX - tl, -th],
+    [baseX, -th * 0.08],
+  ];
+}
+
 /* ===========================================================
    魚メッシュ生成
    =========================================================== */
 export function createFishGeometry(sp, opts = {}) {
   const albino = !!opts.albino;
+  const L = lookOf(sp);
   const lenM = (sp.len[1] * 0.85) / 100 * VIS_SCALE; // 代表サイズで作り、後でスケール
   const shape = PROFILES[sp.shape] ? sp.shape : 'slim';
   const B = BODY[shape];
   const prof = PROFILES[shape];
-  const H = lenM * B.h, Wd = lenM * B.w;
+  const H = lenM * B.h * L.h;
+  const Wd = lenM * B.w * L.w;
+  const fork = L.fork != null ? L.fork : B.fork;
 
-  /* --- 胴体（回転体） --- */
-  const N = 20;
+  /* --- 胴体（回転体）。snout で口先を伸ばし、headFlat で頭を扁平に --- */
+  const N = 22;
   const pts = [];
   for (let i = 0; i <= N; i++) {
     const t = i / N;
-    pts.push(new THREE.Vector2(Math.max(0.004, profileAt(prof, t) * 0.5), t - 0.5));
+    let r = profileAt(prof, t) * 0.5;
+    // 口先：プロファイルを前方へ引き伸ばす
+    if (L.snout > 0 && t > 0.78) {
+      const k = smoothstep(0.78, 1, t);
+      r = lerp(r, r * (0.35 + 0.2 * (1 - L.snout)), k * L.snout);
+    }
+    pts.push(new THREE.Vector2(Math.max(0.003, r), t - 0.5));
   }
-  const body = new THREE.LatheGeometry(pts, 14);
+  const body = new THREE.LatheGeometry(pts, 16);
   body.rotateZ(-Math.PI / 2);
-  body.scale(lenM, H, Wd);
+  // snout 分だけ全体を +X に伸ばす（頭側）
+  const snoutStretch = 1 + L.snout * 0.28;
+  body.scale(lenM * snoutStretch, H, Wd);
+  if (L.headFlat > 0) {
+    // 頭側の頂点だけ横に広げて扁平な頭にする
+    const pos = body.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const t = x / (lenM * snoutStretch) + 0.5;
+      if (t > 0.55) {
+        const k = smoothstep(0.55, 0.95, t) * L.headFlat;
+        pos.setZ(i, pos.getZ(i) * (1 + k * 0.85));
+        pos.setY(i, pos.getY(i) * (1 - k * 0.35));
+      }
+    }
+    pos.needsUpdate = true;
+    body.computeVertexNormals();
+  }
 
   const cols = colorsOf(sp, albino);
   const top = new THREE.Color(cols.top);
   const mid = new THREE.Color(cols.mid);
   const belly = new THREE.Color(cols.belly);
   const finC = new THREE.Color(cols.fin);
-  const pattern = albino ? 'none'
-    : sp.rarity >= 2 ? (sp.tags.includes('trout') ? 'spots' : sp.tags.includes('predator') ? 'stripe' : 'bars') : 'none';
+  const bodyLen = lenM * snoutStretch;
+  const texType = textureTypeFor(sp, L, albino);
+  // AI テクスチャがある種は頂点色を薄いティントにし、map の色を優先する
+  const pattern = albino || texType ? 'none' : (L.pattern || 'none');
 
   paint(body, (x, y, z, c) => {
     const v = clamp01((y / (H * 0.5) + 1) * 0.5); // 0=腹 1=背
     if (v > 0.62) c.copy(mid).lerp(top, smoothstep(0.62, 1.0, v));
     else c.copy(belly).lerp(mid, smoothstep(0.1, 0.62, v));
 
-    const tx = x / lenM + 0.5; // 0=尾 1=頭
-    if (pattern === 'spots') {
-      const h = hash3(Math.floor(x * 190), Math.floor(y * 190), Math.floor(z * 90));
-      if (h > 0.9 && v > 0.35) c.multiplyScalar(0.55);
-      else if (h > 0.86 && v > 0.5) c.lerp(top, 0.5);
-    } else if (pattern === 'stripe') {
-      const band = Math.abs(v - 0.55) < 0.09 + Math.sin(tx * 22) * 0.025;
-      if (band) c.multiplyScalar(0.5);
-    } else if (pattern === 'bars') {
-      const b = Math.sin(tx * 26) * 0.5 + 0.5;
-      if (b > 0.78 && v > 0.4) c.multiplyScalar(0.72);
+    const tx = clamp01(x / bodyLen + 0.5); // 0=尾 1=頭
+    if (texType) {
+      // テクスチャのアルベドを活かす（白に寄せた薄い種色）
+      c.lerp(new THREE.Color('#f2f0ea'), 0.72);
+    } else {
+      applyPattern(c, pattern, tx, v, x, y, z, top, mid, albino);
+      if (!albino && L.lateral > 0 && Math.abs(v - 0.48) < 0.07) {
+        c.lerp(finC, L.lateral * 0.85);
+      }
     }
-    // 口元を暗く
-    if (tx > 0.955) c.multiplyScalar(albino ? 0.82 : 0.5);
+    // ブルーギルのエラ蓋斑
+    if (!albino && L.cheek && tx > 0.78 && tx < 0.9 && v > 0.35 && v < 0.7 && Math.abs(z) > Wd * 0.25) {
+      c.setRGB(0.12, 0.1, 0.18);
+    }
+    // 口の形で先端の影を変える
+    const mouthDark = L.mouth === 'wide' || L.mouth === 'beak' ? 0.92 : 0.96;
+    if (tx > mouthDark) c.multiplyScalar(albino ? 0.85 : (L.mouth === 'beak' ? 0.4 : 0.55));
   });
+  setBodyUV(body, bodyLen, H);
+
+  /* 胴の輪郭上の高さ・幅（吻ストレッチ後の bodyLen 基準）。
+     ヒレを lenM 固定座標で置くとチョウザメ／ガー等で胴から浮く */
+  const bodyRadAt = (x) => {
+    const t = clamp01(x / bodyLen + 0.5);
+    let r = profileAt(prof, t);
+    if (L.snout > 0 && t > 0.78) {
+      const k = smoothstep(0.78, 1, t);
+      r = lerp(r, r * (0.35 + 0.2 * (1 - L.snout)), k * L.snout);
+    }
+    return r * 0.5; // Lathe の正規化半径
+  };
+  const bodyYAt = (x) => bodyRadAt(x) * H;
+  const bodyZAt = (x) => bodyRadAt(x) * Wd;
 
   const parts = [body];
 
+  /* --- チョウザメの硬鱗列（控えめな骨板） --- */
+  if (L.scutes && !albino) {
+    for (let i = 0; i < 7; i++) {
+      const t = 0.18 + i * 0.1;
+      const x = (t - 0.5) * bodyLen;
+      const sc = new THREE.ConeGeometry(bodyLen * 0.007, bodyLen * 0.014, 5);
+      sc.translate(0, bodyLen * 0.007, 0);
+      sc.translate(x, bodyYAt(x) * 0.94, 0);
+      parts.push(paint(sc, (x, y, z, c) => c.copy(top).lerp(mid, 0.3).multiplyScalar(0.85)));
+    }
+  }
+
   /* --- 尾びれ --- */
-  const tl = lenM * B.tail, th = H * (0.75 + B.fork * 0.7) + lenM * 0.03;
-  const tail = finGeo([
-    [-lenM * 0.47, 0],
-    [-lenM * 0.47 - tl, th],
-    [-lenM * 0.47 - tl * (1 - B.fork * 0.6), 0],
-    [-lenM * 0.47 - tl, -th],
-  ]);
+  const hetero = L.tail === 'hetero';
+  const roundTail = L.tail === 'round';
+  // 長い胴（ガー等）で bodyLen 比例が効きすぎないよう丸尾・歪尾は抑える
+  const tl = bodyLen * B.tail * L.tailLen * (hetero ? 0.85 : roundTail ? 0.62 : 1);
+  const th = hetero
+    ? H * (0.7 + fork * 0.35) + bodyLen * 0.012
+    : roundTail
+      ? H * (0.55 + fork * 0.35) + bodyLen * 0.006
+      : H * (0.72 + fork * 0.7) + bodyLen * 0.025;
+  const baseX = -bodyLen * 0.48;
+  const tail = finGeo(tailPoints(L.tail, fork, baseX, tl, th));
   parts.push(paint(tail, (x, y, z, c) => {
-    c.copy(finC).multiplyScalar(0.75 + 0.25 * clamp01(1 - Math.abs(y) / th));
+    c.copy(finC).multiplyScalar(0.72 + 0.28 * clamp01(1 - Math.abs(y) / Math.max(1e-3, th)));
   }));
 
-  /* --- 背びれ --- */
-  const dh = H * B.dorsal * 3.0;
-  const dorsal = finGeo([
-    [lenM * 0.12, H * 0.48],
-    [-lenM * 0.02, H * 0.48 + dh],
-    [-lenM * 0.16, H * 0.46],
-  ]);
-  parts.push(paint(dorsal, (x, y, z, c) => c.copy(finC).multiplyScalar(0.9)));
+  /* --- 背びれ（ウナギは長いリボン） --- */
+  if (L.ribbon) {
+    const rx = [0.25, 0.05, -0.35, -0.45].map((f) => bodyLen * f);
+    const ribbon = finGeo([
+      [rx[0], bodyYAt(rx[0]) * 0.95],
+      [rx[1], bodyYAt(rx[1]) * 0.95 + H * 0.22],
+      [rx[2], bodyYAt(rx[2]) * 0.9 + H * 0.18],
+      [rx[3], bodyYAt(rx[3]) * 0.85],
+    ]);
+    parts.push(paint(ribbon, (x, y, z, c) => c.copy(finC).multiplyScalar(0.85)));
+    const bx = [0.1, -0.1, -0.4, -0.45].map((f) => bodyLen * f);
+    const bellyR = finGeo([
+      [bx[0], -bodyYAt(bx[0]) * 0.9],
+      [bx[1], -bodyYAt(bx[1]) * 0.9 - H * 0.2],
+      [bx[2], -bodyYAt(bx[2]) * 0.85 - H * 0.16],
+      [bx[3], -bodyYAt(bx[3]) * 0.7],
+    ]);
+    parts.push(paint(bellyR, (x, y, z, c) => c.copy(finC).multiplyScalar(0.8)));
+  } else {
+    const dh = H * B.dorsal * 2.8 * L.dorsalH;
+    const dx = L.dorsalX;
+    const dLen = 0.14 * L.dorsalLen;
+    const tipT = L.dorsalTip;
+    const x0 = bodyLen * (dx + dLen * 0.55);
+    const x1 = bodyLen * (dx + dLen * (0.55 - tipT));
+    const x2 = bodyLen * (dx - dLen * 0.55);
+    const y0 = bodyYAt(x0) * 0.98;
+    const y2 = bodyYAt(x2) * 0.98;
+    const dorsal = finGeo([
+      [x0, y0],
+      [x1, Math.max(y0, y2) + dh],
+      [x2, y2],
+    ]);
+    parts.push(paint(dorsal, (x, y, z, c) => c.copy(finC).multiplyScalar(0.9)));
 
-  /* --- 尻びれ --- */
-  const anal = finGeo([
-    [-lenM * 0.1, -H * 0.44],
-    [-lenM * 0.22, -H * 0.44 - dh * 0.55],
-    [-lenM * 0.3, -H * 0.42],
-  ]);
-  parts.push(paint(anal, (x, y, z, c) => c.copy(finC).multiplyScalar(0.8)));
+    /* --- 尻びれ --- */
+    const ah = dh * 0.55 * L.analH;
+    const ax0 = -bodyLen * 0.08;
+    const ax1 = -bodyLen * 0.20;
+    const ax2 = -bodyLen * 0.30;
+    const anal = finGeo([
+      [ax0, -bodyYAt(ax0) * 0.95],
+      [ax1, -bodyYAt(ax1) * 0.95 - ah],
+      [ax2, -bodyYAt(ax2) * 0.95],
+    ]);
+    parts.push(paint(anal, (x, y, z, c) => c.copy(finC).multiplyScalar(0.8)));
+
+    /* --- 脂びれ（鱒） --- */
+    if (L.adipose) {
+      const ad0 = -bodyLen * 0.22;
+      const ad1 = -bodyLen * 0.28;
+      const ad2 = -bodyLen * 0.34;
+      const ad = finGeo([
+        [ad0, bodyYAt(ad0) * 0.98],
+        [ad1, bodyYAt(ad1) * 0.98 + H * 0.16],
+        [ad2, bodyYAt(ad2) * 0.98],
+      ]);
+      parts.push(paint(ad, (x, y, z, c) => c.copy(finC).multiplyScalar(0.95)));
+    }
+  }
+
+  /* --- 腹びれ --- */
+  if (L.pelvic) {
+    for (const s of [1, -1]) {
+      const px0 = -bodyLen * 0.02;
+      const px1 = -bodyLen * 0.12;
+      const px2 = -bodyLen * 0.16;
+      const py = -bodyYAt(px0) * 0.35;
+      const pel = finGeo([
+        [px0, py],
+        [px1, py - H * 0.28],
+        [px2, py + H * 0.02],
+      ]);
+      pel.rotateX(s * 0.85);
+      pel.translate(0, 0, s * bodyZAt(px0) * 0.85);
+      parts.push(paint(pel, (x, y, z, c) => c.copy(finC).multiplyScalar(0.88)));
+    }
+  }
 
   /* --- 胸びれ（左右） --- */
   for (const s of [1, -1]) {
+    const ps = L.pec;
+    const px = bodyLen * 0.22;
+    const py = -bodyYAt(px) * 0.12;
     const pec = finGeo([
-      [lenM * 0.2, -H * 0.05],
-      [lenM * 0.04, -H * 0.42],
-      [lenM * 0.02, -H * 0.02],
+      [px, py],
+      [px - bodyLen * 0.18 * ps, py - H * 0.38 * ps],
+      [px - bodyLen * 0.2 * ps, py + H * 0.02],
     ]);
-    pec.rotateX(s * 1.15);
-    pec.translate(0, 0, s * Wd * 0.42);
+    pec.rotateX(s * (L.mouth === 'wide' ? 1.35 : 1.15));
+    pec.translate(0, 0, s * bodyZAt(px) * 0.9);
     parts.push(paint(pec, (x, y, z, c) => c.copy(finC).multiplyScalar(0.95)));
   }
 
+  /* --- 口の張り出し（バス・ガーなど） --- */
+  if (L.mouth === 'wide' || L.mouth === 'beak') {
+    const jawLen = lenM * (L.mouth === 'beak' ? 0.22 + L.snout * 0.12 : 0.1);
+    const jaw = new THREE.ConeGeometry(H * (L.mouth === 'beak' ? 0.12 : 0.18), jawLen, 6);
+    jaw.rotateZ(-Math.PI / 2);
+    jaw.translate(bodyLen * 0.48 + jawLen * 0.15, -H * 0.06, 0);
+    if (L.mouth === 'beak') jaw.scale(1, 0.55, 0.55);
+    parts.push(paint(jaw, (x, y, z, c) => c.copy(mid).multiplyScalar(albino ? 0.95 : 0.55)));
+  } else if (L.mouth === 'up') {
+    // ハス：上向きの口
+    const jaw = new THREE.ConeGeometry(H * 0.1, lenM * 0.08, 5);
+    jaw.rotateZ(-Math.PI / 2);
+    jaw.rotateZ(-0.45);
+    jaw.translate(bodyLen * 0.48, H * 0.05, 0);
+    parts.push(paint(jaw, (x, y, z, c) => c.copy(belly).multiplyScalar(0.9)));
+  } else if (L.mouth === 'sucker') {
+    const lip = new THREE.TorusGeometry(H * 0.09, H * 0.035, 5, 10);
+    lip.rotateY(Math.PI / 2);
+    lip.translate(bodyLen * 0.48, -H * 0.08, 0);
+    parts.push(paint(lip, (x, y, z, c) => c.copy(belly).multiplyScalar(0.85)));
+  }
+
   /* --- 目 --- */
-  const eyeR = Math.max(lenM * 0.012, H * 0.13);
+  const eyeR = Math.max(lenM * 0.01, H * 0.12 * L.eye);
   for (const s of [1, -1]) {
+    const ex = bodyLen * L.eyeX;
+    const ey = H * L.eyeY;
+    const ez = Wd * (0.38 + L.headFlat * 0.15);
     const eye = new THREE.SphereGeometry(eyeR, 8, 6);
-    eye.translate(lenM * (shape === 'gar' ? 0.30 : 0.355), H * 0.13, s * Wd * 0.42);
+    eye.translate(ex, ey, s * ez);
     parts.push(paint(eye, (x, y, z, c) => {
-      const front = z * s > Wd * 0.44;
+      const front = z * s > ez * 0.95;
       if (albino) c.setRGB(front ? 0.72 : 0.95, front ? 0.08 : 0.35, front ? 0.12 : 0.38);
       else c.setRGB(front ? 0.03 : 0.5, front ? 0.03 : 0.45, front ? 0.05 : 0.4);
     }));
-    const glint = new THREE.SphereGeometry(eyeR * 0.42, 6, 4);
-    glint.translate(lenM * (shape === 'gar' ? 0.31 : 0.365), H * 0.19, s * Wd * 0.5);
+    const glint = new THREE.SphereGeometry(eyeR * 0.4, 6, 4);
+    glint.translate(ex + lenM * 0.008, ey + eyeR * 0.35, s * (ez + eyeR * 0.35));
     parts.push(paint(glint, (x, y, z, c) => c.setRGB(1, 1, 1)));
   }
 
-  /* --- ヒゲ（ナマズ類） --- */
-  if (shape === 'eel') {
+  /* --- ヒゲ --- */
+  if (L.whiskers > 0) {
     for (const s of [1, -1]) {
-      for (let k = 0; k < 2; k++) {
-        const wl = lenM * (k === 0 ? 0.3 : 0.16);
-        const bar = new THREE.CylinderGeometry(lenM * 0.006, lenM * 0.002, wl, 4);
-        bar.rotateZ(Math.PI / 2);
-        bar.rotateY(s * (0.5 + k * 0.35));
-        bar.translate(lenM * 0.46, k === 0 ? H * 0.05 : -H * 0.2, s * Wd * 0.25);
-        parts.push(paint(bar, (x, y, z, c) => c.copy(mid).multiplyScalar(0.85)));
+      for (let k = 0; k < L.whiskers; k++) {
+        const wl = lenM * (0.14 + (L.whiskers - k) * 0.08) * L.whiskerLen;
+        const bar = new THREE.CylinderGeometry(lenM * 0.005, lenM * 0.0018, wl, 4);
+        bar.rotateZ(Math.PI / 2 + (k - 1) * 0.25);
+        bar.rotateY(s * (0.35 + k * 0.28));
+        bar.translate(
+          bodyLen * (0.44 + L.snout * 0.05),
+          H * (0.08 - k * 0.14),
+          s * Wd * (0.22 + L.headFlat * 0.15)
+        );
+        parts.push(paint(bar, (x, y, z, c) => c.copy(mid).multiplyScalar(0.82)));
       }
     }
   }
 
   const geo = mergeGeos(parts);
-  geo.userData.baseLength = lenM;
+  geo.userData.baseLength = bodyLen;
+  geo.userData.look = L;
+  geo.userData.texType = texType;
   return geo;
 }
 
@@ -438,7 +942,7 @@ export function createFishMaterial(shiny = 0.35) {
     uBend: { value: 0 },
   };
   mat.userData.u = u;
-  mat.customProgramCacheKey = () => 'fish-wiggle-v1';
+  mat.customProgramCacheKey = () => 'fish-wiggle-v2-tex';
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, u);
     shader.vertexShader =
@@ -509,6 +1013,14 @@ export class Fish {
     const s = sp.rarity === 0 ? 1 : want / base;
     this.mesh.scale.setScalar(s);
     this.mesh.material.userData.u.uLen.value = base;
+    // AI 生成テクスチャを map に載せる（種タイプごと。未ロードなら頂点色のみ）
+    const texType = geo.userData.texType || textureTypeFor(sp, lookOf(sp), this.albino);
+    const mat = this.mesh.material;
+    const map = texType ? fishTexture(texType) : null;
+    if (mat.map !== map) {
+      mat.map = map;
+      mat.needsUpdate = true;
+    }
     this.mesh.visible = true;
     this.active = true;
     this.pos.copy(pos);

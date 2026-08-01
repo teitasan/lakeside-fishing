@@ -8,19 +8,27 @@
      - キャストで届く範囲に、全魚種の生息層が必ず存在する
    =========================================================== */
 import { makeNoise2D, makeRng, clamp, clamp01, smoothstep, TAU } from './util.js';
-import { REAL_FISH, depthFit } from './data.js';
+import { REAL_FISH, depthFit, RODS } from './data.js';
 
 export const WORLD_SIZE = 1000;    // 地形メッシュの一辺
 export const WATER_REGION = 440;   // 水面メッシュ & 高さテクスチャの一辺
 export const MAX_DEPTH = 26;       // 湖心の水深
 
-/* プレイヤーが狙える距離（キャストの実効範囲 m） */
+/* プレイヤーが狙える距離（キャストの実効範囲 m）。竿の飛距離から決まる
+   CAST_MAX   一番飛ぶ竿。ここまでに全魚種の生息層があることを保証する
+   CAST_START 最初の竿。スタート地点の近さと、淵の「遠さ」の基準
+   最初の竿で湖のすべてに手が届いてしまうと竿を買い替える理由がないので、
+   深い淵は CAST_START の外・CAST_MAX の内側に置く */
 export const CAST_MIN = 4.5;
-export const CAST_MAX = 46;
+export const CAST_MAX = Math.max(...RODS.map((r) => r.cast));
+export const CAST_START = Math.min(...RODS.map((r) => r.cast));
 
 /* 地形フィーチャの目標値 */
 const HOLE_TARGET_DEPTH = 24.0;    // 深い淵の水深（レジェンドの層）
 const HOLE_RADIUS = 30;
+/* 淵を桟橋の先端から離す距離。最初の竿では届かず、中位の竿で届くところ */
+const HOLE_DOCK_MIN = CAST_START + 14;
+const HOLE_DOCK_MAX = CAST_MAX - 16;
 const FLAT_TARGET_DEPTH = 2.5;     // 藻場の水深（浅場の魚の層）
 const FLAT_RADIUS = 30;
 const FLAT_MIN_DEPTH = 1.2;        // 藻場でもこれ以上は必ず水を残す
@@ -133,8 +141,9 @@ export function makeLake(seed) {
   const dockCos = Math.cos(dockAngle), dockSin = Math.sin(dockAngle);
   const baseShoreDock = crossing(dockAngle, baseHeight);
 
-  /* ---------- 深い淵（レジェンドの層を保証する） ----------
-     1 つ目は桟橋からキャストで届く所に置く（詰み防止）。
+  /* ---------- 深い淵（レジェンドの層） ----------
+     1 つ目は桟橋の正面、HOLE_DOCK_MIN〜MAX の帯に置く。
+     最初の竿では届かず、竿を伸ばすと届くようになる＝買い替えの目標。
      残りは湖のどこかに散らす（「なんでもない水域」を減らす） */
   const holes = [];
   const flats = [];
@@ -144,27 +153,31 @@ export function makeLake(seed) {
 
   const holeSign = rng() < 0.5 ? -1 : 1;
   {
-    // 桟橋から届く扇の中で、掘って 24m にできる（元が深すぎず浅すぎない）所を探す
-    let best = null;
-    for (let i = 0; i < 18; i++) {
-      const holeAngle = dockAngle + holeSign * (0.13 + (i % 6) * 0.032 + rng() * 0.03);
-      const holeInset = 26 + Math.floor(i / 6) * 5 + rng() * 5;
+    /* 桟橋の先端（この時点では概算）から沖へ、狙いの帯の中で
+       掘って 24m にできる（元が深すぎず浅すぎない）所を探す */
+    const tipR = Math.max(baseShoreDock * 0.35, baseShoreDock - DOCK_LENGTH);
+    const tipX = dockCos * tipR, tipZ = dockSin * tipR;
+    const outward = dockAngle + Math.PI;              // 岸 → 湖心
+    /** 先端から dist・左右 spread の位置を評価する */
+    const probe = (dist, spread) => {
+      const a = outward + spread;
+      const x = tipX + Math.cos(a) * dist, z = tipZ + Math.sin(a) * dist;
+      const holeAngle = Math.atan2(z, x);
       const holeShore = crossing(holeAngle, baseHeight);
-      const holeR = Math.max(holeShore * 0.35, holeShore - holeInset);
-      const x = Math.cos(holeAngle) * holeR, z = Math.sin(holeAngle) * holeR;
+      const inset = holeShore - Math.hypot(x, z);
       const base = -baseHeight(x, z);
-      const sc = -Math.abs(base - 13);
-      if (base >= 5 && base <= 24 && (!best || sc > best.sc)) {
-        best = { sc, x, z, angle: holeAngle, inset: holeShore - holeR, base };
-      }
+      return { x, z, angle: holeAngle, inset, base, dist };
+    };
+    let best = null;
+    for (let i = 0; i < 24; i++) {
+      const dist = HOLE_DOCK_MIN + ((i % 8) / 7) * (HOLE_DOCK_MAX - HOLE_DOCK_MIN);
+      const spread = holeSign * (0.10 + Math.floor(i / 8) * 0.16 + rng() * 0.06);
+      const c = probe(dist, spread);
+      // 岸から十分内側で、掘れば淵になる水深であること
+      c.sc = -Math.abs(c.base - 13);
+      if (c.inset >= 20 && c.base >= 5 && c.base <= 24 && (!best || c.sc > best.sc)) best = c;
     }
-    if (!best) {
-      const holeAngle = dockAngle + holeSign * 0.2;
-      const holeShore = crossing(holeAngle, baseHeight);
-      const holeR = Math.max(holeShore * 0.35, holeShore - 30);
-      const x = Math.cos(holeAngle) * holeR, z = Math.sin(holeAngle) * holeR;
-      best = { x, z, angle: holeAngle, inset: holeShore - holeR, base: -baseHeight(x, z) };
-    }
+    if (!best) best = probe((HOLE_DOCK_MIN + HOLE_DOCK_MAX) / 2, holeSign * 0.14);
     holes.push({
       x: best.x, z: best.z, r: HOLE_RADIUS, angle: best.angle, inset: best.inset,
       amp: clamp(HOLE_TARGET_DEPTH - best.base, 0, 21),
@@ -402,8 +415,15 @@ export function analyzeLake(lake, opts = {}) {
   let minDepth = Infinity, maxDepth = 0;
   let maxFromDock = 0, minFromDock = Infinity;
   let deepSpot = null, shallowSpot = null;
-  // 各層が「キャストで届く」かどうか
+  // 各層が「一番飛ぶ竿で届く」かどうか
   const bands = { shallow: false, mid: false, deep: false, veryDeep: false };
+  // 最初の竿で届く範囲（スタートの遊びやすさと、淵の遠さを見る）
+  const startBands = { shallow: false, mid: false, deep: false, veryDeep: false };
+  let startMaxDepth = 0;
+  /* 深淵（20m+）のサンプルが最初の竿の範囲でどれだけ「よくある」か。
+     地形は棚のヘリ（かけあがり）が急なので、「1点も届かない」を求めると
+     ほぼ全ての湖が不合格になる。「稀にしか無い」に緩めて割合で見る */
+  let startWaterN = 0, startVeryDeepN = 0;
 
   /** 立ち位置 p から扇状にキャストして水深を集める */
   const scan = (px, pz, aimAngle, isDock) => {
@@ -421,6 +441,15 @@ export function analyzeLake(lake, opts = {}) {
         if (d >= 5.0 && d <= 10.0) bands.mid = true;
         if (d >= 12.0 && d <= 18.0) bands.deep = true;
         if (d >= 20.0) bands.veryDeep = true;
+        if (dist <= CAST_START) {
+          if (d > startMaxDepth) startMaxDepth = d;
+          if (d >= 1.0 && d <= 4.0) startBands.shallow = true;
+          if (d >= 5.0 && d <= 10.0) startBands.mid = true;
+          if (d >= 12.0 && d <= 18.0) startBands.deep = true;
+          if (d >= 20.0) startBands.veryDeep = true;
+          startWaterN++;
+          if (d >= 20.0) startVeryDeepN++;
+        }
         if (isDock) {
           if (d > maxFromDock) maxFromDock = d;
           if (d < minFromDock) minFromDock = d;
@@ -495,8 +524,10 @@ export function analyzeLake(lake, opts = {}) {
     return !reach || depthFit(sp, clamp(maxDepth, lo, hi)) < 1;
   }).map((sp) => sp.name);
 
+  const startVeryDeepFrac = startWaterN ? startVeryDeepN / startWaterN : 0;
+
   return {
-    bands,
+    bands, startBands, startMaxDepth, startVeryDeepFrac,
     minDepth, maxDepth, minFromDock, maxFromDock, dockTipDepth,
     holeDepth, flatDepth, holeFromDock, flatFromDock, holeFlatGap,
     holeInset: lake.hole.inset, flatInset: lake.flat.inset,
@@ -505,7 +536,10 @@ export function analyzeLake(lake, opts = {}) {
     dockClearance, dockY: lake.dock.y,
     shoreR0: lake.dock.r0, deepSpot, shallowSpot, unreachable,
     structures: lake.structures.length,
-    // 桟橋の先端からキャストで届くストラクチャーの数
+    /* 桟橋の先端からキャストで届くストラクチャーの数。CAST_MAX（一番良い竿）基準：
+       「そこに何か狙う目標がある」かどうかの話であって、今の竿の話ではない。
+       CAST_START で縛ると、最初の竿が短いほど桟橋際に構造物を詰め込む必要が出て、
+       他の地形条件と衝突する */
     structNearDock: lake.structures.filter((t) =>
       Math.hypot(t.x - lake.dock.end.x, t.z - lake.dock.end.z) <= CAST_MAX).length,
   };
@@ -527,7 +561,17 @@ export function validateLake(lake, stats = analyzeLake(lake)) {
   if (!(S.minDepth <= 3.0)) bad.push(`届く範囲に浅場がない (最浅 ${S.minDepth.toFixed(1)}m)`);
   if (!(S.maxFromDock >= 12)) bad.push(`桟橋から深場が狙えない (${S.maxFromDock.toFixed(1)}m)`);
   if (!(S.holeDepth >= 20 && S.holeDepth <= 34)) bad.push(`淵の水深が不適 (${S.holeDepth.toFixed(1)}m)`);
-  if (!(S.holeFromDock <= 44)) bad.push(`淵が桟橋から遠すぎる (${S.holeFromDock.toFixed(1)}m)`);
+  /* 淵は「最初の竿では届かない・良い竿なら届く」帯に入っていること。
+     近すぎると竿を替える理由がなくなり、遠すぎると一生届かない */
+  if (!(S.holeFromDock > CAST_START + 6)) bad.push(`淵が桟橋に近すぎる＝最初の竿で届く (${S.holeFromDock.toFixed(1)}m)`);
+  if (!(S.holeFromDock <= CAST_MAX - 8)) bad.push(`淵が桟橋から遠すぎる (${S.holeFromDock.toFixed(1)}m)`);
+  /* 最初の竿は意図的にごく短い（cast=10m）ので、浅場・中層が必ず届く
+     ことまでは求めない（求めると、地形のかけあがりの都合でほぼ全ての湖が
+     不合格になる）。ここで見るのは「深淵（20m+・レジェンドの主戦場）が
+     ありふれていないか」だけ＝竿を買い替える動機を壊さないこと。
+     「1点も届かない」を求めるとやはりほぼ全ての湖が不合格になるので
+     （実測 3%）、サンプルに占める割合で見て、稀にしか無ければ良しとする */
+  if (S.startVeryDeepFrac > 0.06) bad.push(`最初の竿でも深淵(20m+)がありふれている (${(S.startVeryDeepFrac * 100).toFixed(0)}%)`);
   if (!(S.holeInset >= 18)) bad.push(`淵が岸に近すぎる (${S.holeInset.toFixed(1)}m)`);
   if (!(S.flatDepth >= 1.4 && S.flatDepth <= 4.6)) bad.push(`藻場の水深が不適 (${S.flatDepth.toFixed(1)}m)`);
   if (!(S.flatInset >= 6)) bad.push(`藻場が岸に近すぎる (${S.flatInset.toFixed(1)}m)`);

@@ -33,7 +33,7 @@ export class Environment {
   constructor(scene, opts = {}) {
     this.scene = scene;
     this.exposure = opts.exposure ?? 1.0;
-    this.hour = 6;
+    this.hour = 9;
     this.sunDir = new THREE.Vector3(0.3, 0.6, 0.4).normalize();
     this.nightAmount = 0;
     this.horizonColor = new THREE.Color(0x9fc4de);

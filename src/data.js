@@ -282,7 +282,7 @@ export const SPECIES = [
     flavor: '長いヒゲでゆらり。掛かると重量感のある首振り。',
   },
   {
-    id: 'koi', name: 'コイ', rarity: 2, tags: ['carp', 'bottom'], shape: 'deep',
+    id: 'koi', name: 'コイ', rarity: 2, tags: ['carp', 'bottom'], shape: 'wide',
     len: [38, 92], wc: 2.5, depth: [1.5, 9.5], spawn: 14, times: T.any, weather: W.cloudy,
     str: 1.5, sta: 1.55, agg: 0.5, value: 170, perCm: 3.6,
     fight: 'tank',
@@ -477,31 +477,36 @@ export const JUNK = SPECIES.filter((s) => s.rarity === 0);
    装備
    =========================================================== */
 
+/* cast = 狙える最大距離（m）。遠くへ投げられる竿ほど深い場所に届く＝釣れる魚が増える。
+   湖の生成（lakefield）はこの配列から検証距離を決める：
+     一番飛ぶ竿（84m）… この距離までに全魚種の生息層があることを保証する
+     最初の竿（26m）  … 深い淵はこの距離の外に置く（＝竿を買い替える動機にする）
+   最初の竿を伸ばせば淵も一緒に遠ざかるので、どう変えても詰みにはならない */
 export const RODS = [
   {
     id: 'bamboo', name: '竹の釣り竿', icon: 'rod-bamboo', price: 0, level: 1,
-    reel: 0.85, power: 1.0, attract: 1.0,
-    desc: '祖父から受け継いだ一本。しなやかだが力不足。',
+    reel: 0.85, power: 1.0, attract: 1.0, cast: 10,
+    desc: '祖父から受け継いだ一本。足元にしか届かず、沖の深みには遠く及ばない。',
   },
   {
     id: 'glass', name: 'グラスファイバーロッド', icon: 'rod-glass', price: 700, level: 2,
-    reel: 1.0, power: 1.22, attract: 1.05,
-    desc: '扱いやすい万能竿。巻き取りが少し速い。',
+    reel: 1.0, power: 1.22, attract: 1.05, cast: 38,
+    desc: '扱いやすい万能竿。ひと回り遠く、かけあがりの先まで届く。',
   },
   {
     id: 'carbon', name: 'カーボンロッド', icon: 'rod-carbon', price: 3200, level: 5,
-    reel: 1.16, power: 1.48, attract: 1.12,
-    desc: '軽量高弾性。魚の引きをよく吸収してくれる。',
+    reel: 1.16, power: 1.48, attract: 1.12, cast: 52,
+    desc: '軽量高弾性。沖の淵が射程に入り、魚の引きもよく吸収してくれる。',
   },
   {
     id: 'master', name: '名匠竿「渓月」', icon: 'rod-master', price: 11000, level: 9,
-    reel: 1.32, power: 1.8, attract: 1.2,
-    desc: '職人が一年かけて削り上げた逸品。大物に負けない。',
+    reel: 1.32, power: 1.8, attract: 1.2, cast: 68,
+    desc: '職人が一年かけて削り上げた逸品。岸に立ったままでも深場を叩ける。',
   },
   {
     id: 'legend', name: '伝説の竿「湖鳴」', icon: 'rod-legend', price: 38000, level: 14,
-    reel: 1.52, power: 2.2, attract: 1.32,
-    desc: '湖の主を釣り上げるために鍛えられたという竿。',
+    reel: 1.52, power: 2.2, attract: 1.32, cast: 84,
+    desc: '湖の主を釣り上げるために鍛えられたという竿。どこに立っても淵に届く。',
   },
 ];
 
@@ -736,6 +741,7 @@ export const TAG_LABEL = {
    ショップの表示（内部数値は出さず、同じ種類の中での相対位置を言葉にする）
    =========================================================== */
 const STAT_WORDS = {
+  cast: ['短い', 'やや短い', 'ふつう', '遠い', 'とても遠い'],
   reel: ['ゆっくり', 'やや遅い', 'ふつう', '速い', 'とても速い'],
   power: ['弱い', 'やや弱い', 'ふつう', '強い', 'とても強い'],
   attractRod: ['ふつう', 'やや高い', '高い', 'かなり高い', '抜群'],
@@ -765,6 +771,7 @@ export function gearStats(kind, it) {
   if (kind === 'rod') {
     // ロッド・ラインは価格順の階段なので、同種の中での順位を言葉にする
     return [
+      ['飛距離', `${rankWord(RODS, (r) => r.cast, it, STAT_WORDS.cast)}（${it.cast}m）`],
       ['巻き取り', rankWord(RODS, (r) => r.reel, it, STAT_WORDS.reel)],
       ['竿の力', rankWord(RODS, (r) => r.power, it, STAT_WORDS.power)],
       ['集魚力', rankWord(RODS, (r) => r.attract, it, STAT_WORDS.attractRod)],
@@ -852,11 +859,10 @@ export function rollLength(sp, luck = 0) {
 }
 
 /**
- * 釣果カード用の接頭詞付き名前（図鑑は素の名前のまま）。
+ * 釣果カード用の接頭詞（図鑑は素の名前のまま）。
  * 体長帯・標準体重比・アルビノから自動付与。
- * 例: 「小さなニジマス」「巨大な太ったブラックバス」「アルビノ大きなイワナ」
  */
-export function catchDisplayName(sp, len, weight, albino = false) {
+export function catchDisplayPrefix(sp, len, weight, albino = false) {
   const parts = [];
   if (albino) parts.push('アルビノ');
 
@@ -873,7 +879,12 @@ export function catchDisplayName(sp, len, weight, albino = false) {
     else if (ratio <= 0.88) parts.push('痩せた');
   }
 
-  return parts.join('') + sp.name;
+  return parts.join('');
+}
+
+/** 接頭詞＋名前（ログ等用） */
+export function catchDisplayName(sp, len, weight, albino = false) {
+  return catchDisplayPrefix(sp, len, weight, albino) + sp.name;
 }
 
 /** 同種のレア個体（アルビノ）。魚種確定後に 1% */

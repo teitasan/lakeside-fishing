@@ -4,9 +4,11 @@
 import * as THREE from 'three';
 import { Environment } from './sky.js';
 import { Terrain, WATER_REGION } from './terrain.js';
-import { resolveLake } from './lakefield.js';
+import { resolveLake, CAST_MAX } from './lakefield.js';
 import { Water } from './water.js';
 import { FishSchool } from './fish.js';
+import { preloadFishTextures } from './fishTextures.js';
+import { preloadTerrainIcons } from './terrainIcons.js';
 import { Angler } from './angler.js';
 import { UI } from './ui.js';
 import { Debug } from './debug.js';
@@ -15,7 +17,7 @@ import * as Save from './save.js';
 import {
   REAL_FISH, JUNK, GEAR, ACHIEVEMENTS, RIG_LAYERS, rigLayerOf, swimLayer, depthFit,
   bedAffinity, structureBonus, terrainMatches, TERRAIN_BY_ID,
-  rollWeight, catchDisplayName, valueOf, xpOf, rollLength, rollAlbino, fightPattern,
+  rollWeight, catchDisplayName, catchDisplayPrefix, valueOf, xpOf, rollLength, rollAlbino, fightPattern,
 } from './data.js';
 import {
   clamp, clamp01, lerp, damp, rand, pick, weightedPick, TAU, timeBand, fmt1,
@@ -26,12 +28,16 @@ const GRAVITY = 9.8;
 const EXPOSURE = 0.78;
 const PLAYER_RADIUS = 0.34;
 /* キャストの狙い */
-const CAST_SPEED_MIN = 4.5;    // 最弱キャストの初速（足元 4〜5m を狙える）
-const CAST_SPEED_MAX = 28.5;
-const AIM_MAX = 50;            // 照準が届く最大距離
+/* 最弱キャストの初速。ロッド先端は足元より少し前（約1.25m）にあるので、
+   初速を絞ってもそれ未満にはならない。0.5 でおよそ 1.5〜2m まで縮む */
+const CAST_SPEED_MIN = 0.5;
 const CAST_TOL = 0.06;         // 目印に合っていると見なすパワーの許容差
+/* 竿の到達距離より少し余分に初速を出しておく。ぴったりだとパワー 1.0 に
+   張り付いて「狙い通り」が出せなくなる */
+const CAST_HEADROOM = 1.07;
+/* 糸の長さ = 竿の最大飛距離 + 走られる余裕 + 手元の余り */
+const LINE_SLACK = 8;
 const HOURS_PER_SEC = 1 / 60;   // 実 1 秒 = ゲーム内 1 分（1 日 = 実 24 分）
-const MAX_LINE = 62;
 /* ファイト（残り距離は実際のメートル）
    REEL_MPS  巻き取り速度の基準（m/s）。ロッドの reel と魚の抵抗で増減する
    LINEOUT_MPS 糸を送っているときに出ていく速さ（m/s・引きの強さ 1 あたり）
@@ -74,6 +80,54 @@ const CAM_MAX = 9;
 /** 湖を作り直して再読み込みした直後は、タイトルを飛ばして再開する */
 export const AUTOSTART_KEY = 'lakeside-fishing-autostart';
 
+/* 湖の採用条件は「CAST_MAX（46m）の範囲に全魚種の生息層がある」こと。
+   それより短い竿を出すと、その竿では届かない魚が生まれて詰む */
+{
+  const short = GEAR.rod.filter((r) => !(r.cast >= CAST_MAX));
+  if (short.length) {
+    console.warn(`[data] 飛距離が ${CAST_MAX}m 未満の竿があります（${short.map((r) => r.id).join(', ')}）。`
+      + '湖はこの距離に全魚種の層があることを条件に生成しているため、届かない魚が出ます');
+  }
+}
+
+/* ---------------- キャストの弾道 ----------------
+   仕掛けは空気抵抗を受けるので、飛距離は初速に比例しない。
+   狙いの逆算・着水予測・竿ごとの倍率の逆算で、すべて同じ積分を使う */
+
+/** 投げ出す角度（水平＝0 として上向き成分）。見上げるほど山なりになる */
+const elevFor = (pitch) => clamp(0.46 + pitch * 0.55, 0.16, 0.95);
+
+/** 初速 speed・仰角成分 elev・高さ y0 から投げたときの水平到達距離（m） */
+function flightRange(speed, elev, y0) {
+  const n = Math.hypot(1, elev);
+  let vx = speed / n;
+  let vy = (speed * elev) / n;
+  let x = 0, y = y0;
+  const dt = 0.055;
+  for (let i = 0; i < 200 && y > 0; i++) {
+    vy -= GRAVITY * dt;
+    const k = 1 - 0.0055 * Math.hypot(vx, vy) * dt;
+    vx *= k; vy *= k;
+    x += vx * dt; y += vy * dt;
+  }
+  return x;
+}
+
+/**
+ * 「この竿は何 m まで届く」から初速の上限を逆算する。
+ * 基準は水平に近い構え（遠投の姿勢）と、ロッド先端の高さ 3m。
+ */
+function castTopSpeed(rangeM) {
+  const elev = elevFor(-0.03);
+  const want = rangeM * CAST_HEADROOM;
+  let lo = 5, hi = 60;
+  for (let i = 0; i < 20; i++) {
+    const mid = (lo + hi) / 2;
+    if (flightRange(mid, elev, 3) < want) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
 /**
  * 引きの強さの表示（魚種・レア度は伏せ、手応えだけを伝える）
  * pull0 = 種の str × サイズ係数 なので、大きなコモンも「重い」になる
@@ -85,11 +139,6 @@ function pullLabel(pull0) {
   if (pull0 < 2.4) return 'かなり重い…！';
   return 'とてつもない重さ…！';
 }
-
-const BAIT_COLORS = {
-  worm: 0xb9614c, akamushi: 0xc23a3a, dough: 0xe4d6b4, roe: 0xf07a3c,
-  shrimp: 0xd9b9a8, minnow: 0xa9bcc8, secret: 0xd9c274,
-};
 
 const UP = new THREE.Vector3(0, 1, 0);
 const _v1 = new THREE.Vector3();
@@ -203,6 +252,13 @@ export class Game {
     await onProgress('水を注いでいます');
     this.water = new Water(this.scene, this.terrain, { quality: q, exposure: EXPOSURE });
 
+    await onProgress('魚の模様を塗っています');
+    try {
+      await Promise.all([preloadFishTextures(), preloadTerrainIcons()]);
+    } catch (e) {
+      console.warn('図鑑画像の読み込みに失敗', e);
+    }
+
     await onProgress('魚を放しています');
     this.school = new FishSchool(this.scene, this.terrain, this.water, {
       count: q === 'low' ? 14 : q === 'high' ? 30 : 22,
@@ -240,6 +296,7 @@ export class Game {
     this.yaw = Math.atan2(this.terrain.dockDir.x, this.terrain.dockDir.z);
     this.angler.setPosition(this.pos.x, this.pos.y, this.pos.z);
     this.angler.setYaw(this.yaw);
+    this.angler.setBait(this.bait.id);
 
     /* 水越しの絵に写らないもの（空・雨・陸の木と岩）はキャプチャから外す */
     this.water.setCaptureHidden([this.env.sky, this.env.rain, ...(this.terrain.overWaterProps || [])]);
@@ -534,6 +591,7 @@ export class Game {
       const st = this.state.baitStock;
       st[item.id] = (st[item.id] || 0) + item.pack;
       this.state.gear.bait = item.id;
+      this.angler.setBait(item.id);
       this.audio.buy();
       this.ui.toast(`${iconHtml(item.icon)} <b>${item.name}</b> ×${item.pack}（在庫 ${st[item.id]}）`, 'gold');
       this.saveState();
@@ -577,6 +635,7 @@ export class Game {
       const next = this._cheapestBait();
       if (next) {
         this.state.gear.bait = next.id;
+        this.angler.setBait(next.id);
         this.ui.toast(`${iconHtml(next.icon)} <b>${next.name}</b> に持ち替えた<small style="opacity:.75"> — 残り ${this.baitCount(next.id)}</small>`, 'gold');
       } else {
         this.ui.toast('エサを切らした… <b>B</b> でショップへ（ミミズは無料）', 'bad');
@@ -590,6 +649,7 @@ export class Game {
       if (this.baitCount(id) <= 0) { this.audio.deny(); return; }
     } else if (!this.state.owned[kind].includes(id)) return;
     this.state.gear[kind] = id;
+    if (kind === 'bait') this.angler.setBait(id);
     this.audio.click();
     const item = GEAR[kind].find((x) => x.id === id);
     this.ui.toast(`${iconLabel(item.icon, item.name)} を装備`, 'good');
@@ -869,15 +929,30 @@ export class Game {
     return out.set(Math.sin(this.yaw) * cp, Math.sin(this.pitch), Math.cos(this.yaw) * cp);
   }
 
+  /* 竿ごとの初速上限と糸の長さ。ロッドが変わったときだけ計算し直す */
+  _rodCast() {
+    const rod = this.rod;
+    if (this._rodCastId !== rod.id) {
+      this._rodCastId = rod.id;
+      this._castTop = castTopSpeed(rod.cast);
+      this._maxLine = rod.cast + RUN_MARGIN + LINE_SLACK;
+    }
+  }
+
+  /** 竿が狙える最大距離（m） */
+  get castRange() { return this.rod.cast; }
+  /** 出せる糸の長さ（m）。竿の飛距離に走られる余裕を足したもの */
+  get maxLine() { this._rodCast(); return this._maxLine; }
+
   _castVelocity(power, out = new THREE.Vector3()) {
     this._aimDir(out);
     out.y = 0;
     if (out.lengthSq() < 1e-6) out.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
     out.normalize();
-    const elev = clamp(0.46 + this.pitch * 0.55, 0.16, 0.95);
-    out.y = elev;
+    out.y = elevFor(this.pitch);
     out.normalize();
-    return out.multiplyScalar(lerp(CAST_SPEED_MIN, CAST_SPEED_MAX, power));
+    this._rodCast();
+    return out.multiplyScalar(lerp(CAST_SPEED_MIN, this._castTop, power));
   }
 
   /**
@@ -885,18 +960,8 @@ export class Game {
    * 地形サンプルを使わない軽量版で、目印の逆算に使う。
    */
   _rangeForPower(power) {
-    this._castVelocity(power, _v4);
-    let vx = Math.hypot(_v4.x, _v4.z);
-    let vy = _v4.y;
-    let x = 0, y = this._tipY || 3;
-    const dt = 0.055;
-    for (let i = 0; i < 200 && y > 0; i++) {
-      vy -= GRAVITY * dt;
-      const k = 1 - 0.0055 * Math.hypot(vx, vy) * dt;
-      vx *= k; vy *= k;
-      x += vx * dt; y += vy * dt;
-    }
-    return x;
+    this._rodCast();
+    return flightRange(lerp(CAST_SPEED_MIN, this._castTop, power), elevFor(this.pitch), this._tipY || 3);
   }
 
   /**
@@ -932,9 +997,11 @@ export class Game {
     this.minCastDist = this._rangeForPower(0) + this._tipFwd;
 
     const eyeY = this.visY + EYE_H;
-    let dist = AIM_MAX;
-    if (dirY < -0.02) dist = h * (-eyeY / dirY);   // 視線が y=0 に達する距離
-    dist = clamp(dist, this.minCastDist, AIM_MAX);
+    const aimMax = Math.max(this.minCastDist, this.castRange);   // 竿ごとの上限
+    // 視線が y=0 に達する距離。ほぼ水平〜上向きなら「無限に遠く」＝竿の限界で頭打ち
+    const look = dirY < -0.02 ? h * (-eyeY / dirY) : Infinity;
+    this.aimCapped = look > aimMax;
+    const dist = clamp(Math.min(look, aimMax), this.minCastDist, aimMax);
     this.aimDist = dist;
     this.aimPoint.set(this.pos.x + fx * dist, 0, this.pos.z + fz * dist);
 
@@ -958,7 +1025,7 @@ export class Game {
       _v2.addScaledVector(_v3, dt);
       const ground = this.terrain.heightAt(_v2.x, _v2.z);
       if (_v2.y <= (ground < 0 ? 0 : ground)) break;
-      if (_v2.distanceTo(_v1) > MAX_LINE) break;
+      if (_v2.distanceTo(_v1) > this.maxLine) break;
     }
     return out.copy(_v2);
   }
@@ -981,7 +1048,7 @@ export class Game {
     this.castOrigin.copy(this.bobber);
     this._castVelocity(power, this.bobberVel);
     this.angler.bobber.visible = true;
-    this.angler.baitMat.color.setHex(BAIT_COLORS[this.bait.id] ?? 0xc2705a);
+    this.angler.setBait(this.bait.id);
     this.marker.visible = false;
     this.aimMarker.visible = false;
     this.ui.showPower(false);
@@ -1055,10 +1122,13 @@ export class Game {
       this.bobber.z - (this.pos.z + Math.cos(this.yaw) * 1.6)
     ));
     const surge = sp.str * sizeF >= 1.2 && pattern.runGap < 50;
+    // 掛かった深さ（水面からの距離）。ファイト中はここを起点に、疲れたら浮く
+    const surf0 = this.water.surfaceY(f.pos.x, f.pos.z);
+    const hookDepth = clamp(surf0 - f.pos.y, 0.4, 48);
     this.fight = {
       len0,
-      // 糸は MAX_LINE ぶんしか無いので、遠投したときの余裕はそこで打ち止め
-      span: Math.max(len0 + 4, Math.min(len0 + RUN_MARGIN, MAX_LINE)),
+      // 糸の残りぶんしか走らせられないので、目一杯投げたときはそこで打ち止め
+      span: Math.max(len0 + 4, Math.min(len0 + RUN_MARGIN, this.maxLine)),
       dist: len0,
       tension: 0,
       stamina: 1,
@@ -1081,6 +1151,7 @@ export class Game {
       shakeT: rand(0.6, 1.3),
       shakeOn: false,
       shakeAge: 0,
+      hookDepth,         // ヒット深度（m）。2.4m 上限で浅い層へワープさせない
     };
     this.fs = 'fight';
     this.stateTime = 0;
@@ -1259,11 +1330,12 @@ export class Game {
     const dock = this.terrain.onDock(nx, nz);
     if (dock !== null) { this.pos.x = nx; this.pos.z = nz; return true; }
     const h = this.terrain.heightAt(nx, nz);
-    if (h < -0.55) return false;               // 深くて入れない
+    // 通常は膝丈まで。デバッグ中は湖底まで歩ける
+    if (!this.debug?.enabled && h < -0.55) return false;
     if (h > 0.6 && this.terrain.slopeAt(nx, nz) > 1.5) return false; // 崖
-    // 桟橋から降りる時の段差
+    // 桟橋から降りる時の段差（デバッグ水中歩行時はスキップ）
     const cur = this.terrain.onDock(this.pos.x, this.pos.z);
-    if (cur !== null && h < cur - 1.9) return false;
+    if (!this.debug?.enabled && cur !== null && h < cur - 1.9) return false;
     this.pos.x = nx; this.pos.z = nz;
     return true;
   }
@@ -1324,10 +1396,11 @@ export class Game {
     const want = pivot.clone().addScaledVector(dir, -dist);
     want.y += 0.35;
 
-    // 地面/水面にめり込まないように
+    // 地面/水面にめり込まないように（デバッグで水中歩行中は湖底に追従）
     const gh = this.terrain.heightAt(want.x, want.z);
     const wh = gh < 0 ? this.water.surfaceY(want.x, want.z) : gh;
-    const minY = Math.max(gh + 0.45, wh + 0.35);
+    const debugUw = this.debug?.enabled && this.pos.y < -0.2;
+    const minY = debugUw ? gh + 0.45 : Math.max(gh + 0.45, wh + 0.35);
     if (want.y < minY) want.y = minY;
 
     if (snap) cam.position.copy(want);
@@ -1347,7 +1420,8 @@ export class Game {
       if (this.hookFish) look.lerp(this.hookFish.pos, 0.6);
     }
     cam.lookAt(look);
-    this._setUnderwaterFx(false);
+    const camSurf = this.water.surfaceY(cam.position.x, cam.position.z);
+    this._setUnderwaterFx(debugUw && cam.position.y < camSurf);
   }
 
   /** 一人称：カメラは頭の位置そのまま。視線はマウス（レティクル＝狙い）に完全一致させる */
@@ -1364,7 +1438,8 @@ export class Game {
     }
     const dir = this._aimDir(_v1);
     cam.lookAt(_v2.copy(cam.position).addScaledVector(dir, 12));
-    this._setUnderwaterFx(false);
+    const surf = this.water.surfaceY(cam.position.x, cam.position.z);
+    this._setUnderwaterFx(!!this.debug?.enabled && cam.position.y < surf);
   }
 
   _setFirstPerson(on, quiet = false) {
@@ -1499,6 +1574,7 @@ export class Game {
         ui.showFight(false);
         ui.setPrompt(this.hasBait
           ? `<b>水面の輪で狙い</b>、長押しして<b>目印で離す</b>　/　<b>E</b> でタナ（いま ${this.rigLayer.name}）`
+            + (this.aimCapped ? `　<small style="opacity:.7">— ここが竿の限界 ${this.castRange}m</small>` : '')
           : '<b>エサ切れ</b> — <b>B</b> でショップへ（ミミズは 0G で補充できる）');
         break;
       }
@@ -1597,7 +1673,7 @@ export class Game {
           const surf = ground < 0 ? this.water.surfaceY(this.bobber.x, this.bobber.z) : ground;
           const lineOut = this.bobber.distanceTo(this.castOrigin);
 
-          if (this.bobber.y <= surf || lineOut > MAX_LINE) {
+          if (this.bobber.y <= surf || lineOut > this.maxLine) {
             this.bobber.y = surf;
             if (ground < -0.25) this._onLandWater();
             else this._onLandGround();
@@ -1608,7 +1684,7 @@ export class Game {
         bob.rotation.set(0, 0, 0);
         this.angler.updateLine(_v1, this.bobber, 0.25, this.camera,
           this._clipY(this.bobber.x, this.bobber.z));
-        this.angler.updateRig(this.bobber, this.baitPos, this.camera, false);
+        this.angler.updateRig(this.bobber, this.baitPos, this.camera, false, dt);
         this.angler.bobberRing.visible = false;
         break;
       }
@@ -1642,7 +1718,7 @@ export class Game {
         bob.quaternion.setFromUnitVectors(UP, _v2);
         this.angler.updateLine(_v1, this.bobber, 0.62, this.camera, this._uwFx ? null : surf);
         // 水中の仕掛けは水中カメラの時だけ見せる
-        this.angler.updateRig(this.bobber, this.baitPos, this.camera, !!this._uwFx);
+        this.angler.updateRig(this.bobber, this.baitPos, this.camera, !!this._uwFx, dt);
         // 水面のリング（遠くでもウキが見えるように）
         const ring = this.angler.bobberRing;
         ring.visible = true;
@@ -1651,7 +1727,7 @@ export class Game {
         ring.material.opacity = this.fs === 'nibble' ? 0.55 : 0.34;
 
         // 糸が伸びきったら強制回収
-        if (_v1.distanceTo(this.bobber) > MAX_LINE) {
+        if (_v1.distanceTo(this.bobber) > this.maxLine) {
           this.ui.toast('糸が伸びきった…回収します', 'bad');
           this._retrieve();
           break;
@@ -1696,7 +1772,7 @@ export class Game {
         bob.position.copy(this.bobber);
         if (Math.random() < dt * 6) this.water.addRipple(this.bobber.x, this.bobber.z, 0.5, 0.9);
         this.angler.updateLine(_v1, this.bobber, 0.25, this.camera, this._uwFx ? null : surf);
-        this.angler.updateRig(this.bobber, this.baitPos, this.camera, !!this._uwFx);
+        this.angler.updateRig(this.bobber, this.baitPos, this.camera, !!this._uwFx, dt);
         this.angler.bobberRing.visible = false;
         ui.setPrompt('今だ！ <b>クリック / Space</b> でアワセ！');
         if (this.stateTime > this.biteWindow) this._missBite();
@@ -2007,7 +2083,10 @@ export class Game {
     const far = _v3.copy(this.bobberFar);
 
     F.lateral = damp(F.lateral, (F.running ? Math.sin(F.time * 1.7) * 1.9 : Math.sin(F.time * 0.9) * 0.7), 3, dt);
-    const t = clamp01(F.dist / F.span);
+    /* バー表示用。取り込みは距離 LAND_M で起きるので、バーの 0% もそこに合わせる
+       （そのままだと LAND_M ぶんの隙間が残ったまま「釣れた」ことになり、
+       巻き終わる前に釣り上がったように見える） */
+    const t = clamp01((F.dist - LAND_M) / (F.span - LAND_M));
     // 着水点の方向へ、残り距離ぶん離した所に魚を置く（メートルそのまま）
     let dx = far.x - near.x, dz = far.z - near.z;
     const dl = Math.hypot(dx, dz) || 1;
@@ -2024,9 +2103,15 @@ export class Game {
     const wz = near.z + dz * reach + pz * F.lateral;
     const depth = this.terrain.depthAt(wx, wz);
     const surf = this.water.surfaceY(wx, wz);
-    // 疲れると浮いてくる
-    const wantDepth = clamp(lerp(0.35, 2.4, F.stamina) * lerp(0.4, 1.4, t), 0.2, Math.max(0.25, depth - 0.25));
-    let fy = Math.min(surf - 0.12, -wantDepth + surf);
+    /* 深さ：ヒット深度を起点に、疲れたら浮く（固定 2.4m 上限は使わない）。
+       水平は毎フレーム再配置するが、Y は damp でワープさせない */
+    const hookD = F.hookDepth ?? 2.4;
+    const floatD = 0.4;
+    let wantDepth = lerp(floatD, hookD, F.stamina * F.stamina);
+    // 走り中は少し潜る（ヒット深度を大きく超えない）
+    if (F.running) wantDepth = Math.min(hookD + 0.8, wantDepth + Math.min(1.4, hookD * 0.12));
+    wantDepth = clamp(wantDepth, 0.25, Math.max(0.25, depth - 0.25));
+    let fy;
     if (jumping) {
       // 空中に跳ね上がる（0 → 1 → 0 の弧）
       const jt = 1 - F.jumpT / (P.jumpDur || 0.62);
@@ -2035,6 +2120,9 @@ export class Game {
         this.water.addSplash(wx, surf, wz, 6, 1.0);
         this.water.addRipple(wx, wz, 0.8, 1.2);
       }
+    } else {
+      const targetY = Math.min(surf - 0.12, surf - wantDepth);
+      fy = damp(f.pos.y, targetY, 2.4, dt);
     }
     f.pos.set(wx, fy, wz);
     f.state = 'hooked';
@@ -2093,7 +2181,7 @@ export class Game {
     this.angler.bobber.position.copy(this.bobber);
     // 糸は水面で切って、水中は描かない（水中カメラ中は見せる）
     this.angler.updateLine(tip, mouth, slack, this.camera, this._uwFx ? null : surf);
-    this.angler.updateRig(this.bobber, mouth, this.camera, false);
+    this.angler.updateRig(this.bobber, mouth, this.camera, false, dt);
 
     /* --- UI --- */
     // 魚種とレア度は取り込むまで伏せる（引きの強さだけを見せる）
@@ -2108,7 +2196,7 @@ export class Game {
       tension: tRatio,
       dist: t,
       distM: F.dist,
-      hookAt: F.len0 / F.span,
+      hookAt: clamp01((F.len0 - LAND_M) / (F.span - LAND_M)),
       stam: F.stamina,
       reeling,
     });
@@ -2223,6 +2311,7 @@ export class Game {
     const isNewAlbino = albino && !(rec && rec.albinoCaught);
     const record = !!rec && len > rec.maxLen;
     const title = catchDisplayName(sp, len, weight, albino);
+    const titlePrefix = catchDisplayPrefix(sp, len, weight, albino);
     if (isNew) {
       s.records[sp.id] = {
         count: 1, maxLen: len, maxWeight: weight, firstAt: Date.now(),
@@ -2249,7 +2338,7 @@ export class Game {
 
     this.fs = 'card';
     this._exitLock(); // カーソルを戻し、カードをマウスで操作できるようにする
-    this.ui.showCatch({ sp, len, weight, value, xp, record, isNew, albino, isNewAlbino, title });
+    this.ui.showCatch({ sp, len, weight, value, xp, record, isNew, albino, isNewAlbino, title, titlePrefix });
     this._checkAchievements();
     Save.saveNow(s);
   }

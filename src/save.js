@@ -22,7 +22,7 @@ export function defaultState() {
     nightCaught: 0,
     snapped: 0,
     escaped: 0,
-    clock: 5.6, // 夜明け前スタート
+    clock: 9, // 9時スタート
     rigLayer: 'mid', // 狙う層（タナ）: top|mid|bottom。実際の深さは水深×比率
     seed: null, // 湖のシード（null = 起動時にランダムで決める）
     gear: { rod: 'bamboo', line: 'nylon', bait: 'worm' },
