@@ -2,7 +2,9 @@
    セーブデータ（localStorage）
    =========================================================== */
 
-import { BAITS, BAIT_ALIAS, RIG_LAYERS, SPECIES_BY_ID } from './data.js';
+import {
+  BAITS, BAIT_ALIAS, LINES, LINE_ALIAS, RIG_LAYERS, SPECIES_BY_ID,
+} from './data.js';
 
 const KEY = 'lakeside-fishing-save-v1';
 
@@ -25,8 +27,8 @@ export function defaultState() {
     clock: 9, // 9時スタート
     rigLayer: 'mid', // 狙う層（タナ）: top|mid|bottom。実際の深さは水深×比率
     seed: null, // 湖のシード（null = 起動時にランダムで決める）
-    gear: { rod: 'bamboo', line: 'nylon', bait: 'worm' },
-    owned: { rod: ['bamboo'], line: ['nylon'], bait: ['worm'] },
+    gear: { rod: 'bamboo', line: 'nylon2', bait: 'worm' },
+    owned: { rod: ['bamboo'], line: ['nylon2'], bait: ['worm'] },
     // エサの在庫（id -> 個数）。魚が触ると減る。ミミズは 0G なので詰まらない
     baitStock: { worm: 10 },
     records: {}, // id -> {count, maxLen, maxWeight, albinoCaught?}
@@ -88,6 +90,12 @@ export function load() {
       out.rigLayer = d === null ? 'mid' : d <= 3 ? 'top' : d <= 12 ? 'mid' : 'bottom';
     }
     delete out.rigDepth;
+    // ライン刷新（素材だけ→素材×号数）：旧 id を対応する号数へ読み替える
+    const lineIds = new Set(LINES.map((l) => l.id));
+    const toLine = (id) => (lineIds.has(id) ? id : LINE_ALIAS[id]);
+    out.gear.line = toLine(out.gear.line) || base.gear.line;
+    out.owned.line = uniq(out.owned.line.map(toLine).filter(Boolean));
+    if (!out.owned.line.includes(out.gear.line)) out.owned.line.push(out.gear.line);
     // ルアー廃止（spoon/frog/crank）：装備・所持を対応するエサに読み替える
     const baitIds = new Set(BAITS.map((b) => b.id));
     const toBait = (id) => (baitIds.has(id) ? id : BAIT_ALIAS[id]);

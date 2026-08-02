@@ -366,14 +366,21 @@ F.runDur  = rand(<span class="n">0.6</span>, <span class="n">1.2</span>) * P.run
     </div>
 
     <div class="note q">
-      <span class="qh">Q. 「糸の強さ（line.cap）」とは？</span>
-      <b>テンションの上限＝切れる値</b>そのものです。HUD のテンションバーは <code>tension / cap</code> を表示しているので、
-      cap が大きい糸は「同じ表示％に達するまでの余裕が大きい」＝<b>巻ける時間が長くなる</b>ことを意味します。
+      <span class="qh">Q. ラインの「素材 × 号数」って何が変わるの？</span>
+      ラインはナイロン／フロロカーボン／PE の<b>3 素材 × 1〜3号</b>の 9 種類。<b>号数は同じ素材内の強度の階段</b>
+      （1号&lt;2号&lt;3号）だけを動かし、<b>素材が強度以外の性格（一長一短）</b>を決めます。
       <ul style="margin-bottom:0">
-        <li>ナイロン 1.00 → ミスリル 2.80 で、<b>切れるまでに耐えられる張力が 2.8 倍</b>。</li>
-        <li>張力の増加は <code>(0.08 + pull×0.55) / rod.power</code> /秒。0 から cap に達するまでの秒数は
-          <code>cap × rod.power / (0.08 + pull×0.55)</code> です。</li>
-        <li>体力削りは <code>tension / cap</code> の比で効くため、<b>強い糸ほど「安全な範囲で強く引ける」</b>＝魚を早く疲れさせられます。</li>
+        <li><code>cap</code>（強さ＝切れる張力）：ナイロン1号 0.72 〜 PE3号 3.11 まで、号数と素材の両方で伸びる
+          （<b>1号&lt;2号&lt;3号</b> かつ <b>ナイロン&lt;フロロ&lt;PE</b>）。</li>
+        <li><code>line.shock</code>（テンションの増え方の倍率）：ナイロン 0.90（伸びが衝撃を逃がすので上がりにくい＝寛容）
+          → フロロ 1.00 → PE 1.10（伸びがほぼ無く直に伝わる＝やや厳しい）。張力の増加は
+          <code>(0.08 + pull×0.55) × line.shock / rod.power</code> /秒なので、<b>PE は cap こそ高いが上がる速さも速い</b>
+          ——強い代わりに雑に巻くとすぐ切れる、という一長一短。</li>
+        <li><code>line.attract</code>（アタリまでの速さ）：見えにくいフロロが最速、ナイロンは標準、
+          目立つ PE はやや遅い（<b>フロロ&gt;ナイロン&gt;PE</b>、2号基準で 1.15 / 1.00 / 0.88）。
+          同じ素材でも<b>号数が細いほど速い</b>（1号&gt;2号&gt;3号）——太いほど目立って遅くなる。</li>
+        <li><code>line.biteWindow</code>（アワセ猶予）：伸びないぶんアタリが直に伝わる PE が 1.2 で最長、
+          ナイロンは 0.85 で最短、フロロは 1.0（標準）。</li>
       </ul>
     </div>
 
@@ -393,9 +400,12 @@ F.runDur  = rand(<span class="n">0.6</span>, <span class="n">1.2</span>) * P.run
       power は「切れにくさ」、reel は「早さ」に効きます。ラインブレイクを減らしたいなら <b>line.cap と rod.power</b>、
       ファイトを短くしたいなら <b>rod.reel</b> です。<code>attract</code> はファイトには無関係（アタリの速さと抽選）。<br>
       <b>power はもう一つ効きます</b>：張力の増えが遅くなる＝<b>長く押していられる</b>＝リールが乗る、という経路です。
-      チョウザメ（平均 123cm）を<b>連打</b>で獲るのに掛かる時間は 竹+ナイロン <b>108 秒</b>／グラス+フロロ <b>55 秒</b>／
-      カーボン+PE <b>37 秒</b>／伝説+ミスリル <b>21 秒</b>。案内どおりの操作なら カーボン+PE <b>32 秒</b>／伝説+ミスリル <b>22 秒</b> なので、
-      <b>装備が足りている限り連打は損</b>です。足りない装備で無理に獲るなら、2 分近く叩き続けることになります。
+      チョウザメ（平均 123cm・60 回試行）を<b>連打</b>で獲ろうとすると、竹+ナイロン2号は<b>装備不足でまず切れる</b>
+      （0/60）。グラス+フロロ2号もまれにしか着地しない（2/60・約 153 秒）。カーボン+PE2号でようやく互角
+      （36/60・約 113 秒）、伝説+PE3号なら安定して獲れます（60/60・約 121 秒）。<br>
+      同じ組み合わせで<b>案内どおりの操作</b>なら カーボン+PE2号 <b>約 35 秒</b>／伝説+PE3号 <b>約 23 秒</b>と
+      どちらも確実に獲れるので、<b>装備が足りている限り連打は損</b>です。足りない装備で無理に獲るなら、
+      2 分以上切れずに叩き続ける必要があります。
     </div>
 
     <div class="note warn">
@@ -1212,7 +1222,7 @@ function simulate(sp, len, rod, line, policy, delay, len0 = 22, dt = 1 / 60, rec
       spin = 1 - (1 - spin) * Math.exp(-dt / 0.22);          // リールの立ち上がり
       const resist = clamp(1.70 - pull * 0.75, 0.35, 1.60) * (shakeBite ? P.shakeReel : 1);
       dist -= rod.reel * 4.6 * resist * (1 + dist * 0.012) * spin * dt;
-      let gain = (0.08 + pull * 0.55) * P.tensionGain * shortLine;
+      let gain = (0.08 + pull * 0.55) * P.tensionGain * shortLine * line.shock;
       if (shakeBite) gain *= P.shakeGain;
       if (jumpBite) gain *= P.jumpTension;
       tension += (gain * dt) / rod.power;
@@ -1220,7 +1230,7 @@ function simulate(sp, len, rod, line, policy, delay, len0 = 22, dt = 1 / 60, rec
       spin *= Math.exp(-dt / 0.12);                          // 離すと止まっていく
       dist += pull * 0.70 * P.lineOut * dt;
       tension -= (1.30 + pull * 0.30) * P.tensionDecay * dt;
-      if (running) tension += pull * 0.30 * shortLine * dt;
+      if (running) tension += pull * 0.30 * shortLine * line.shock * dt;
       if (jumping) stamina -= (P.jumpDrain || 0) * dt;
     }
     tension = clamp(tension, 0, cap * 1.2);
@@ -1255,7 +1265,7 @@ function evaluate(sp, len, rod, line, policy, delay, n, len0 = 22) {
 }
 
 /* --- 単体シミュレータ UI --- */
-const simState = { sp: 'koi', size: 'avg', rod: 'bamboo', line: 'nylon', policy: 0.7, delay: 0.2, len0: 22 };
+const simState = { sp: 'koi', size: 'avg', rod: 'bamboo', line: 'nylon2', policy: 0.7, delay: 0.2, len0: 22 };
 
 function ctlSelect(label, id, options, value, onChange) {
   const d = el('div', 'ctl');
@@ -1311,8 +1321,8 @@ function runSim() {
   const e = evaluate(sp, len, rod, line, simState.policy, simState.delay, 200, simState.len0);
   const sizeF = 0.55 + (len / sp.len[1]) * 0.75;
   const pull0 = sp.str * sizeF;
-  const gain = (0.08 + pull0 * 0.55) / rod.power;
-  const gainRun = (0.08 + pull0 * 2 * 0.55) / rod.power;
+  const gain = ((0.08 + pull0 * 0.55) * line.shock) / rod.power;
+  const gainRun = ((0.08 + pull0 * 2 * 0.55) * line.shock) / rod.power;
   const snapT = line.cap / gain;
   const resist = clamp(1.70 - pull0 * 0.75, 0.35, 1.60);
   const reelRate = rod.reel * 4.6 * resist * (1 + simState.len0 * 0.012);   // 立ち上がり切った状態
@@ -1405,7 +1415,7 @@ function drawChart(rec) {
 }
 
 /* --- 一括シミュレータ --- */
-const tblState = { rod: 'bamboo', line: 'nylon', policy: 0.7, delay: 0.2, size: 'avg', len0: 22 };
+const tblState = { rod: 'bamboo', line: 'nylon2', policy: 0.7, delay: 0.2, size: 'avg', len0: 22 };
 function renderTblCtl() {
   const c = document.getElementById('tblCtl');
   c.innerHTML = '';
@@ -1494,7 +1504,7 @@ function biteWeights({ depth, hour, weather, baitId, rodId, level, layer, bed, s
   return { rows, bait, rod, baitDepth, band };
 }
 
-const rollState = { depth: 18, hour: 6, weather: 'clear', bait: 'worm', rod: 'bamboo', level: 1, caught: 10, layer: 'mid', bed: 'sand', struct: false };
+const rollState = { depth: 18, hour: 6, weather: 'clear', bait: 'worm', rod: 'bamboo', line: 'nylon2', level: 1, caught: 10, layer: 'mid', bed: 'sand', struct: false };
 function renderRollCtl() {
   const c = document.getElementById('rollCtl');
   c.innerHTML = '';
@@ -1504,6 +1514,7 @@ function renderRollCtl() {
   c.appendChild(ctlSelect('天候', 'rw', Object.entries(WEATHERS).map(([k, w]) => [k, w.name]), rollState.weather, (v) => { rollState.weather = v; runRoll(); }));
   c.appendChild(ctlSelect('エサ', 'rb', BAITS.map((b) => [b.id, `${b.name}（得意 ${baitStrengths(b, 2).join('・')}）`]), rollState.bait, (v) => { rollState.bait = v; runRoll(); }));
   c.appendChild(ctlSelect('ロッド', 'rr', RODS.map((r) => [r.id, r.name]), rollState.rod, (v) => { rollState.rod = v; runRoll(); }));
+  c.appendChild(ctlSelect('ライン', 'rln', LINES.map((l) => [l.id, `${l.name}（アタリ ${l.attract}）`]), rollState.line, (v) => { rollState.line = v; runRoll(); }));
   c.appendChild(ctlSelect('水底', 'rbd', [['sand', '砂地'], ['rock', '岩場'], ['mud', '泥底']], rollState.bed, (v) => { rollState.bed = v; runRoll(); }));
   c.appendChild(ctlSelect('ストラクチャー', 'rst', [['no', 'なし'], ['yes', '近くにある']], rollState.struct ? 'yes' : 'no', (v) => { rollState.struct = v === 'yes'; runRoll(); }));
   c.appendChild(ctlRange('プレイヤーレベル', 'rl', 1, 20, 1, rollState.level, (v) => 'Lv' + v, (v) => { rollState.level = v; runRoll(); }));
@@ -1514,11 +1525,13 @@ function runRoll() {
     baitId: rollState.bait, rodId: rollState.rod, level: rollState.level, layer: rollState.layer,
     bed: rollState.bed, struct: rollState.struct,
   });
+  const line = LINES.find((l) => l.id === rollState.line);
   const total = rows.reduce((a, r) => a + r.w, 0);
   const junkP = 0.085 * bait.junk * (rollState.depth < 1.4 ? 1.8 : 1)
     * (rollState.layer === 'bottom' ? 1.5 : 0.55) * (rollState.caught < 3 ? 0.3 : 1);
   const bandName = { dawn: '朝', day: '昼', dusk: '夕', night: '夜' }[band];
-  const attract = bait.attract * rod.attract * WEATHERS[rollState.weather].bite;
+  // アタリまでの時間はラインの見え方（line.attract）も効く（ゲーム本体の _onLandWater と同じ）
+  const attract = bait.attract * rod.attract * line.attract * WEATHERS[rollState.weather].bite;
   const waitLo = 2.2 / attract * (rollState.depth < 0.9 ? 1.7 : 1);
   const waitHi = 7.0 / attract * (rollState.depth < 0.9 ? 1.7 : 1);
 
@@ -1729,13 +1742,17 @@ function runRoll() {
 
   document.getElementById('lineTable').innerHTML = `<table><thead><tr>
     <th class="l">ライン</th><th class="num">価格 G</th><th class="num">解禁 Lv</th><th class="num">cap<br><span style="opacity:.6">強度</span></th>
+    <th class="num">shock<br><span style="opacity:.6">テンション倍率</span></th>
+    <th class="num">attract<br><span style="opacity:.6">アタリ速さ</span></th>
+    <th class="num">biteWindow<br><span style="opacity:.6">アワセ猶予</span></th>
     <th class="num">pull0=1.0 の魚を<br>巻き続けて切れるまで</th><th class="l">説明</th>
     </tr></thead><tbody>${LINES.map((l) => `<tr>
       <td class="l name">${ico(l.icon)}${l.name}</td><td class="num">${l.price.toLocaleString()}</td><td class="num">${l.level}</td>
       <td class="num" style="color:var(--warn)">${l.cap}</td>
-      <td class="num">${f1(l.cap / ((0.08 + 1.0 * 0.55) / 1.0))} 秒</td>
+      <td class="num">${l.shock}</td><td class="num">${l.attract}</td><td class="num">${l.biteWindow}</td>
+      <td class="num">${f1(l.cap / ((0.08 + 1.0 * 0.55) * l.shock / 1.0))} 秒</td>
       <td class="l" style="white-space:normal;color:var(--fg-dim)">${l.desc}</td></tr>`).join('')}</tbody>
-      <tfoot><tr><td colspan="6" class="l">「切れるまで」は竹の釣り竿（power 1.0）で pull0 = 1.0 の魚を巻き続けた場合。power が高いほど伸びます。</td></tr></tfoot></table>`;
+      <tfoot><tr><td colspan="9" class="l">「切れるまで」は竹の釣り竿（power 1.0）で pull0 = 1.0 の魚を巻き続けた場合（<code>line.shock</code> ぶん反映済み）。power が高いほど伸びます。</td></tr></tfoot></table>`;
 
   document.getElementById('baitTable').innerHTML = `<table><thead><tr>
     <th class="l">エサ</th><th class="num">価格 G</th><th class="num">束</th><th class="num">1個</th><th class="num">解禁 Lv</th><th class="l">得意</th>

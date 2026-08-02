@@ -510,13 +510,49 @@ export const RODS = [
   },
 ];
 
+/* ラインは「素材（ナイロン／フロロ／PE）× 号数（1〜3号）」の組み合わせ。
+   号数は同じ素材内での強度の階段（1号<2号<3号）だけを動かし、素材が強度以外の
+   性格（一長一短）を決める：
+     ナイロン: よく伸びて衝撃を逃がす＝テンションが上がりにくく寛容。その代わり強度は
+               控えめで、アタリを感じにくいぶんアワセの猶予も短い
+     フロロ  : 水中で見えにくくアタリが速い。強度・寛容さ・アワセ猶予は標準的な中間型
+     PE      : 同じ太さなら圧倒的な強度で、伸びがほぼ無いぶんアタリが直に伝わり
+               アワセの猶予は一番長い。ただし糸が目立ちやすくアタリはやや遅く、
+               テンションが急に上がる（＝寛容さは最低）ので巻き方が雑だとすぐ切れる
+   attract: アタリまでの速さ倍率（bait.attract 等と同じ意味）
+   shock  : ファイト中のテンション増加倍率（低いほど衝撃を逃がして粘る＝寛容）
+   biteWindow: アワセ猶予（アタリ本番の反応時間）の倍率 */
 export const LINES = [
-  { id: 'nylon', name: 'ナイロン 2号', icon: 'line-nylon', price: 0, level: 1, cap: 1.0, desc: '標準的な糸。切れやすいので丁寧に。' },
-  { id: 'fluoro', name: 'フロロカーボン 4号', icon: 'line-fluoro', price: 600, level: 1, cap: 1.32, desc: '水中で見えにくく、強度も上がる。' },
-  { id: 'pe', name: 'PEライン 1.5号', icon: 'line-pe', price: 2600, level: 4, cap: 1.68, desc: '伸びない高強度編組ライン。' },
-  { id: 'spider', name: '特殊繊維「蜘蛛糸」', icon: 'line-spider', price: 9500, level: 8, cap: 2.15, desc: '細いのに驚異的な強度を誇る。' },
-  { id: 'mithril', name: 'ミスリルライン', icon: 'line-mithril', price: 30000, level: 13, cap: 2.8, desc: '銀色に輝く不思議な糸。まず切れない。' },
+  { id: 'nylon1', name: 'ナイロン 1号', icon: 'line-nylon', price: 0, level: 1,
+    cap: 0.72, attract: 1.08, shock: 0.9, biteWindow: 0.85,
+    desc: '最も手頃な一本。細く目立たないぶんアタリは速いが、すぐ切れる。' },
+  { id: 'nylon2', name: 'ナイロン 2号', icon: 'line-nylon', price: 0, level: 1,
+    cap: 1.0, attract: 1.0, shock: 0.9, biteWindow: 0.85,
+    desc: '標準的な太さの万能糸。伸びが衝撃を逃がすので粘り強い。' },
+  { id: 'nylon3', name: 'ナイロン 3号', icon: 'line-nylon', price: 300, level: 2,
+    cap: 1.35, attract: 0.92, shock: 0.9, biteWindow: 0.85,
+    desc: '太くして強度を底上げした一本。太いぶんアタリはやや遅い。' },
+  { id: 'fluoro1', name: 'フロロカーボン 1号', icon: 'line-fluoro', price: 260, level: 1,
+    cap: 1.12, attract: 1.24, shock: 1.0, biteWindow: 1.0,
+    desc: '水中で見えにくい細糸。食いつきは抜群だが心もとない太さ。' },
+  { id: 'fluoro2', name: 'フロロカーボン 2号', icon: 'line-fluoro', price: 850, level: 3,
+    cap: 1.55, attract: 1.15, shock: 1.0, biteWindow: 1.0,
+    desc: '見えにくさと強さのバランスが良い定番。' },
+  { id: 'fluoro3', name: 'フロロカーボン 3号', icon: 'line-fluoro', price: 1900, level: 6,
+    cap: 2.09, attract: 1.06, shock: 1.0, biteWindow: 1.0,
+    desc: '見えにくさはそのままに強度を底上げした一本。' },
+  { id: 'pe1', name: 'PEライン 1号', icon: 'line-pe', price: 1400, level: 4,
+    cap: 1.66, attract: 0.95, shock: 1.1, biteWindow: 1.2,
+    desc: '伸びない高強度糸。アタリは直に伝わるが目立ちやすい。' },
+  { id: 'pe2', name: 'PEライン 2号', icon: 'line-pe', price: 4200, level: 8,
+    cap: 2.3, attract: 0.88, shock: 1.1, biteWindow: 1.2,
+    desc: '扱いやすい太さの高強度ライン。伸びない分すぐ張り詰める。' },
+  { id: 'pe3', name: 'PEライン 3号', icon: 'line-pe', price: 9500, level: 12,
+    cap: 3.11, attract: 0.81, shock: 1.1, biteWindow: 1.2,
+    desc: 'とにかく強いが、伸びず目立つ玄人向けの一本。太くて最もアタリが遅い。' },
 ];
+/** 旧セーブ（素材だけでサイズの無かった頃）からの読み替え */
+export const LINE_ALIAS = { nylon: 'nylon2', fluoro: 'fluoro2', pe: 'pe2', spider: 'pe3', mithril: 'pe3' };
 
 /**
  * depth: エサが到達する狙いの水深(m)
@@ -749,6 +785,9 @@ const STAT_WORDS = {
   attractBait: ['ふつう', 'やや速い', '速い', 'かなり速い', '抜群'],
   rare: ['出にくい', 'ふつう', 'やや出やすい', '出やすい', 'かなり出やすい'],
   junk: ['多い', 'やや多い', 'ふつう', '少ない', 'とても少ない'],
+  shock: ['よく粘る', '粘る', 'ふつう', 'やや硬い', '直に伝わる'],
+  biteWindow: ['短い', 'やや短い', 'ふつう', 'やや長い', '長い'],
+  attractLine: ['遅い', 'やや遅い', 'ふつう', 'やや速い', '速い'],
 };
 
 /** 同種アイテム内での順位を言葉に（invert = 小さいほど良い） */
@@ -778,7 +817,12 @@ export function gearStats(kind, it) {
     ];
   }
   if (kind === 'line') {
-    return [['強度', rankWord(LINES, (l) => l.cap, it, STAT_WORDS.cap)]];
+    return [
+      ['強度', rankWord(LINES, (l) => l.cap, it, STAT_WORDS.cap)],
+      ['アタリ', rankWord(LINES, (l) => l.attract, it, STAT_WORDS.attractLine)],
+      ['粘り', rankWord(LINES, (l) => l.shock, it, STAT_WORDS.shock)],
+      ['アワセ猶予', rankWord(LINES, (l) => l.biteWindow, it, STAT_WORDS.biteWindow)],
+    ];
   }
   // エサは 1.0 を基準にした倍率なので、しきい値で「ふつう」を基準に置く
   return [

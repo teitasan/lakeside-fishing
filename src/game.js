@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { Environment } from './sky.js';
 import { Terrain, WATER_REGION } from './terrain.js';
-import { resolveLake, CAST_MAX } from './lakefield.js';
+import { resolveLake } from './lakefield.js';
 import { Water } from './water.js';
 import { FishSchool } from './fish.js';
 import { preloadFishTextures } from './fishTextures.js';
@@ -80,15 +80,6 @@ const CAM_MAX = 9;
 /** 湖を作り直して再読み込みした直後は、タイトルを飛ばして再開する */
 export const AUTOSTART_KEY = 'lakeside-fishing-autostart';
 
-/* 湖の採用条件は「CAST_MAX（46m）の範囲に全魚種の生息層がある」こと。
-   それより短い竿を出すと、その竿では届かない魚が生まれて詰む */
-{
-  const short = GEAR.rod.filter((r) => !(r.cast >= CAST_MAX));
-  if (short.length) {
-    console.warn(`[data] 飛距離が ${CAST_MAX}m 未満の竿があります（${short.map((r) => r.id).join(', ')}）。`
-      + '湖はこの距離に全魚種の層があることを条件に生成しているため、届かない魚が出ます');
-  }
-}
 
 /* ---------------- キャストの弾道 ----------------
    仕掛けは空気抵抗を受けるので、飛距離は初速に比例しない。
@@ -147,6 +138,7 @@ const _v3 = new THREE.Vector3();
 const _v4 = new THREE.Vector3();
 const _v5 = new THREE.Vector3();
 const _v6 = new THREE.Vector3();
+const _lineEnd = new THREE.Vector3();
 
 export class Game {
   constructor(canvas) {
@@ -1127,6 +1119,9 @@ export class Game {
     const hookDepth = clamp(surf0 - f.pos.y, 0.4, 48);
     this.fight = {
       len0,
+      // 掛けた瞬間の向き。魚の見た目の位置はこれを基準にする（毎フレームの
+      // 現在の向きを使うと、ファイト中に視点を回すだけで魚が振り回されて見える）
+      yaw0: this.yaw,
       // 糸の残りぶんしか走らせられないので、目一杯投げたときはそこで打ち止め
       span: Math.max(len0 + 4, Math.min(len0 + RUN_MARGIN, this.maxLine)),
       dist: len0,
@@ -1214,20 +1209,34 @@ export class Game {
       },
     });
 
-    // 釣り人
+    // 釣り人（しなり方向は糸の先＝ファイト中は口、それ以外はウキ）
     const fightT = this.fight ? clamp01(this.fight.tension / this.line.cap) : 0;
+    let lineEnd = null;
+    if (this.fs === 'fight' && this.hookFish) {
+      lineEnd = this.hookFish.mouthPos(_lineEnd);
+    } else if (
+      this.fs === 'flight' || this.fs === 'wait'
+      || this.fs === 'nibble' || this.fs === 'bite'
+    ) {
+      lineEnd = this.bobber;
+    }
     this.angler.pitch = this.pitch;
     this.angler.update(dt, {
+      // ナブル・アタリは「待ち」の姿勢のまま、竿先の震え・引き込みだけ別枠で乗る
       state: this.fs === 'charge' ? 'charge'
         : this.fs === 'fight' ? 'fight'
           : this.fs === 'landing' || this.fs === 'card' ? 'landed'
-            : this.fs === 'wait' || this.fs === 'nibble' || this.fs === 'bite' ? 'wait'
-              : this.fs === 'flight' ? 'flight' : 'idle',
+            : this.fs === 'nibble' ? 'nibble'
+              : this.fs === 'bite' ? 'bite'
+                : this.fs === 'wait' ? 'wait'
+                  : this.fs === 'flight' ? 'flight' : 'idle',
       charge: this.charge,
       tension: fightT,
       moving: this.moveAmt,
       reeling: this.fs === 'fight' && this.actionHeld,
+      rarity: this.hookFish ? this.hookFish.species.rarity : 0,
       time: this.time,
+      lineEnd,
     });
 
     this.ui.updateHUD(this);
@@ -1853,8 +1862,9 @@ export class Game {
     this.water.addRipple(x, z, 0.6, 1.3);
     // 近くの魚を驚かせる（上手いキャストなら控えめ）
     this.school.startle(x, z, this.castPerfect ? 1.4 : 2.6 + this.castPower * 2.2);
-    // アタリまでの時間
-    const attract = this.bait.attract * this.rod.attract * this.env.weather.bite * (this.castPerfect ? 1.18 : 1);
+    // アタリまでの時間（ラインの見え方も効く：フロロは速く、PEはやや遅い）
+    const attract = this.bait.attract * this.rod.attract * this.line.attract
+      * this.env.weather.bite * (this.castPerfect ? 1.18 : 1);
     const depth = this.terrain.depthAt(x, z);
     let base = rand(2.2, 7.0) / attract;
     if (depth < 0.9) base *= 1.7;
@@ -1951,7 +1961,9 @@ export class Game {
     const sp = this.hookFish.species;
     this.fs = 'bite';
     this.stateTime = 0;
-    this.biteWindow = lerp(1.55, 0.85, clamp01(sp.rarity / 5)) * (sp.tags.includes('trout') ? 0.8 : 1);
+    // ラインの伸びが少ないほどアタリが直に伝わる＝アワセの猶予が長い（PE は長く、ナイロンは短い）
+    this.biteWindow = lerp(1.55, 0.85, clamp01(sp.rarity / 5))
+      * (sp.tags.includes('trout') ? 0.8 : 1) * this.line.biteWindow;
     this.audio.bite();
     this.ui.biteAlert();
     this.water.addSplash(this.bobber.x, this.water.surfaceY(this.bobber.x, this.bobber.z), this.bobber.z, 8, 0.5);
@@ -2055,7 +2067,8 @@ export class Game {
       // m/s。遠いうちは糸を送り込むだけなので速く、寄せるほど重くなる
       const rate = this.rod.reel * REEL_MPS * resist * (1 + F.dist * 0.012) * F.spin;
       F.dist -= rate * dt;
-      let gain = (0.08 + pull * 0.55) * P.tensionGain * shortLine;
+      // ラインの伸び（shock）：ナイロンは衝撃を逃がして上がりにくく、PE は伸びずに直に伝わる
+      let gain = (0.08 + pull * 0.55) * P.tensionGain * shortLine * this.line.shock;
       if (shakeBite) gain *= P.shakeGain;
       if (jumpBite) gain *= P.jumpTension;
       F.tension += gain * dt / this.rod.power;
@@ -2064,7 +2077,7 @@ export class Game {
       F.spin *= Math.exp(-dt / SPIN_DOWN);             // 離すとリールは止まっていく
       F.dist += pull * LINEOUT_MPS * P.lineOut * dt;   // 出される糸は距離に関係なく m/s
       F.tension -= (1.30 + pull * 0.30) * P.tensionDecay * dt;
-      if (F.running) F.tension += pull * 0.30 * shortLine * dt;
+      if (F.running) F.tension += pull * 0.30 * shortLine * this.line.shock * dt;
       // 跳ねている間に糸を送れていれば、魚が余計に消耗する
       if (jumping) F.stamina -= (P.jumpDrain || 0) * dt;
     }
@@ -2075,11 +2088,13 @@ export class Game {
     F.stamina -= (0.022 + tRatio * 0.17 + (reeling ? 0.02 : 0)) * P.staminaDrain * dt / Math.max(0.4, sp.sta);
     F.stamina = clamp01(F.stamina);
 
-    /* --- 魚の位置（見た目） --- */
+    /* --- 魚の位置（見た目） ---
+       near は「掛けた時の向き」で固定する（this.yaw を使うと、ファイト中に
+       視点を動かしただけで near が振れて魚が一緒に振り回されてしまう） */
     if (!this.bobberFar) this.bobberFar = this.bobber.clone();
     const near = _v2.set(this.pos.x, 0, this.pos.z);
-    near.x += Math.sin(this.yaw) * 1.6;
-    near.z += Math.cos(this.yaw) * 1.6;
+    near.x += Math.sin(F.yaw0) * 1.6;
+    near.z += Math.cos(F.yaw0) * 1.6;
     const far = _v3.copy(this.bobberFar);
 
     F.lateral = damp(F.lateral, (F.running ? Math.sin(F.time * 1.7) * 1.9 : Math.sin(F.time * 0.9) * 0.7), 3, dt);
