@@ -458,7 +458,7 @@ F.runDur  = rand(<span class="n">0.6</span>, <span class="n">1.2</span>) * P.run
   × 生息水深の適合 depthFit(sp, その場所の水深)          <span class="cm">// ② どこに居るか</span>
   × sp.times[時間帯]                                    <span class="cm">// ③ 朝/昼/夕/夜</span>
   × sp.weather[天候]                                    <span class="cm">// ④ 晴/曇/雨</span>
-  × エサ相性                                            <span class="cm">// ⑤ タグの平均</span>
+  × エサ相性                                            <span class="cm">// ⑤ 魚種ごとの好き嫌い表（pref）</span>
   × 遊泳層[プレイヤーが選んだ層]                        <span class="cm">// ⑥ 水中のどこで食うか</span>
   × (レア度≧3 なら bait.rare) × rod.attract             <span class="cm">// ⑦ レア補正</span>
   × 底質の相性 ^ 層の底寄り度                            <span class="cm">// ⑧ 砂地/岩場/泥底</span>
@@ -491,9 +491,13 @@ d0 ≦ 水深 ≦ d1              → <span class="n">1.00</span>
 レア度5（レジェンド）× clamp01((Lv − <span class="n">5</span>) / <span class="n">6</span>)           <span class="cm">// 湖の主・イトウは tags に legend → 下限なし</span></pre>
 
     <div class="note">
-      <b>エサ相性（⑤）</b>は、魚の <code>tags</code> のうちエサの <code>aff</code> に載っているものの<b>平均</b>です。
-      例：ブラックバスの tags は <code>predator, weed</code>。スプーンの aff は predator 1.5 / weed 0.8 →
-      相性は (1.5 + 0.8) / 2 = <b>1.15</b>。1 つも一致しなければ 1.0（無補正）。
+      <b>エサ相性（⑤）</b>は、魚種ごとに直接持たせた好き嫌い表 <code>SPECIES[].pref</code>（エサの並び順に 0〜3 の整数）を
+      <code>PREF_MULT = [0, 0.5, 1.0, 1.6]</code> で倍率に変換したものです（<code>baitPrefMult()</code>）。
+      例：ブラックバスの泳がせ（小魚）への pref は <b>3（好物）</b>→ 倍率 <b>1.6</b>。<br>
+      以前は <code>tags</code> のうちエサの <code>aff</code> に載っているものの<b>平均</b>で計算していましたが、
+      無関係なタグを共有しているだけで食いつきが水増しされる事故が起きたため
+      （例：ワカサギが <code>deep</code> タグを共有するだけで泳がせ餌に寄ってきた）、
+      魚種ごとに直接持たせる方式に変更しました。生態に合わない組み合わせは <b>pref=0 で絶対に釣れません</b>。
     </div>
 
     <h3>いま何が釣れる？ 出現確率シミュレータ</h3>
@@ -704,7 +708,8 @@ p    = <span class="n">2.1</span> − min(<span class="n">1.2</span>, bait.rare 
 
     <h3>エサ</h3>
     <p>
-      <b>attract</b>＝アタリの速さ、<b>rare</b>＝レア度 3 以上の重み＆サイズ補正、<b>junk</b>＝ゴミ率の倍率、<b>aff</b>＝タグ別の食いつき。
+      <b>attract</b>＝アタリの速さ、<b>rare</b>＝レア度 3 以上の重み＆サイズ補正、<b>junk</b>＝ゴミ率の倍率。
+      食いつきそのものは魚種ごとの <code>pref</code> 表（下記「エサ相性」参照）で決まります。
       <b>エサは層を持ちません</b>（狙う層＝タナは <kbd>E</kbd> の仕掛けウインドウで 表層／中層／底層 の 3 択で決めます）。
       ルアーは<b>投げて放置する操作と噛み合わない</b>ため廃止し、すべて置き餌・生き餌に置き換えました。
     </p>
@@ -1083,7 +1088,7 @@ dockDist = 桟橋までの距離</pre>
 <script type="module">
 import {
   SPECIES, RARITY, RODS, LINES, BAITS, ACHIEVEMENTS, RIG_LAYERS,
-  baitStrengths, TAG_LABEL, swimLayer, swimLayerLabel, depthFit, depthBandAt, dielNote,
+  baitStrengths, baitPrefMult, PREF_MULT, BAIT_ORDER, TAG_LABEL, swimLayer, swimLayerLabel, depthFit, depthBandAt, dielNote,
   bedAffinity, structureBonus, BED_LABEL, TERRAIN_KINDS, TERRAIN_GROUPS,
   FIGHT_PATTERNS, fightPattern, weightOf, valueOf, xpOf,
 } from './src/data.js';
@@ -1467,11 +1472,8 @@ function runTbl() {
 /* ============================================================
    2. アタリ抽選シミュレータ
    ============================================================ */
-function baitAffinity(sp, bait) {
-  let sum = 0, n = 0;
-  for (const t of sp.tags) if (bait.aff[t] !== undefined) { sum += bait.aff[t]; n++; }
-  return n ? sum / n : 1;
-}
+// ゲーム本体の baitAffinity と同じ：魚種ごとの好き嫌い表（pref, 0〜3）を倍率にする
+const baitAffinity = (sp, bait) => baitPrefMult(sp, bait);
 function biteWeights({ depth, hour, weather, baitId, rodId, level, layer, bed, struct }) {
   const band = timeBand(hour);
   const bait = BAITS.find((b) => b.id === baitId);
@@ -1775,15 +1777,24 @@ function runRoll() {
       <td class="l" style="white-space:normal;color:var(--fg-dim)">${t.fish}</td></tr>`).join('')}</tbody>
     <tfoot><tr><td colspan="5" class="l">src/data.js — TERRAIN_KINDS / terrainMatches()、src/game.js — terrainCtxAt() / _noteTerrain()</td></tr></tfoot></table>`;
 
-  const tags = ['bottom', 'mid', 'predator', 'trout', 'carp', 'weed', 'deep', 'legend'];
+  /* エサ相性は「魚種ごとの直接の好き嫌い表」（pref, 0〜3）に一本化されている。
+     タグ相性の平均だと、無関係なタグを共有しているだけで食いつきが水増し／希釈
+     される事故が起きる（例：ワカサギが mid/deep を持つだけで泳がせ餌に寄ってきた
+     問題）。魚種ごとに直接持たせることで、そういう組み合わせを確実に 0 にできる */
+  const prefWord = ['食べない', '苦手', 'ふつう', '好物'];
   document.getElementById('affTable').innerHTML = `<table><thead><tr>
-    <th class="l">エサ相性（aff）</th>${tags.map((t) => `<th class="num">${TAG_LABEL[t] || t}<br><span style="opacity:.5;font-size:9px">${t}</span></th>`).join('')}
-    </tr></thead><tbody>${BAITS.map((b) => `<tr><td class="l name">${ico(b.icon)}${b.name}</td>
-      ${tags.map((t) => {
-        const v = b.aff[t];
-        return `<td class="num" style="color:${v === undefined ? 'var(--fg-mute)' : v >= 1.5 ? 'var(--good)' : v <= 0.5 ? 'var(--bad)' : 'inherit'}">${v === undefined ? '—' : f2(v)}</td>`;
+    <th class="l">魚種 → エサの好き嫌い（pref）</th>
+    ${BAITS.map((b) => `<th class="num">${ico(b.icon)}<br><span style="opacity:.6;font-size:9px">${b.name}</span></th>`).join('')}
+    </tr></thead><tbody>${SPECIES.filter((s) => s.rarity > 0).map((sp) => `<tr>
+      <td class="l name">${sp.name}<br><span style="opacity:.5;font-size:9px">${sp.tags.join(',')}</span></td>
+      ${BAITS.map((b) => {
+        const p = sp.pref ? sp.pref[BAIT_ORDER.indexOf(b.id)] : 2;
+        const col = p === 0 ? 'var(--bad)' : p === 3 ? 'var(--good)' : p === 1 ? 'var(--warn)' : 'inherit';
+        return `<td class="num" style="color:${col}" title="${prefWord[p]}">${p}</td>`;
       }).join('')}</tr>`).join('')}</tbody>
-      <tfoot><tr><td colspan="${tags.length + 1}" class="l">魚の tags のうち、この表に値があるものの<b>平均</b>が重み ⑤ になります（該当なしは 1.0）。</td></tr></tfoot></table>`;
+      <tfoot><tr><td colspan="${BAITS.length + 1}" class="l">
+        0=食べない（絶対に釣れない）／1=苦手だが食べなくはない／2=ふつう／3=好物。
+        倍率は <code>PREF_MULT = [0, 0.5, 1.0, 1.6]</code>。src/data.js — SPECIES[].pref, PREF_MULT, baitPrefMult()</td></tr></tfoot></table>`;
 })();
 
 /* ============================================================

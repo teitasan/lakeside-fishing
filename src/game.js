@@ -18,6 +18,7 @@ import {
   REAL_FISH, JUNK, GEAR, ACHIEVEMENTS, RIG_LAYERS, rigLayerOf, swimLayer, depthFit,
   bedAffinity, structureBonus, terrainMatches, TERRAIN_BY_ID,
   rollWeight, catchDisplayName, catchDisplayPrefix, valueOf, xpOf, rollLength, rollAlbino, fightPattern,
+  baitPrefMult,
 } from './data.js';
 import {
   clamp, clamp01, lerp, damp, rand, pick, weightedPick, TAU, timeBand, fmt1,
@@ -785,14 +786,9 @@ export class Game {
   /* =========================================================
      魚種の抽選
      ========================================================= */
+  /** 魚種ごと・エサごとの食いつき（0〜3 の好き嫌い表を倍率に変換） */
   baitAffinity(sp) {
-    const aff = this.bait.aff;
-    let sum = 0, n = 0;
-    for (const t of sp.tags) {
-      if (aff[t] !== undefined) { sum += aff[t]; n++; }
-    }
-    if (!n) return 1;
-    return sum / n;
+    return baitPrefMult(sp, this.bait);
   }
 
   /**

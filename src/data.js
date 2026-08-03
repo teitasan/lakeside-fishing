@@ -145,7 +145,7 @@ export const SPECIES = [
     id: 'medaka', name: 'メダカ', rarity: 1, tags: ['mid', 'weed'], shape: 'slim',
     len: [2.5, 5], wc: 1.6, depth: [0.2, 0.9], spawn: 38, times: T.dayish, weather: W.any,
     str: 0.2, sta: 0.25, agg: 0.15, value: 8, perCm: 0.8,
-    fight: 'dash',
+    fight: 'dash', pref: [2, 3, 1, 0, 0, 0, 2],
     layer: { top: 1.0, mid: 0.45, bottom: 0.05 }, // 岸ぎわの水面だけ
     colors: { top: '#5a6a48', mid: '#a8b878', belly: '#f0eed8', fin: '#c4c090' },
     flavor: '水面をきらめく豆粒ほどの魚。昔ながらの池の住人。',
@@ -154,7 +154,7 @@ export const SPECIES = [
     id: 'moroko', name: 'モロコ', rarity: 1, tags: ['bottom', 'mid'], shape: 'slim',
     len: [7, 16], wc: 1.4, depth: [0.5, 3.5], spawn: 34, times: T.dayish, weather: W.any,
     str: 0.35, sta: 0.4, agg: 0.2, value: 14, perCm: 1.2,
-    fight: 'dash',
+    fight: 'dash', pref: [3, 3, 2, 1, 0, 0, 2],
     layer: { top: 0.5, mid: 1.0, bottom: 0.8 }, // 群れで中層〜底を回る
     colors: { top: '#6d7a5c', mid: '#a8b291', belly: '#e8e6d6', fin: '#c9c3a6' },
     flavor: '群れで泳ぐ小さな魚。佃煮がうまい。',
@@ -163,7 +163,7 @@ export const SPECIES = [
     id: 'bluegill', name: 'ブルーギル', rarity: 1, tags: ['mid', 'weed'], shape: 'deep',
     len: [9, 25], wc: 3.1, depth: [0.8, 5], spawn: 32, times: T.dayish, weather: W.any,
     str: 0.55, sta: 0.55, agg: 0.4, value: 20, perCm: 1.6,
-    fight: 'dash',
+    fight: 'dash', pref: [3, 2, 2, 2, 2, 1, 2],
     colors: { top: '#31513f', mid: '#5d8b63', belly: '#e9d98a', fin: '#2b3f38' },
     flavor: '青い頬。どこにでもいて、何にでも食いつく。',
   },
@@ -171,7 +171,7 @@ export const SPECIES = [
     id: 'funa', name: 'マブナ', rarity: 1, tags: ['bottom', 'carp'], shape: 'deep',
     len: [14, 36], wc: 2.7, depth: [1, 6.5], spawn: 30, times: T.any, weather: W.cloudy,
     str: 0.7, sta: 0.7, agg: 0.3, value: 26, perCm: 2.0,
-    fight: 'tank',
+    fight: 'tank', pref: [3, 2, 3, 1, 1, 0, 2],
     diel: { dawn: -0.4, day: 0.3, dusk: -0.3, night: -0.5 }, // 夜は岸寄りの浅場へ
     colors: { top: '#5b5535', mid: '#9c9257', belly: '#ded7ad', fin: '#7c7143' },
     flavor: '「釣りはフナに始まりフナに終わる」。',
@@ -180,7 +180,7 @@ export const SPECIES = [
     id: 'ugui', name: 'ウグイ', rarity: 1, tags: ['mid'], shape: 'slim',
     len: [14, 42], wc: 1.35, depth: [0.5, 5.5], spawn: 28, times: T.any, weather: W.rain,
     str: 0.65, sta: 0.6, agg: 0.5, value: 24, perCm: 1.7,
-    fight: 'jumper',
+    fight: 'jumper', pref: [3, 2, 2, 2, 2, 1, 2],
     colors: { top: '#4b5b6b', mid: '#8fa2ae', belly: '#f0f2f0', fin: '#c98a70' },
     flavor: '婚姻色の朱い帯が美しい。引きは意外に強い。',
   },
@@ -188,7 +188,7 @@ export const SPECIES = [
     id: 'dojo', name: 'ドジョウ', rarity: 1, tags: ['bottom'], shape: 'eel',
     len: [8, 19], wc: 0.45, depth: [0.5, 4], spawn: 22, times: T.nightish, weather: W.rain,
     str: 0.4, sta: 0.45, agg: 0.2, value: 22, perCm: 2.4,
-    fight: 'shake',
+    fight: 'shake', pref: [3, 2, 1, 1, 1, 0, 2],
     colors: { top: '#4a3d2a', mid: '#7b6743', belly: '#d8c79a', fin: '#5b4b32' },
     flavor: '泥の中からにゅるり。にょろにょろと手強い。',
   },
@@ -196,7 +196,7 @@ export const SPECIES = [
     id: 'oikawa', name: 'オイカワ', rarity: 1, tags: ['mid'], shape: 'slim',
     len: [8, 20], wc: 1.15, depth: [0.5, 4], spawn: 26, times: T.dayish, weather: W.clear,
     str: 0.45, sta: 0.45, agg: 0.5, value: 16, perCm: 1.4,
-    fight: 'dash',
+    fight: 'dash', pref: [2, 3, 1, 1, 0, 0, 2],
     colors: { top: '#5c6f78', mid: '#b9c6c8', belly: '#f2f0e6', fin: '#c98b9a' },
     flavor: '日中の浅場をきらきらと泳ぐ。オスは婚姻色が美しい。',
   },
@@ -204,7 +204,7 @@ export const SPECIES = [
     id: 'tanago', name: 'タナゴ', rarity: 1, tags: ['weed', 'mid'], shape: 'deep',
     len: [5, 12], wc: 2.6, depth: [0.5, 3], spawn: 23, times: T.dayish, weather: W.any,
     str: 0.3, sta: 0.35, agg: 0.3, value: 20, perCm: 2.4,
-    fight: 'dash',
+    fight: 'dash', pref: [1, 3, 1, 0, 0, 0, 2],
     colors: { top: '#3b4a63', mid: '#8fa6c4', belly: '#f0ead8', fin: '#d98a5a' },
     flavor: '手のひらに収まる宝石。二枚貝に卵を産む。',
   },
@@ -212,7 +212,7 @@ export const SPECIES = [
     id: 'prawn', name: 'テナガエビ', rarity: 1, tags: ['bottom', 'weed'], shape: 'shrimp',
     len: [8, 16], wc: 1.45, depth: [0.5, 4.5], spawn: 20, times: T.nightish, weather: W.any,
     str: 0.3, sta: 0.4, agg: 0.15, value: 22, perCm: 2.8,
-    fight: 'dash',
+    fight: 'dash', pref: [3, 2, 1, 1, 1, 0, 2],
     diel: { dawn: -0.2, day: 0.4, dusk: -0.4, night: -0.8 }, // 夜行性。暗くなると浅場へ出てくる
     colors: { top: '#5b6470', mid: '#a9b3bd', belly: '#e8eaea', fin: '#cfd6d4' },
     flavor: '長い腕をゆらり。夜、石の間から出てくる。素揚げが最高。',
@@ -221,7 +221,7 @@ export const SPECIES = [
     id: 'crayfish', name: 'ザリガニ', rarity: 1, tags: ['bottom', 'weed'], shape: 'crayfish',
     len: [5, 15], wc: 3.5, depth: [0.4, 3], spawn: 22, times: T.any, weather: W.any,
     str: 0.5, sta: 0.7, agg: 0.1, value: 14, perCm: 1.5,
-    fight: 'deadweight',
+    fight: 'deadweight', pref: [3, 2, 1, 2, 2, 0, 2],
     diel: { dawn: -0.2, day: 0.4, dusk: -0.4, night: -0.8 }, // 夜行性。暗くなると石の間から浅場へ出てくる
     colors: { top: '#7a2c1e', mid: '#c05334', belly: '#e8b18c', fin: '#8e3a24' },
     flavor: 'ハサミを振り上げて一歩も引かない。引くだけ引いて離さない。',
@@ -232,7 +232,7 @@ export const SPECIES = [
     id: 'rainbow', name: 'ニジマス', rarity: 2, tags: ['trout', 'mid'], shape: 'slim',
     len: [21, 54], wc: 1.3, depth: [1, 8.5], spawn: 20, times: T.twilight, weather: W.cloudy,
     str: 1.0, sta: 0.95, agg: 0.8, value: 90, perCm: 4.2,
-    fight: 'jumper',
+    fight: 'jumper', pref: [2, 2, 1, 3, 2, 2, 2],
     layer: { // 朝夕は水面でライズ、日中は深い層へ落ちる
       dawn: { top: 1.0, mid: 0.9, bottom: 0.25 },
       day: { top: 0.3, mid: 0.85, bottom: 1.0 },
@@ -247,7 +247,7 @@ export const SPECIES = [
     id: 'bass', name: 'ブラックバス', rarity: 2, tags: ['predator', 'weed'], shape: 'wide',
     len: [24, 58], wc: 1.55, depth: [1, 7.5], spawn: 19, times: T.twilight, weather: W.cloudy,
     str: 1.15, sta: 1.0, agg: 1.1, value: 110, perCm: 4.6,
-    fight: 'dash',
+    fight: 'dash', pref: [1, 0, 0, 1, 2, 3, 2],
     layer: { // 朝夕はシャローの表層、日中はディープに落ちる。夜も浅い
       dawn: { top: 1.0, mid: 0.8, bottom: 0.2 },
       day: { top: 0.35, mid: 0.9, bottom: 1.0 },
@@ -262,7 +262,7 @@ export const SPECIES = [
     id: 'yamame', name: 'ヤマメ', rarity: 2, tags: ['trout'], shape: 'slim',
     len: [17, 42], wc: 1.2, depth: [0.5, 5], spawn: 16, times: T.dawnOnly, weather: W.rain,
     str: 0.95, sta: 0.9, agg: 0.9, value: 130, perCm: 5.0,
-    fight: 'jumper',
+    fight: 'jumper', pref: [2, 2, 1, 3, 2, 1, 2],
     layer: { // 朝マズメに水面を意識し、日中は沈む
       dawn: { top: 1.0, mid: 0.85, bottom: 0.2 },
       day: { top: 0.45, mid: 1.0, bottom: 0.7 },
@@ -276,7 +276,7 @@ export const SPECIES = [
     id: 'namazu', name: 'ナマズ', rarity: 2, tags: ['bottom', 'predator', 'deep'], shape: 'eel',
     len: [34, 84], wc: 1.25, depth: [3.5, 15], spawn: 15, times: T.nightish, weather: W.rain,
     str: 1.35, sta: 1.3, agg: 0.6, value: 150, perCm: 4.0,
-    fight: 'shake',
+    fight: 'shake', pref: [2, 1, 1, 1, 3, 3, 2],
     diel: { dawn: 0, day: 0.8, dusk: -0.5, night: -1 }, // 夜にシャローへ差して餌を探す。日中は深場の底
     colors: { top: '#3a3a2e', mid: '#6b6550', belly: '#cfc7a4', fin: '#4a463a' },
     flavor: '長いヒゲでゆらり。掛かると重量感のある首振り。',
@@ -285,7 +285,7 @@ export const SPECIES = [
     id: 'koi', name: 'コイ', rarity: 2, tags: ['carp', 'bottom'], shape: 'wide',
     len: [38, 92], wc: 2.5, depth: [1.5, 9.5], spawn: 14, times: T.any, weather: W.cloudy,
     str: 1.5, sta: 1.55, agg: 0.5, value: 170, perCm: 3.6,
-    fight: 'tank',
+    fight: 'tank', pref: [2, 1, 3, 1, 1, 0, 2],
     diel: { dawn: -0.6, day: 0.5, dusk: -0.4, night: -0.8 }, // 夜から朝マズメに浅場へ入って餌を漁る
     colors: { top: '#5a4a2c', mid: '#a3854a', belly: '#e6dcb4', fin: '#7c6234' },
     flavor: '悠然と泳ぐ湖の主候補。走り出すと止まらない。',
@@ -294,7 +294,7 @@ export const SPECIES = [
     id: 'wakasagi', name: 'ワカサギ', rarity: 2, tags: ['mid', 'deep'], shape: 'slim',
     len: [7, 16], wc: 0.85, depth: [4, 14], spawn: 15, times: T.twilight, weather: W.cloudy,
     str: 0.5, sta: 0.5, agg: 0.45, value: 70, perCm: 4.6,
-    fight: 'dash',
+    fight: 'dash', pref: [1, 3, 1, 0, 0, 0, 2],
     layer: { // プランクトンを追って昼は深い層、朝夕〜夜は浮く（氷上釣りでも昼は底層）
       dawn: { top: 0.95, mid: 1.0, bottom: 0.3 },
       day: { top: 0.15, mid: 0.7, bottom: 1.0 },
@@ -308,7 +308,7 @@ export const SPECIES = [
     id: 'nigoi', name: 'ニゴイ', rarity: 2, tags: ['bottom', 'carp'], shape: 'slim',
     len: [26, 64], wc: 1.15, depth: [1.5, 10], spawn: 14, times: T.any, weather: W.cloudy,
     str: 1.2, sta: 1.15, agg: 0.6, value: 100, perCm: 3.8,
-    fight: 'tank',
+    fight: 'tank', pref: [3, 2, 2, 1, 1, 0, 2],
     colors: { top: '#57605c', mid: '#a7aea4', belly: '#eceade', fin: '#8b8f84' },
     flavor: 'コイに似て口先が長い。底を突きながら餌を探す。',
   },
@@ -316,7 +316,7 @@ export const SPECIES = [
     id: 'hasu', name: 'ハス', rarity: 2, tags: ['predator', 'mid'], shape: 'slim',
     len: [22, 52], wc: 1.1, depth: [1, 7], spawn: 13, times: T.dayish, weather: W.clear,
     str: 1.1, sta: 0.95, agg: 1.35, value: 140, perCm: 5.2,
-    fight: 'dash',
+    fight: 'dash', pref: [1, 0, 0, 1, 2, 3, 2],
     colors: { top: '#41525f', mid: '#9fb0b4', belly: '#f3f1e4', fin: '#b8bfae' },
     flavor: 'コイ科なのに小魚を追う。への字の口が特徴。',
   },
@@ -324,7 +324,7 @@ export const SPECIES = [
     id: 'mokuzugani', name: 'モクズガニ', rarity: 2, tags: ['bottom'], shape: 'crab',
     len: [6, 14], wc: 14, depth: [1, 8], spawn: 12, times: T.nightish, weather: W.rain,
     str: 0.9, sta: 1.3, agg: 0.1, value: 240, perCm: 9,
-    fight: 'deadweight',
+    fight: 'deadweight', pref: [3, 1, 1, 2, 2, 0, 2],
     diel: { dawn: -0.2, day: 0.4, dusk: -0.4, night: -0.8 }, // 夜に浅場を歩き回る
     colors: { top: '#3f4a3c', mid: '#75775e', belly: '#c9c2a4', fin: '#565a48' },
     flavor: 'ハサミに毛の生えた川のカニ。味は絶品、根掛かりのように重い。',
@@ -335,7 +335,7 @@ export const SPECIES = [
     id: 'iwana', name: 'イワナ', rarity: 3, tags: ['trout', 'deep'], shape: 'slim',
     len: [24, 62], wc: 1.25, depth: [3, 13], spawn: 9, times: T.dawnOnly, weather: W.rain,
     str: 1.25, sta: 1.15, agg: 1.0, value: 340, perCm: 8.0,
-    fight: 'shake',
+    fight: 'shake', pref: [2, 2, 1, 3, 2, 2, 3],
     layer: { // 日中は底に張り付き、朝夕に浮いて虫を食う
       dawn: { top: 0.8, mid: 1.0, bottom: 0.5 },
       day: { top: 0.15, mid: 0.7, bottom: 1.0 },
@@ -350,7 +350,7 @@ export const SPECIES = [
     id: 'snakehead', name: 'ライギョ', rarity: 3, tags: ['predator', 'weed'], shape: 'eel',
     len: [38, 94], wc: 1.15, depth: [0.5, 4.5], spawn: 8, times: T.dayish, weather: W.clear,
     str: 1.6, sta: 1.4, agg: 1.5, value: 380, perCm: 7.2,
-    fight: 'dash',
+    fight: 'dash', pref: [0, 0, 0, 0, 2, 3, 3],
     layer: { // 日中は水面のカバーで浮いている。夜は沈む（他の魚と逆）
       dawn: { top: 0.9, mid: 0.9, bottom: 0.4 },
       day: { top: 1.0, mid: 0.7, bottom: 0.15 },
@@ -364,7 +364,7 @@ export const SPECIES = [
     id: 'grasscarp', name: 'ソウギョ', rarity: 3, tags: ['carp', 'weed'], shape: 'slim',
     len: [52, 118], wc: 1.7, depth: [1.5, 8], spawn: 7, times: T.dayish, weather: W.clear,
     str: 1.85, sta: 1.8, agg: 0.7, value: 420, perCm: 6.4,
-    fight: 'tank',
+    fight: 'tank', pref: [1, 0, 2, 0, 0, 0, 3],
     layer: { top: 0.9, mid: 0.85, bottom: 0.5 }, // 水面の水草を食べる
     colors: { top: '#4d5340', mid: '#95a077', belly: '#e5e3c6', fin: '#6c7452' },
     flavor: '水草を食べる巨体。一度走られたら覚悟が必要。',
@@ -373,7 +373,7 @@ export const SPECIES = [
     id: 'biwatrout', name: 'ビワマス', rarity: 3, tags: ['trout', 'deep'], shape: 'slim',
     len: [29, 68], wc: 1.35, depth: [6, 19], spawn: 7, times: T.twilight, weather: W.cloudy,
     str: 1.45, sta: 1.3, agg: 1.2, value: 460, perCm: 8.6,
-    fight: 'jumper',
+    fight: 'jumper', pref: [1, 1, 0, 3, 2, 3, 3],
     layer: { // 朝は浅い層に上がり、日中は深層へ（トローリングの定番）
       dawn: { top: 0.9, mid: 1.0, bottom: 0.35 },
       day: { top: 0.1, mid: 0.65, bottom: 1.0 },
@@ -388,7 +388,7 @@ export const SPECIES = [
     id: 'unagi', name: 'ウナギ', rarity: 3, tags: ['bottom', 'deep'], shape: 'eel',
     len: [40, 100], wc: 0.6, depth: [2, 12], spawn: 7, times: T.nightish, weather: W.rain,
     str: 1.5, sta: 1.75, agg: 0.5, value: 520, perCm: 9.5,
-    fight: 'shake',
+    fight: 'shake', pref: [3, 1, 0, 1, 3, 2, 3],
     diel: { dawn: 0.2, day: 0.7, dusk: -0.4, night: -1 }, // 日中は底の穴に潜み、夜に浅場へ出てくる
     colors: { top: '#2c2b28', mid: '#5a5646', belly: '#e0d8b8', fin: '#3a382e' },
     flavor: '夜、底穴から出て餌を探す。掛けてからが本当の勝負。',
@@ -397,7 +397,7 @@ export const SPECIES = [
     id: 'sakuramasu', name: 'サクラマス', rarity: 3, tags: ['trout', 'deep'], shape: 'slim',
     len: [34, 72], wc: 1.4, depth: [5, 17], spawn: 6, times: T.twilight, weather: W.rain,
     str: 1.6, sta: 1.45, agg: 1.35, value: 600, perCm: 9.5,
-    fight: 'jumper',
+    fight: 'jumper', pref: [1, 1, 0, 3, 2, 3, 3],
     layer: { // 朝夕は浮き、日中は深い層に落ちる
       dawn: { top: 1.0, mid: 0.95, bottom: 0.3 },
       day: { top: 0.25, mid: 0.8, bottom: 1.0 },
@@ -412,7 +412,7 @@ export const SPECIES = [
     id: 'aouo', name: 'アオウオ', rarity: 3, tags: ['carp', 'deep'], shape: 'wide',
     len: [60, 140], wc: 1.85, depth: [4, 16], spawn: 5.5, times: T.any, weather: W.cloudy,
     str: 2.0, sta: 2.0, agg: 0.6, value: 560, perCm: 7,
-    fight: 'tank',
+    fight: 'tank', pref: [1, 0, 1, 0, 2, 0, 3],
     colors: { top: '#3b4149', mid: '#6f7a7d', belly: '#d9dcc9', fin: '#4d565a' },
     flavor: '貝を砕いて食う黒い巨体。ソウギョより重く、粘る。',
   },
@@ -422,7 +422,7 @@ export const SPECIES = [
     id: 'sturgeon', name: 'チョウザメ', rarity: 4, tags: ['deep', 'bottom'], shape: 'sturgeon',
     len: [78, 168], wc: 1.05, depth: [10, 24], spawn: 3.0, times: T.nightish, weather: W.cloudy,
     str: 2.3, sta: 2.3, agg: 0.9, value: 1400, perCm: 16,
-    fight: 'tank',
+    fight: 'tank', pref: [2, 1, 1, 2, 3, 2, 3],
     colors: { top: '#3d4a55', mid: '#7d8d99', belly: '#dfe3e0', fin: '#4d5a63' },
     flavor: '古代の姿を残す魚。背の硬鱗が水中でぬめりと光る。',
   },
@@ -430,7 +430,7 @@ export const SPECIES = [
     id: 'gar', name: 'アリゲーターガー', rarity: 4, tags: ['predator', 'deep'], shape: 'gar',
     len: [86, 196], wc: 0.9, depth: [4, 16], spawn: 2.6, times: T.nightish, weather: W.clear,
     str: 2.6, sta: 2.1, agg: 1.7, value: 1700, perCm: 17,
-    fight: 'dash',
+    fight: 'dash', pref: [0, 0, 0, 0, 1, 3, 3],
     layer: { top: 0.95, mid: 1.0, bottom: 0.5 }, // 水面で空気を吸う
     colors: { top: '#3c4433', mid: '#7c8560', belly: '#d6d3ab', fin: '#4a5238' },
     flavor: 'ワニのような顎。誰が湖に放したのか、誰も知らない。',
@@ -440,8 +440,14 @@ export const SPECIES = [
   {
     id: 'nushi', name: '湖の主', rarity: 5, tags: ['deep', 'predator', 'legend'], shape: 'eel',
     len: [138, 232], wc: 1.6, depth: [14, 28], spawn: 0.32, times: T.nightish, weather: W.rain,
-    str: 3.3, sta: 3.2, agg: 1.4, value: 7000, perCm: 34,
-    fight: 'tank',
+    /* str は元 3.3 だったが、tank パターン（pull 常時 1.12 倍・resist が pull×0.75 で
+       下限 0.35 に張り付く）と組み合わせると、最強装備（伝説+PE3号）でも大型個体の
+       着地率が 1 桁%まで落ちる検証結果になったため 2.8 に調整。伝説の魚として
+       「tank 系では最強」の地位は保ったまま、最強装備なら平均個体はほぼ確実に、
+       最大個体でも 9 割前後は獲れる水準にした（同じ str=3.5 でも jumper パターンの
+       イトウはほぼ 100% 獲れており、tank と jumper で必要な str のスケールが違う） */
+    str: 2.8, sta: 3.2, agg: 1.4, value: 7000, perCm: 34,
+    fight: 'tank', pref: [1, 0, 0, 0, 2, 3, 3],
     layer: { // 夜は中層まで上がってくる。日中は淵の底で動かない
       dawn: { top: 0.5, mid: 1.0, bottom: 0.9 },
       day: { top: 0.1, mid: 0.6, bottom: 1.0 },
@@ -456,7 +462,7 @@ export const SPECIES = [
     id: 'itou', name: 'イトウ', rarity: 5, tags: ['trout', 'predator', 'deep', 'legend'], shape: 'slim',
     len: [95, 210], wc: 1.1, depth: [10, 26], spawn: 0.38, times: T.twilight, weather: W.rain,
     str: 3.5, sta: 3.5, agg: 1.7, value: 9500, perCm: 42,
-    fight: 'jumper',
+    fight: 'jumper', pref: [1, 0, 0, 2, 2, 3, 3],
     layer: { // 朝夕に浅場の表層で待ち伏せ、日中は深場の底へ
       dawn: { top: 1.0, mid: 0.9, bottom: 0.3 },
       day: { top: 0.3, mid: 0.9, bottom: 1.0 },
@@ -559,55 +565,70 @@ export const LINE_ALIAS = { nylon: 'nylon2', fluoro: 'fluoro2', pe: 'pe2', spide
  * attract: アタリまでの速さ倍率
  * rare: レア度ボーナス
  * junk: ゴミを引く確率の倍率
- * aff: 魚のタグ別の食いつき倍率
  */
 /* エサ（ルアーは廃止。放置して待つ釣りに合わないため、すべて置き餌・生き餌に統一）
    depth は持たない：狙う層（タナ）はプレイヤーが仕掛け側で決める。
-   aff = タグ別の食いつき。タナ × エサの組み合わせで釣れる魚が変わる */
+   食いつきはタグの相性平均ではなく、魚種ごとに直接持たせた好き嫌い表
+   （SPECIES の pref、後述の baitPrefMult）で決まる */
 export const BAITS = [
   {
     id: 'worm', name: 'ミミズ', icon: 'bait-worm', price: 0, level: 1, pack: 10,
     attract: 1.0, rare: 1.0, junk: 1.0,
-    aff: { bottom: 1.7, carp: 1.4, mid: 1.0, predator: 0.6, trout: 0.8, weed: 0.9, deep: 1.0 },
     desc: '万能の置き餌。底を突く魚に強い。',
   },
   {
     id: 'akamushi', name: 'アカムシ', icon: 'bait-akamushi', price: 180, level: 1, pack: 20,
     attract: 1.14, rare: 0.88, junk: 0.9,
-    aff: { mid: 1.6, bottom: 1.3, weed: 1.2, carp: 1.0, trout: 0.9, predator: 0.3, deep: 0.7 },
     desc: '極小の赤い虫。小物のアタリが速いが、大物は寄らない。',
   },
   {
     id: 'dough', name: '練り餌', icon: 'bait-dough', price: 250, level: 1, pack: 20,
     attract: 1.08, rare: 1.05, junk: 0.8,
-    aff: { carp: 1.9, bottom: 1.2, mid: 1.2, predator: 0.4, trout: 0.7, weed: 1.0, deep: 0.8 },
     desc: 'フナ・コイの大好物。練り込んで針に付ける。',
   },
   {
     id: 'roe', name: 'イクラ', icon: 'bait-roe', price: 900, level: 2, pack: 15,
     attract: 1.16, rare: 1.15, junk: 0.6,
-    aff: { trout: 2.0, mid: 1.2, deep: 1.1, predator: 0.9, bottom: 0.8, weed: 0.8, carp: 0.6 },
     desc: '鱒が目の色を変える一粒。流れの中で映える。',
   },
   {
     id: 'shrimp', name: '川エビ', icon: 'bait-shrimp', price: 1600, level: 3, pack: 12,
     attract: 1.2, rare: 1.25, junk: 0.5,
-    aff: { predator: 1.9, deep: 1.4, bottom: 1.3, trout: 1.2, weed: 1.2, mid: 1.0, carp: 0.6 },
     desc: '生きたまま付ける定番の生き餌。何にでも効く。',
   },
   {
     id: 'minnow', name: '小魚（泳がせ）', icon: 'bait-minnow', price: 3800, level: 6, pack: 10,
     attract: 1.22, rare: 1.45, junk: 0.4,
-    aff: { predator: 2.2, deep: 1.8, trout: 1.3, mid: 1.0, bottom: 0.9, weed: 1.0, carp: 0.4 },
-    desc: '生きた小魚を泳がせる大物狙い。小物は寄りつかない。',
+    desc: '生きた小魚を泳がせる大物狙い。小魚（ワカサギ・メダカ等）は絶対に食いつかない。',
   },
   {
     id: 'secret', name: '秘伝の撒き餌', icon: 'bait-secret', price: 12000, level: 10, pack: 3,
     attract: 1.7, rare: 2.2, junk: 0.25,
-    aff: { deep: 1.6, legend: 2.6, predator: 1.4, trout: 1.4, carp: 1.4, bottom: 1.4, mid: 1.4, weed: 1.2 },
     desc: '老人が「主を呼ぶ」と言って売ってくれた壺。何かがおかしい匂い。',
   },
 ];
+
+/* ===========================================================
+   エサの好き嫌い（0〜3 の整数表 → 倍率）
+   タグの相性平均だと、無関係な理由（例：同じ深場タグを持つだけ）で
+   食いつきが薄まったり水増しされたりする（例：ワカサギが泳がせ餌に
+   寄ってしまう問題）。魚種ごとに「このエサをどれだけ好むか」を直接
+   持たせることで、そういう事故を起こさず、生態に合わない組み合わせを
+   確実に 0（絶対に食いつかない）にできる。
+     0 = 食べない（絶対に釣れない）　1 = 苦手だが食べなくはない
+     2 = ふつう　3 = 好物
+   BAITS の並び（worm, akamushi, dough, roe, shrimp, minnow, secret）と
+   同じ順で SPECIES 側に pref: [n,n,n,n,n,n,n] を持たせる */
+export const PREF_MULT = [0, 0.5, 1.0, 1.6];
+export const BAIT_ORDER = ['worm', 'akamushi', 'dough', 'roe', 'shrimp', 'minnow', 'secret'];
+
+/** 魚種 sp が、エサ bait にどれだけ食いつくか（倍率）。pref 未設定の魚（ゴミ等）は 1 固定 */
+export function baitPrefMult(sp, bait) {
+  if (!sp.pref) return 1;
+  const i = BAIT_ORDER.indexOf(bait.id);
+  const p = i >= 0 ? sp.pref[i] : 2;
+  return PREF_MULT[p] ?? 1;
+}
 
 /* ===========================================================
    タナ（狙う層）— 3 択。実際の深さは着水地点の水深に対する比率で決まる
@@ -833,10 +854,21 @@ export function gearStats(kind, it) {
   ];
 }
 
-/** エサが得意な魚（aff の上位）を短く並べる */
+/** エサが得意な魚（pref の高い魚が多いタグ）を短く並べる。
+    aff テーブルは廃止したので、pref 表からタグごとの平均好感度を集計して求める */
 export function baitStrengths(bait, n = 3) {
-  return Object.entries(bait.aff)
-    .filter(([, v]) => v >= 1.2)
+  const sum = {}, count = {};
+  for (const sp of REAL_FISH) {
+    if (!sp.pref) continue;
+    const p = baitPrefMult(sp, bait);
+    for (const t of sp.tags) {
+      sum[t] = (sum[t] || 0) + p;
+      count[t] = (count[t] || 0) + 1;
+    }
+  }
+  return Object.keys(sum)
+    .map((t) => [t, sum[t] / count[t]])
+    .filter(([, avg]) => avg >= 1.05)   // 1.0（ふつう）より明確に高いタグだけ拾う
     .sort((a, b) => b[1] - a[1])
     .slice(0, n)
     .map(([k]) => TAG_LABEL[k] || k);
