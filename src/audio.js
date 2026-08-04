@@ -1,7 +1,10 @@
 /* ===========================================================
    WebAudio による効果音・環境音（外部アセット不要の合成音）
    =========================================================== */
-import { clamp, clamp01, rand } from './util.js';
+import { clamp, clamp01, lerp, rand } from './util.js';
+
+/** ドラグが鳴き始めるテンション比。ここから上は音の速さ・高さで限界の近さが分かる */
+const DRAG_FROM = 0.35;
 
 export class AudioEngine {
   constructor() {
@@ -10,6 +13,7 @@ export class AudioEngine {
     this.volume = 0.7;    // 効果音（SE）
     this.bgm = 0.7;       // 環境音（水・風・雨・虫）
     this._reelClickAt = 0;
+    this._dragClickAt = 0;
     this._noise = null;
   }
 
@@ -256,6 +260,29 @@ export class AudioEngine {
   drag() {
     if (!this.ready) return;
     this._tone({ freq: rand(1400, 1900), dur: 0.05, type: 'sawtooth', gain: 0.03, attack: 0.002 });
+  }
+
+  /**
+   * ドラグの鳴き。張力が上がるほど速く・高く鳴るので、
+   * 画面（テンションバー）を見ていなくても限界の近さが耳で分かる。
+   * ファイト中に毎フレーム呼ぶ想定（内部で間隔を絞る）
+   * @param {number} t テンション比 0..1
+   */
+  dragTick(t) {
+    if (!this.ready || t < DRAG_FROM) return;
+    const now = this.ctx.currentTime;
+    const k = clamp01((t - DRAG_FROM) / (1 - DRAG_FROM));
+    // 限界に近いほど間隔が詰まって連続音に近づく
+    const interval = lerp(0.15, 0.03, k);
+    if (now - this._dragClickAt < interval) return;
+    this._dragClickAt = now;
+    this._tone({
+      freq: rand(1150, 1420) * lerp(1, 1.85, k),
+      dur: 0.032,
+      type: 'sawtooth',
+      gain: 0.016 + 0.032 * k,
+      attack: 0.002,
+    });
   }
 
   snap() {

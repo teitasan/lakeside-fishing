@@ -50,7 +50,7 @@ export const FIGHT_PATTERNS = {
     jump: 0, shake: 0,
   },
   jumper: {
-    id: 'jumper', name: 'ジャンパー', hint: '水面に跳ねる — 跳んだら糸を送れ',
+    id: 'jumper', name: 'ジャンパー', hint: '水面に跳ねる',
     runGap: 0.95, runDur: 1.0, runPull: 1.05,
     pull: 0.95, lineOut: 1.05,
     tensionGain: 1.0, tensionDecay: 1.05,
@@ -63,7 +63,7 @@ export const FIGHT_PATTERNS = {
     shake: 0,
   },
   shake: {
-    id: 'shake', name: '首振り', hint: '首を振る — 振っている間は巻かない',
+    id: 'shake', name: '首振り', hint: '首を激しく振る',
     runGap: 1.30, runDur: 1.05, runPull: 0.95,
     pull: 1.0, lineOut: 0.95,
     tensionGain: 1.0, tensionDecay: 1.0,

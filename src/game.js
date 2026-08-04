@@ -2016,7 +2016,8 @@ export class Game {
       this.audio.drag();
       // ジャンパーは走りの途中で跳ねる
       if (P.jump > 0 && F.jumps < 4 && Math.random() < 0.8) F.jumpQueued = F.runDur * rand(0.3, 0.55);
-      else if (F.pull0 >= 1.2 && Math.random() < 0.4) this.ui.toast('走った！ <b>糸を送れ</b>', 'bad');
+      // 「何が起きたか」だけ知らせる。どう捌くかは操作する側に任せる
+      else if (F.pull0 >= 1.2 && Math.random() < 0.4) this.ui.toast('<b>走った！</b>', 'bad');
     }
 
     /* --- 首振り（振っている間は巻いても進まず、張力だけ上がる） --- */
@@ -2043,7 +2044,7 @@ export class Game {
         F.jumpT = P.jumpDur || 0.62;
         F.jumps++;
         this.audio.splash(1.0);
-        this.ui.toast('跳ねた！ <b>糸を送れ</b>', 'bad');
+        this.ui.toast('<b>跳ねた！</b>', 'bad');
       }
     }
     if (F.jumpT > 0) F.jumpT = Math.max(0, F.jumpT - dt);
@@ -2072,8 +2073,16 @@ export class Game {
     } else {
       F.spin *= Math.exp(-dt / SPIN_DOWN);             // 離すとリールは止まっていく
       F.dist += pull * LINEOUT_MPS * P.lineOut * dt;   // 出される糸は距離に関係なく m/s
-      F.tension -= (1.30 + pull * 0.30) * P.tensionDecay * dt;
-      if (F.running) F.tension += pull * 0.30 * shortLine * this.line.shock * dt;
+      /* 張力の回復は cap に比例させる。比例させないと、回復量が絶対値なのに
+         バーの高さは cap で割って表示されるため、強い糸（cap 大）ほど
+         「バーが戻るのが遅い」ことになり、強度を上げたのに戦いにくくなる逆転が起きる。
+         cap を掛けることで「バーの割合で見た回復速度」が糸によらず一定になる
+         （基準のナイロン2号 cap=1.0 は従来と同じ挙動） */
+      F.tension -= (1.30 + pull * 0.30) * P.tensionDecay * cap * dt;
+      /* 走られている間は張力が抜けにくい。ここに line.shock を掛けると PE が
+         「巻けば急に張る・離しても抜けない」の二重苦になり、
+         cap で勝っているのに実戦では弱いという逆転が起きるため掛けない */
+      if (F.running) F.tension += pull * 0.30 * shortLine * cap * dt;
       // 跳ねている間に糸を送れていれば、魚が余計に消耗する
       if (jumping) F.stamina -= (P.jumpDrain || 0) * dt;
     }
@@ -2083,6 +2092,8 @@ export class Game {
     const tRatio = clamp01(F.tension / cap);
     F.stamina -= (0.022 + tRatio * 0.17 + (reeling ? 0.02 : 0)) * P.staminaDrain * dt / Math.max(0.4, sp.sta);
     F.stamina = clamp01(F.stamina);
+    // ドラグの鳴き（張力が上がるほど速く・高く鳴る＝耳でも限界が分かる）
+    this.audio.dragTick(tRatio);
 
     /* --- 魚の位置（見た目） ---
        near は「掛けた時の向き」で固定する（this.yaw を使うと、ファイト中に

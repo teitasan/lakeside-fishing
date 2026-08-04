@@ -252,9 +252,10 @@ shortLine = clamp(<span class="n">1.35</span> - F.dist * <span class="n">0.025</
 } <span class="k">else</span> {
   F.spin   *= exp(-dt / <span class="n">0.12</span>)                       <span class="cm">// 離すとリールは止まっていく</span>
   F.dist    += pull * <span class="n">0.70</span> * dt                     <span class="cm">// 出る糸は距離に関係なく m/s</span>
-  F.tension -= (<span class="n">1.30</span> + pull * <span class="n">0.30</span>) * dt
-  <span class="k">if</span> (F.running) F.tension += pull * <span class="n">0.30</span> * shortLine * dt   <span class="cm">// 走られると放しても張る</span>
-}
+  F.tension -= (<span class="n">1.30</span> + pull * <span class="n">0.30</span>) * P.tensionDecay * <b>line.cap</b> * dt
+  <span class="k">if</span> (F.running) F.tension += pull * <span class="n">0.30</span> * shortLine * <b>line.cap</b> * dt   <span class="cm">// 走られると放しても張る</span>
+}   <span class="cm">// ↑ cap を掛ける＝「バーの割合で見た回復速度」を糸によらず一定にする。</span>
+    <span class="cm">//   掛けないと cap の大きい強い糸ほどバーが戻らず、強度を上げたのに不利になる</span>
 F.tension = clamp(F.tension, <span class="n">0</span>, line.cap * <span class="n">1.2</span>)
 
 <span class="cm">// 体力：テンション比が高いほど速く削れる</span>
@@ -1234,8 +1235,9 @@ function simulate(sp, len, rod, line, policy, delay, len0 = 22, dt = 1 / 60, rec
     } else {
       spin *= Math.exp(-dt / 0.12);                          // 離すと止まっていく
       dist += pull * 0.70 * P.lineOut * dt;
-      tension -= (1.30 + pull * 0.30) * P.tensionDecay * dt;
-      if (running) tension += pull * 0.30 * shortLine * line.shock * dt;
+      // 回復は cap に比例（バー割合での回復速度を糸によらず一定に）。走り中の押し戻しに shock は掛けない
+      tension -= (1.30 + pull * 0.30) * P.tensionDecay * cap * dt;
+      if (running) tension += pull * 0.30 * shortLine * cap * dt;
       if (jumping) stamina -= (P.jumpDrain || 0) * dt;
     }
     tension = clamp(tension, 0, cap * 1.2);

@@ -15,6 +15,9 @@ import { iconHtml, iconLabel, loadIcon, preloadIcons, JUNK_ICONS } from './icons
 
 const $ = (id) => document.getElementById(id);
 
+/** 画面端の赤いにじみが出始めるテンション比（ここから切れる 1.0 までを 0→1 で塗る） */
+const TENSION_VIG_FROM = 0.80;
+
 /* ゲーム内の時間帯区分（dawn/day/dusk/night）に対応する短い表記 */
 const TIME_SHORT = { dawn: '朝', day: '昼', dusk: '夕', night: '夜' };
 const WEATHER_SHORT = { clear: '晴', cloudy: '曇', rain: '雨' };
@@ -485,7 +488,8 @@ export class UI {
       fight: $('fight-panel'), fightName: $('fight-name'), fightSub: $('fight-sub'),
       tension: $('tension-fill'), dist: $('dist-fill'), stam: $('stam-fill'),
       distNum: $('dist-num'), distMark: $('dist-mark'), map: $('map-window'),
-      danger: $('danger-flash'), biteAlert: $('bite-alert'), toasts: $('toasts'),
+      danger: $('danger-flash'), tensionVig: $('tension-vignette'),
+      biteAlert: $('bite-alert'), toasts: $('toasts'),
       loading: $('loading'), title: $('title-screen'),
       catchCard: $('catch-card'), shop: $('shop'), journal: $('journal'), pause: $('pause'),
       rigWin: $('rig-window'), fishDetail: $('fish-detail'),
@@ -678,6 +682,16 @@ export class UI {
 
   showFight(on, d = {}) {
     this.el.fight.classList.toggle('on', on);
+    /* 画面端の赤いにじみ。ファイトが終わったら必ず 0 に戻す必要があるので、
+       showFight(false) の早期 return より前で処理する。
+       80%→100% を 0→1 でほぼ線形に塗る（二乗にすると 85% 付近で
+       ほとんど見えず、警告として機能しなかった） */
+    const vk = on ? clamp01((clamp01(d.tension) - TENSION_VIG_FROM) / (1 - TENSION_VIG_FROM)) : 0;
+    const vig = Math.pow(vk, 1.3).toFixed(3);
+    if (vig !== this._last.tensionVig) {
+      this.el.tensionVig.style.opacity = vig;
+      this._last.tensionVig = vig;
+    }
     if (!on) return;
     this.el.fight.classList.toggle('reeling', !!d.reeling);
     if (d.name !== this._last.fightName) {

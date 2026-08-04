@@ -23,6 +23,8 @@ const ROD_BEND_MAX = Math.PI;
 const LINE_TIP_FOLLOW = 0.85;
 /** そのうち何点をこのゾーン専用に確保するか（残りは自然な弛み側） */
 const LINE_TIP_PTS = 10;
+/** 「これくらい弛んでいれば穂先の向きに沿う」の基準（アタリ待ちの弛み量） */
+const LINE_SLACK_REF = 0.62;
 
 /* ---------------- 画面上で一定の太さに見えるライン ---------------- */
 class LineRibbon {
@@ -540,7 +542,12 @@ export class Angler {
        大きく曲がるようにする） */
     let targetAmt = 0.05;
     if (st === 'fight') {
-      targetAmt = tension > 0.001 ? clamp01(Math.pow(tension, 0.55) * 1.25) : 0.08;
+      /* テンション 1.0 でようやく最大しなりに届く曲線にする。
+         以前は pow(t,0.55)*1.25 で、テンション 67% で半円に飽和していたため
+         そこから切れる 100% までまったく見た目が変わらず、
+         いちばん知りたい危険域が竿から読み取れなかった。
+         低いテンションでも大きく曲がる「速い立ち上がり」は指数で維持する */
+      targetAmt = tension > 0.001 ? clamp01(Math.pow(tension, 0.5)) : 0.08;
     } else if (st === 'nibble' || st === 'bite') {
       targetAmt = 0.10;
     }
@@ -641,6 +648,12 @@ export class Angler {
        ため、点配列の前半 TIP_PTS 個をこのゾーン専用に確保して密に敷く */
     this.getRodTipDir(_v4);
     const followT = dist > 1e-4 ? clamp(LINE_TIP_FOLLOW / dist, 0.006, 0.7) : 0;
+    /* 穂先の向きへ寄せるのは「たるんでいる糸」だけにする。
+       張った糸は魚まで一直線に伸びるのが正しく、そこで穂先の向きへ寄せると、
+       しなった竿の穂先が魚の方向とずれているぶん接続部に折れ目が出る
+       （ファイト中に糸が根元で曲がって見えていた原因）。
+       LINE_SLACK_REF（アタリ待ちの弛み）で正規化して 0〜1 にする */
+    const followK = clamp01(slack / LINE_SLACK_REF);
     // 追従ゾーン専用に確保する点数（末尾は自然な弛み側に必ず 1 点以上残す）
     const tipN = followT > 0 ? Math.min(LINE_TIP_PTS, total - 2) : 0;
     for (let i = 0; i < total; i++) {
@@ -650,8 +663,9 @@ export class Angler {
         ? (tipN > 0 ? (i / tipN) * followT : i / (total - 1))
         : followT + ((i - tipN) / (total - 1 - tipN)) * (1 - followT);
       naturalAt(t, _v3);
-      if (t < followT) {
-        const w = smoothstep(0, followT, t);
+      if (t < followT && followK > 0.01) {
+        // w=0 で穂先の向き / w=1 で自然な曲線。たるみが小さいほど自然な曲線（直線）に寄せる
+        const w = 1 - (1 - smoothstep(0, followT, t)) * followK;
         const fx = tipPos.x + _v4.x * t * dist;
         const fy = tipPos.y + _v4.y * t * dist;
         const fz = tipPos.z + _v4.z * t * dist;
