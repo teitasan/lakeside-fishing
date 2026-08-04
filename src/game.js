@@ -419,6 +419,7 @@ export class Game {
         case 'KeyE': this._openRig(); break;
         case 'KeyV': this._toggleUnderwater(); break;
         case 'KeyM': this._cancelCharge(); this._exitLock(); this.ui.openMap(); this.audio.click(); break;
+        case 'KeyU': this._cycleFightUi(); break;
       }
     });
 
@@ -1465,6 +1466,15 @@ export class Game {
     this.env.underwater = on;
     document.getElementById('underwater-tint').classList.toggle('on', on);
     this.audio.setUnderwater(on);
+  }
+
+  /** ファイト中の表示量を U キーで回す。ファイト中でも即時に切り替わる */
+  _cycleFightUi() {
+    const mode = this.ui.cycleFightUi(this.state);
+    const label = { full: '全部', tension: 'テンションだけ', none: 'なし（竿と音だけ）' }[mode];
+    this.ui.toast(`ファイト中の表示：<b>${label}</b>`, 'good');
+    this.audio.click();
+    this.saveState();
   }
 
   _toggleUnderwater() {

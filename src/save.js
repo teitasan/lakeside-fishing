@@ -37,7 +37,12 @@ export function defaultState() {
     achievements: [],
     // volume = 効果音 / bgm = 環境音（雨・風・水・虫）
     // fpv = 一人称視点（ホイールを手前まで回すと切り替わる）
-    settings: { volume: 0.7, bgm: 0.7, sens: 1.0, quality: 'mid', shadow: true, randomLake: false, debug: false, fpv: false },
+    /* fightUi: ファイト中の表示量。'full'=全部 / 'tension'=テンションだけ / 'none'=なし
+       （none でも竿のしなり・ドラグ音・画面端の赤で限界は分かる） */
+    settings: {
+      volume: 0.7, bgm: 0.7, sens: 1.0, quality: 'mid', shadow: true,
+      randomLake: false, debug: false, fpv: false, fightUi: 'full',
+    },
   };
 }
 

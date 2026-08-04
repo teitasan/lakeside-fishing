@@ -67,11 +67,11 @@
           <span class="danger-flash" id="danger-flash"></span>
         </div>
       </div>
-      <div class="fp-row">
+      <div class="fp-row" id="fp-dist">
         <label>残り距離 <b id="dist-num">-- m</b></label>
         <div class="dist-track"><i id="dist-fill"></i><span class="dist-mark" id="dist-mark"></span></div>
       </div>
-      <div class="fp-row">
+      <div class="fp-row" id="fp-stam">
         <label>魚の体力</label>
         <div class="stam-track"><i id="stam-fill"></i></div>
       </div>
@@ -88,6 +88,7 @@
       <span><b>ショップ</b> B</span>
       <span><b>マップ</b> M</span>
       <span><b>水中カメラ</b> V</span>
+      <span><b>表示切替</b> U</span>
       <span><b>メニュー</b> Esc</span>
     </div>
   </div>
@@ -246,6 +247,13 @@
           </select>
         </label>
         <label class="row"><span>影</span><input id="opt-shadow" type="checkbox" checked /></label>
+        <label class="row"><span>ファイト中の表示 <small style="opacity:.5">(U)</small></span>
+          <select id="opt-fightui">
+            <option value="full" selected>全部（テンション・距離・体力）</option>
+            <option value="tension">テンションだけ</option>
+            <option value="none">なし（竿と音だけ）</option>
+          </select>
+        </label>
         <label class="row"><span><img class="ico inline" src="./assets/icons/ui-debug.webp" alt="" width="14" height="14"> デバッグ表示 <small style="opacity:.5">(F3)</small></span><input id="opt-debug" type="checkbox" /></label>
       </div>
       <div class="lake-note">視点：マウスホイールでカメラ距離。一番手前まで回すと<b>一人称</b>、奥へ回すと三人称。<br>水中カメラ（<b>V</b>）中は<b>マウスで見回し</b>・<b>ホイールで寄り引き</b>（プレイヤーの向きは変わりません）。</div>

@@ -595,6 +595,12 @@ export class UI {
       g.applyQuality();
       g.saveState();
     });
+    $('opt-fightui').value = s.fightUi || 'full';
+    this.fightUi = s.fightUi || 'full';
+    $('opt-fightui').addEventListener('change', (e) => {
+      this.setFightUi(e.target.value);
+      g.saveState();
+    });
 
     $('opt-debug').checked = !!s.debug;
     $('opt-debug').addEventListener('change', (e) => g.debug.setEnabled(e.target.checked));
@@ -680,10 +686,32 @@ export class UI {
     setTimeout(() => e.classList.remove('on'), 900);
   }
 
+  /** ファイト中の表示量を切り替える（設定・U キーの両方から呼ばれる） */
+  setFightUi(mode, state = null) {
+    const order = ['full', 'tension', 'none'];
+    this.fightUi = order.includes(mode) ? mode : 'full';
+    if (state) state.settings.fightUi = this.fightUi;
+    const sel = $('opt-fightui');
+    if (sel) sel.value = this.fightUi;
+    return this.fightUi;
+  }
+
+  /** U キー用。full → tension → none → full と回す */
+  cycleFightUi(state = null) {
+    const order = ['full', 'tension', 'none'];
+    const next = order[(order.indexOf(this.fightUi || 'full') + 1) % order.length];
+    return this.setFightUi(next, state);
+  }
+
   showFight(on, d = {}) {
-    this.el.fight.classList.toggle('on', on);
+    /* 表示量は 'full' / 'tension' / 'none'。'none' でもファイト自体は続くので、
+       パネルだけ出さずに画面端の赤（とドラグ音・竿のしなり）で限界を伝える */
+    const mode = this.fightUi || 'full';
+    const showPanel = on && mode !== 'none';
+    this.el.fight.classList.toggle('on', showPanel);
+    this.el.fight.classList.toggle('ui-tension', mode === 'tension');
     /* 画面端の赤いにじみ。ファイトが終わったら必ず 0 に戻す必要があるので、
-       showFight(false) の早期 return より前で処理する。
+       パネルを出すかどうかに関わらず、早期 return より前で処理する。
        80%→100% を 0→1 でほぼ線形に塗る（二乗にすると 85% 付近で
        ほとんど見えず、警告として機能しなかった） */
     const vk = on ? clamp01((clamp01(d.tension) - TENSION_VIG_FROM) / (1 - TENSION_VIG_FROM)) : 0;
@@ -692,7 +720,7 @@ export class UI {
       this.el.tensionVig.style.opacity = vig;
       this._last.tensionVig = vig;
     }
-    if (!on) return;
+    if (!showPanel) return;
     this.el.fight.classList.toggle('reeling', !!d.reeling);
     if (d.name !== this._last.fightName) {
       this.el.fightName.textContent = d.name;
