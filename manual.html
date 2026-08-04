@@ -217,7 +217,13 @@ footer { border-top: 1px solid var(--line); padding: 22px; text-align: center; c
       <div class="card meter-card" style="--c:#f5c451">
         <h4>ラインテンション</h4>
         <div class="sub">F.tension / line.cap</div>
-        <p>糸に掛かっている張力。<b>巻くと増え、離すと減る</b>。<code>line.cap</code>（糸の強さ）に達した瞬間に<b>ラインブレイク</b>。</p>
+        <p>糸に掛かっている張力。<b>巻くと増え、離すと減る</b>。<code>line.cap</code>（糸の強さ）に達した瞬間に<b>ラインブレイク</b>。<br>
+          警告（バーの点滅・画面端の赤）は<b>テンションの % ではなく「切れるまでの残り秒数」</b>で出す
+          （<code>SNAP_WARN_LEAD = 1.0</code> 秒前から）。張力の上がる速さは魚 × サイズ × 竿 × 糸で 2 倍以上変わるので、
+          % 固定だと猶予が揃わない（旧方式の実測：80% から切れるまで通常 0.4〜0.6 秒、
+          突進中はどれも 0.26〜0.32 秒しかなく反応できなかった）。
+          残り秒数で出すと猶予が約 1 秒に揃い、<b>警告が始まるテンションは相手によって自動的に変わる</b>
+          （実測：通常 54〜68% / 突進中 35〜41%）。</p>
       </div>
       <div class="card meter-card" style="--c:#7ee0ff">
         <h4>残り距離</h4>

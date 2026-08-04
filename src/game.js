@@ -21,7 +21,7 @@ import {
   baitPrefMult,
 } from './data.js';
 import {
-  clamp, clamp01, lerp, damp, rand, pick, weightedPick, TAU, timeBand, fmt1,
+  clamp, clamp01, lerp, damp, smoothstep, rand, pick, weightedPick, TAU, timeBand, fmt1,
 } from './util.js';
 import { iconHtml, iconLabel } from './icons.js';
 
@@ -57,6 +57,15 @@ const SPIN_UP = 0.22;     // 押している間の立ち上がり時定数（秒
 const SPIN_DOWN = 0.12;   // 離したときに落ちる時定数（秒）
 const RUN_MARGIN = 16;
 const LAND_M = 0.7;
+/* ラインブレイクの警告（画面端の赤・バーの点滅）を出し始める「切れるまでの残り秒数」。
+   テンションの % で警告すると、張力の上がる速さが魚と装備で 2 倍以上違うため
+   猶予がまったく揃わない（実測：80% から切れるまで通常 0.4〜0.6 秒、
+   突進中はどれも 0.26〜0.32 秒しかなく、人の反応速度では間に合わない）。
+   残り秒数で出せば、引きが強い相手ほど自動的に早い段階から警告が出る */
+const SNAP_WARN_LEAD = 1.0;
+/* ただし張力が低いうちは警告しない（掛けた直後から赤くならないように）。
+   この比率までは警告を抑え、以降で徐々に効かせる */
+const SNAP_WARN_GATE = [0.30, 0.50];
 const EYE_H = 1.62;
 /* レベル解禁前でも残る重みの下限（伝説タグの魚は対象外＝完全に解禁待ち）
    0.008 = Lv1・深い淵の底層・夜で エピックが約 1%（100 回のアタリに 1 回）。
@@ -1144,6 +1153,10 @@ export class Game {
       shakeOn: false,
       shakeAge: 0,
       hookDepth,         // ヒット深度（m）。2.4m 上限で浅い層へワープさせない
+      prevTension: 0,    // 張力の上がる速さを実測するための前フレーム値
+      rise: 0,           // 張力の上昇（/秒・なました値）
+      danger: 0,         // 0..1。切れるまでの残り秒数から出す警告の強さ
+      ttl: Infinity,     // 切れるまでの推定残り秒数（デバッグ表示用）
     };
     this.fs = 'fight';
     this.stateTime = 0;
@@ -2102,8 +2115,24 @@ export class Game {
     const tRatio = clamp01(F.tension / cap);
     F.stamina -= (0.022 + tRatio * 0.17 + (reeling ? 0.02 : 0)) * P.staminaDrain * dt / Math.max(0.4, sp.sta);
     F.stamina = clamp01(F.stamina);
-    // ドラグの鳴き（張力が上がるほど速く・高く鳴る＝耳でも限界が分かる）
-    this.audio.dragTick(tRatio);
+
+    /* --- ラインブレイクの警告 ---
+       張力の上がる速さを実測して「あと何秒で切れるか」を出し、それで警告する。
+       上がる速さは魚の引き × サイズ × 竿の power × 糸の shock で 2 倍以上変わるので、
+       テンションの % で警告すると猶予が揃わない（引きが強い相手ほど一瞬になる）。
+       残り秒数で見れば、強い相手には自動的に早い段階から警告が出る */
+    const rise = (F.tension - F.prevTension) / Math.max(dt, 1e-4);
+    F.prevTension = F.tension;
+    F.rise = damp(F.rise, rise, 9, dt);
+    F.ttl = F.rise > 1e-4 ? (cap - F.tension) / F.rise : Infinity;
+    // 掛けた直後の低い張力では警告しない（そこから赤いと常時点灯になる）
+    const gate = smoothstep(SNAP_WARN_GATE[0], SNAP_WARN_GATE[1], tRatio);
+    const dangerRaw = clamp01(1 - F.ttl / SNAP_WARN_LEAD) * gate;
+    // 立ち上がりは即座に、収まりはゆっくり（一瞬の揺れでちらつかせない）
+    F.danger = dangerRaw > F.danger ? dangerRaw : damp(F.danger, dangerRaw, 5, dt);
+
+    // ドラグの鳴き（張力と危険度で速く・高く鳴る＝耳でも限界が分かる）
+    this.audio.dragTick(tRatio, F.danger);
 
     /* --- 魚の位置（見た目） ---
        near は「掛けた時の向き」で固定する（this.yaw を使うと、ファイト中に
@@ -2230,6 +2259,7 @@ export class Game {
       distM: F.dist,
       hookAt: clamp01((F.len0 - LAND_M) / (F.span - LAND_M)),
       stam: F.stamina,
+      danger: F.danger,   // 切れるまでの残り秒数から出した警告の強さ（画面端の赤・点滅）
       reeling,
     });
     // 状態はパネルの見出し（跳ねた／首を振っている／走っている）に出るので、

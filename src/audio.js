@@ -267,11 +267,13 @@ export class AudioEngine {
    * 画面（テンションバー）を見ていなくても限界の近さが耳で分かる。
    * ファイト中に毎フレーム呼ぶ想定（内部で間隔を絞る）
    * @param {number} t テンション比 0..1
+   * @param {number} danger 切れるまでの残り秒数から出した危険度 0..1。
+   *        張力がまだ低くても「もう間に合わない」場面では、これで鳴きを先に上げる
    */
-  dragTick(t) {
+  dragTick(t, danger = 0) {
     if (!this.ready || t < DRAG_FROM) return;
     const now = this.ctx.currentTime;
-    const k = clamp01((t - DRAG_FROM) / (1 - DRAG_FROM));
+    const k = Math.max(clamp01((t - DRAG_FROM) / (1 - DRAG_FROM)), clamp01(danger));
     // 限界に近いほど間隔が詰まって連続音に近づく
     const interval = lerp(0.15, 0.03, k);
     if (now - this._dragClickAt < interval) return;

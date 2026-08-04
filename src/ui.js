@@ -15,9 +15,6 @@ import { iconHtml, iconLabel, loadIcon, preloadIcons, JUNK_ICONS } from './icons
 
 const $ = (id) => document.getElementById(id);
 
-/** 画面端の赤いにじみが出始めるテンション比（ここから切れる 1.0 までを 0→1 で塗る） */
-const TENSION_VIG_FROM = 0.80;
-
 /* ゲーム内の時間帯区分（dawn/day/dusk/night）に対応する短い表記 */
 const TIME_SHORT = { dawn: '朝', day: '昼', dusk: '夕', night: '夜' };
 const WEATHER_SHORT = { clear: '晴', cloudy: '曇', rain: '雨' };
@@ -712,9 +709,10 @@ export class UI {
     this.el.fight.classList.toggle('ui-tension', mode === 'tension');
     /* 画面端の赤いにじみ。ファイトが終わったら必ず 0 に戻す必要があるので、
        パネルを出すかどうかに関わらず、早期 return より前で処理する。
-       80%→100% を 0→1 でほぼ線形に塗る（二乗にすると 85% 付近で
-       ほとんど見えず、警告として機能しなかった） */
-    const vk = on ? clamp01((clamp01(d.tension) - TENSION_VIG_FROM) / (1 - TENSION_VIG_FROM)) : 0;
+       濃さは game 側が「切れるまでの残り秒数」から出した danger を使う
+       （テンションの % だと、引きの強い魚は 80%→切れるまで 0.3 秒しかなく
+       警告として間に合わなかった） */
+    const vk = on ? clamp01(d.danger ?? 0) : 0;
     const vig = Math.pow(vk, 1.3).toFixed(3);
     if (vig !== this._last.tensionVig) {
       this.el.tensionVig.style.opacity = vig;
@@ -744,7 +742,8 @@ export class UI {
       this._last.hookAt = hk;
     }
     this.el.stam.style.width = (clamp01(d.stam) * 100).toFixed(1) + '%';
-    const danger = d.tension > 0.82;
+    // バーの点滅も残り秒数ベースに揃える（テンション 82% 固定だと猶予が魚ごとに揃わない）
+    const danger = (d.danger ?? 0) > 0.35;
     if (danger !== this._last.danger) {
       this.el.danger.classList.toggle('on', danger);
       this._last.danger = danger;
