@@ -1315,13 +1315,17 @@ export class FishSchool {
     return best;
   }
 
-  /** 近くの魚を驚かせる */
-  startle(x, z, radius = 3.5) {
+  /**
+   * 近くの魚を驚かせる。
+   * sec は驚いている時間（個体ごとに ±25% ばらす）。キャストの精度で
+   * 半径と時間の両方が変わるので、呼ぶ側から渡せるようにしている
+   */
+  startle(x, z, radius = 3.5, sec = 1.8) {
     for (const f of this.fishes) {
       if (!f.active || f.state === 'hooked') continue;
       const d = Math.hypot(f.pos.x - x, f.pos.z - z);
       if (d < radius) {
-        f.startle = rand(1.2, 2.5);
+        f.startle = sec * rand(0.75, 1.25);
         if (f.state === 'wander') {
           _v1.set(f.pos.x - x, 0, f.pos.z - z).normalize().multiplyScalar(14);
           f.target.set(f.pos.x + _v1.x, f.pos.y, f.pos.z + _v1.z);

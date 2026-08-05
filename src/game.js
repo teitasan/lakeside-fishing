@@ -33,6 +33,15 @@ const PLAYER_RADIUS = 0.34;
    初速を絞ってもそれ未満にはならない。0.5 でおよそ 1.5〜2m まで縮む */
 const CAST_SPEED_MIN = 0.5;
 const CAST_TOL = 0.06;         // 目印に合っていると見なすパワーの許容差
+/* キャスト精度が 0 になる誤差。CAST_TOL 以内なら 1、ここまで外すと 0 で、その間は連続。
+   「ジャストか外したか」の 2 択だと惜しいキャストが大外しと同じ扱いになり、
+   目印に近づける練習が報われなかった */
+const CAST_MISS = 0.30;
+/* 着水で魚が驚く半径（m）。ジャスト → 大外し。大外し側は投げた強さでさらに広がる。
+   ジャストならウキの真下がひと揺れする程度で、周りの魚は残る */
+const STARTLE_R = [1.0, 3.2];
+/* 驚いている時間（秒）。ジャスト → 大外し。驚いている魚はアタリの相手に選ばれない */
+const STARTLE_SEC = [0.8, 5.0];
 /* 竿の到達距離より少し余分に初速を出しておく。ぴったりだとパワー 1.0 に
    張り付いて「狙い通り」が出せなくなる */
 const CAST_HEADROOM = 1.07;
@@ -200,6 +209,7 @@ export class Game {
     this.chargeDir = 1;
     this.castPower = 0;
     this.castPerfect = false;
+    this.castAcc = 0;         // キャスト精度 0〜1（着水の静かさ・魚が散る範囲に効く）
     this.bobber = new THREE.Vector3();
     this.bobberVel = new THREE.Vector3();
     this.bobberOffset = 0;
@@ -876,6 +886,7 @@ export class Game {
     const ids = new Set();
     for (const f of this.school.fishes) {
       if (!f.active || f.state !== 'wander' || !f.species) continue;
+      if (f.startle > 0) continue;   // 驚いている魚はエサに寄って来ない
       if (Math.hypot(f.pos.x - x, f.pos.z - z) < r) ids.add(f.species.id);
     }
     return ids;
@@ -1045,6 +1056,9 @@ export class Game {
     const target = this.targetPower ?? 0.78;
     const err = Math.abs(this.charge - target);
     this.castPerfect = err <= CAST_TOL;
+    /* 目印からの遠さを 0〜1 の精度にする。着水の水音・飛沫、驚く魚の範囲と時間、
+       アタリの速さがこの値で連続に変わる */
+    this.castAcc = clamp01(1 - Math.max(0, err - CAST_TOL) / (CAST_MISS - CAST_TOL));
     // 合っていれば小さな誤差を補正して、狙い点にきっちり落とす
     const power = this.castPerfect ? target : this.charge;
     this.castPower = power;
@@ -1064,8 +1078,12 @@ export class Game {
     if (this.castPerfect) {
       this.ui.toast(`${iconHtml('ui-sparkle')} 狙い通り！ <small style="opacity:.75">${fmt1(this.aimDist)}m</small>`, 'good');
     } else {
+      /* 外したときは「魚をどれだけ散らしたか」まで出す。
+         これが無いと精度が着水の静かさにしか出ず、練習する手がかりにならない */
       const over = this.charge > (this.targetPower ?? 0.78);
-      this.ui.toast(over ? '飛ばし過ぎた…' : '手前に落ちた…', '');
+      const label = over ? '飛ばし過ぎた' : '手前に落ちた';
+      const sub = this.castAcc > 0.45 ? '魚を少し散らした' : '魚が散った';
+      this.ui.toast(`${label}… <small style="opacity:.75">${sub}</small>`, '');
     }
   }
 
@@ -1642,7 +1660,7 @@ export class Game {
         this.aimMarker.scale.setScalar(onTarget ? 1.1 : 1);
 
         ui.setPrompt(onTarget
-          ? '<b>今！</b> 離せば狙い通りに落ちる'
+          ? '<b>今！</b> 離せば狙い通り・静かに落ちて魚が散らない'
           : `離してキャスト（狙い ${fmt1(this.aimDist)}m ／ 目印まで待つ）`);
         // 着水点予測（糸が何かに掛かる場合は赤くして知らせる）
         this._predictLanding(this.charge, _v2);
@@ -1886,15 +1904,23 @@ export class Game {
     this.castDist = Math.hypot(x - this.pos.x, z - this.pos.z);
     this._noteTerrain(x, z);
     this._revealMap(x, z, MAP_CAST_R);
-    this.audio.splash(0.55 + this.castPower * 0.5);
-    this.water.addSplash(x, this.water.surfaceY(x, z), z, 16, 0.9 + this.castPower * 0.5);
-    this.water.addRipple(x, z, 1.0 + this.castPower * 0.7, 1.9);
-    this.water.addRipple(x, z, 0.6, 1.3);
-    // 近くの魚を驚かせる（上手いキャストなら控えめ）
-    this.school.startle(x, z, this.castPerfect ? 1.4 : 2.6 + this.castPower * 2.2);
+    /* 精度が高いほど静かに落ちる。魚が散るかどうかは音と飛沫の大きさで見えるので、
+       プレイヤーが「今のは静かだった」と分かるように見た目も揃える */
+    const acc = this.castAcc ?? 0;
+    const soft = 1 - acc * 0.55;
+    this.audio.splash((0.55 + this.castPower * 0.5) * soft);
+    this.water.addSplash(x, this.water.surfaceY(x, z), z,
+      Math.max(4, Math.round(16 * soft)), (0.9 + this.castPower * 0.5) * soft);
+    this.water.addRipple(x, z, (1.0 + this.castPower * 0.7) * soft, 1.9);
+    this.water.addRipple(x, z, 0.6 * soft, 1.3);
+    /* 近くの魚を驚かせる。半径と時間を精度で連続に変えるので、狙い通り決めれば
+       着水地点の魚がその場に残り、大外しすると周りの魚が数秒散る */
+    this.school.startle(x, z,
+      lerp(STARTLE_R[0], STARTLE_R[1] + this.castPower * 2.0, 1 - acc),
+      lerp(STARTLE_SEC[0], STARTLE_SEC[1], 1 - acc));
     // アタリまでの時間（ラインの見え方も効く：フロロは速く、PEはやや遅い）
     const attract = this.bait.attract * this.rod.attract * this.line.attract
-      * this.env.weather.bite * (this.castPerfect ? 1.18 : 1);
+      * this.env.weather.bite * (1 + 0.18 * acc);
     const depth = this.terrain.depthAt(x, z);
     let base = rand(2.2, 7.0) / attract;
     if (depth < 0.9) base *= 1.7;
@@ -1953,7 +1979,7 @@ export class Game {
     {
       for (const f of this.school.fishes) {
         if (!f.active || f.species !== sp) continue;
-        if (f.state !== 'wander') continue;
+        if (f.state !== 'wander' || f.startle > 0) continue;
         const d = Math.hypot(f.pos.x - x, f.pos.z - z);
         if (d < NEARBY_FISH_R && d < bestD) { bestD = d; fish = f; }
       }

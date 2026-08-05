@@ -639,9 +639,10 @@ d0 ≦ 水深 ≦ d1              → <span class="n">1.00</span>
     <div class="tw"><table>
       <thead><tr><th class="l">段階</th><th class="l">長さ・条件</th><th class="l">内容</th></tr></thead>
       <tbody>
-        <tr><td class="l name">① 着水</td><td class="l num">—</td><td class="l">半径 <code>2.6 + power×2.2</code> m（狙い通りなら 1.4 m）の魚が驚いて逃げる</td></tr>
+        <tr><td class="l name">① 着水</td><td class="l num">—</td><td class="l">半径 <code>lerp(1.0, 3.2 + power×2.0, 1−acc)</code> m の魚が
+            <code>lerp(0.8, 5.0, 1−acc)</code> 秒驚く（<code>acc</code> = キャスト精度。下記）</td></tr>
         <tr><td class="l name">② アタリ待ち</td><td class="l num">rand(2.2, 7.0) ÷ attract 秒<br>水深 &lt; 0.9 m ならさらに ×1.7</td>
-            <td class="l"><code>attract = bait.attract × rod.attract × 天候 × (狙い通り 1.18)</code></td></tr>
+            <td class="l"><code>attract = bait.attract × rod.attract × 天候 × (1 + 0.18×acc)</code></td></tr>
         <tr><td class="l name">③ 抽選 → 接近</td><td class="l num">実測 3〜9 秒<br>（22 秒で諦めて再抽選）</td>
             <td class="l">18 m 以内に同種がいればその個体が寄る。いなければ 5.5〜9.5 m 先に生成して寄せる。遊泳速度 <code>(0.78 + 全長cm/100 × 1.7) × 1.45</code> m/s</td></tr>
         <tr><td class="l name">④ 前アタリ</td><td class="l num">rand(0.7, 1.9) 秒<br>レア度 4 以上は ×1.5</td><td class="l">ウキが小刻みに震える。ここで巻くと回収になってしまう</td></tr>
@@ -658,7 +659,7 @@ d0 ≦ 水深 ≦ d1              → <span class="n">1.00</span>
     </p>
     <pre><span class="cm">// ③ 抽選 → 個体選び</span>
 1. rollSpecies(水深, エサ, 時刻, 天候, Lv) で<b>魚種を決める</b>
-2. その魚種の個体が ウキから <span class="n">18</span> m 以内・回遊中(wander) にいる？
+2. その魚種の個体が ウキから <span class="n">18</span> m 以内・回遊中(wander)・<b>驚いていない</b>？
    ├ いる  → <b>いちばん近いその個体</b>が実際に泳いで寄ってくる
    │          （＝水中カメラで見ていた魚が、そのまま掛かる）
    └ いない → ウキの <span class="n">5.5</span>〜<span class="n">9.5</span> m 先・水深 <span class="n">0.8</span> m 以上に<b>新しく生成</b>して寄せる
@@ -679,7 +680,7 @@ d0 ≦ 水深 ≦ d1              → <span class="n">1.00</span>
       <thead><tr><th class="l">きっかけ</th><th class="l">範囲・時間</th><th class="l">挙動</th></tr></thead>
       <tbody>
         <tr><td class="l name">着水（キャスト）</td>
-            <td class="l">半径 <code>2.6 + power×2.2</code> m<br>狙い通りなら <b>1.4 m</b><br>1.2〜2.5 秒</td>
+            <td class="l">半径 <code>lerp(1.0, 3.2 + power×2.0, 1−acc)</code> m<br>時間 <code>lerp(0.8, 5.0, 1−acc)</code> 秒<br>（個体ごとに ±25%）</td>
             <td class="l">範囲内の魚が驚く。回遊中なら<b>着水点の反対へ 14 m</b> の目標を取り直し、遊泳速度が <b>1.5 倍</b>になる</td></tr>
         <tr><td class="l name">仕掛けの回収</td><td class="l">2.2 秒</td>
             <td class="l">寄ってきていた個体が逃走。次のアタリは投げ直しから</td></tr>
@@ -690,10 +691,12 @@ d0 ≦ 水深 ≦ d1              → <span class="n">1.00</span>
     </table></div>
     <p class="src">src/fish.js — FishSchool.startle() / src/game.js — _onLandWater(), _retrieve(), _missBite()</p>
     <div class="note">
-      驚いた魚は状態が回遊(wander)のままなので、<b>抽選対象から外れるわけではありません</b>。
-      ただし 1.5 倍速で 14 m 逃げるため、<b>18 m の圏外に出ると「近くの個体」として選ばれなくなり</b>、
-      その分は新規生成（＝見えない所から来る魚）に置き換わります。
-      足元や見えている魚を狙うときに<b>狙い通りのキャスト（驚かす半径 1.4 m）</b>が効くのはここです。
+      <b>驚いている魚はアタリの相手になりません。</b><code>f.startle &gt; 0</code> の個体は
+      「近くの個体」の候補からも、魚種の抽選を近くの魚へ寄せる <code>near</code> からも外れます。<br>
+      以前は状態が回遊(wander)のままなので抽選から外れず、<b>18 m の圏内に留まるかぎり普通に掛かって</b>いました
+      （逃げる距離 14 m &lt; 圏内 18 m なので、実質ほとんど効いていなかった）。
+      いま外しているのは、キャスト精度が<b>「着水点の魚が残るかどうか」として実際に釣果に効く</b>ようにするためです。
+      驚きは最長でも 5 秒なので、外した投げが無駄になるわけではなく<b>その分アタリが遠くの魚に置き換わる</b>だけです。
     </div>
 
     <h4>ゴミが釣れる確率</h4>
@@ -814,9 +817,14 @@ p    = <span class="n">2.1</span> − min(<span class="n">1.2</span>, bait.rare 
 毎フレーム: v.y −= <span class="n">9.8</span>·dt ;  v ×= (<span class="n">1</span> − <span class="n">0.0055</span>·|v|·dt)    <span class="cm">// 重力 + 空気抵抗</span>
 
 <span class="cm">// ③ 判定：長押し中は 1.05 /秒で 0↔1 を往復（ピンポン）</span>
-狙い通り = |power − 目印| ≤ <span class="n">0.06</span>
+誤差     = |power − 目印|
+狙い通り = 誤差 ≤ <span class="n">0.06</span>（= CAST_TOL）
   → パワーを目印に補正して発射（＝小さな誤差は吸収され、狙い点にきっちり落ちる）
 外した   → そのパワーの距離に着水（手前に落ちる／飛ばし過ぎる）
+
+<span class="cm">// ④ キャスト精度 acc：CAST_TOL 以内なら 1、CAST_MISS=0.30 まで外すと 0</span>
+acc = clamp01(<span class="n">1</span> − max(<span class="n">0</span>, 誤差 − <span class="n">0.06</span>) / (<span class="n">0.30</span> − <span class="n">0.06</span>))
+  <span class="cm">// 着水の水音・飛沫が ×(1 − acc×0.55)、驚かす半径と時間、アタリの速さが連続に変わる</span>
 
 糸の最大長 = rod.cast + <span class="n">16</span>（走られる余裕）+ <span class="n">8</span> m
              <span class="cm">// 竹 34 m 〜 伝説 108 m。超えるとその場で着水／待機中に超えると強制回収</span>
@@ -844,9 +852,33 @@ p    = <span class="n">2.1</span> − min(<span class="n">1.2</span>, bait.rare 
         <b>画面中央の照準（レティクル）は置いていません</b>：狙いは水面の輪だけで示します。
         輪は実寸（半径 0.5〜0.66 m、着水予測は 0.86〜1.12 m）なので、<b>遠いほど小さく・水面に寝て見えます</b>
         — それも距離感の手がかりです。狙い距離と水深は HUD に数値でも出ます。</p></div>
-      <div class="card tight"><h4>狙い通りの効果</h4><p>驚かす半径が 2.6+power×2.2 → <b>1.4 m</b> に縮小、アタリまでの時間が <b>÷1.18</b>。
-        遠投でも足元でも同じ条件で成立するので、<b>浅場狙いが不利にならない</b>のが以前との違いです。</p></div>
+      <div class="card tight"><h4>精度の効果</h4><p><b>ジャストに近いほど着水地点の魚が逃げません</b>。以前は「狙い通りか外したか」の
+        2 択で、外した側はどれも同じ扱いでした。いまは <code>acc</code> で連続に効くので、
+        <b>目印に近づける練習がそのまま釣果になります</b>。遠投でも足元でも同じ条件で成立するので、
+        <b>浅場狙いが不利になりません</b>。実測は下表。</p></div>
     </div>
+
+    <h4>キャスト精度で何が変わるか</h4>
+    <p>
+      桟橋の先端から 20 m 先へ投げ、着水点の 0.8〜6.3 m に 12 匹並べた状態で実測
+      （目印 0.78・実際の <code>_releaseCast()</code> → <code>_onLandWater()</code> を通した値）。
+    </p>
+    <div class="tw"><table>
+      <thead><tr><th class="num">誤差</th><th class="num">精度 acc</th><th class="num">驚かす半径</th><th class="num">驚く時間</th><th class="num">散った魚</th><th class="num">散った最遠</th><th class="num">アタリ倍率</th></tr></thead>
+      <tbody>
+        <tr><td class="num">0.00</td><td class="num">1.00</td><td class="num">1.0 m</td><td class="num">0.8 s</td><td class="num">1/12</td><td class="num">0.8 m</td><td class="num">×1.18</td></tr>
+        <tr><td class="num">0.06</td><td class="num">1.00</td><td class="num">1.0 m</td><td class="num">0.8 s</td><td class="num">1/12</td><td class="num">0.8 m</td><td class="num">×1.18</td></tr>
+        <tr><td class="num">0.10</td><td class="num">0.83</td><td class="num">1.7 m</td><td class="num">1.5 s</td><td class="num">2/12</td><td class="num">1.3 m</td><td class="num">×1.15</td></tr>
+        <tr><td class="num">0.15</td><td class="num">0.62</td><td class="num">2.5 m</td><td class="num">2.4 s</td><td class="num">4/12</td><td class="num">2.3 m</td><td class="num">×1.11</td></tr>
+        <tr><td class="num">0.20</td><td class="num">0.42</td><td class="num">3.2 m</td><td class="num">3.2 s</td><td class="num">6/12</td><td class="num">3.3 m</td><td class="num">×1.08</td></tr>
+        <tr><td class="num">0.30 以上</td><td class="num">0.00</td><td class="num">4.8 m</td><td class="num">5.0 s</td><td class="num">10/12</td><td class="num">5.3 m</td><td class="num">×1.00</td></tr>
+      </tbody>
+      <tfoot><tr><td colspan="7" class="l">半径・時間は個体ごとに ±25% ばらすので、「散った魚」「散った最遠」は 1 回の試行の値。
+        <b>ジャストなら足元の 1 匹が 1 秒ざわつくだけ</b>で、<b>大外しすると 5 m 圏の 10 匹が 5 秒散る</b>。
+        驚いている魚はアタリの相手に選ばれないので、大外しの直後は<b>遠くから来る魚しか掛からない</b>。<br>
+        外したときはトーストで「飛ばし過ぎた… 魚が散った／魚を少し散らした」と結果を返します（境目は acc 0.45）。
+        着水の水音と飛沫も <code>×(1 − acc×0.55)</code> で小さくなるので、決まったキャストは<b>音でも静かだと分かります</b>。</td></tr></tfoot>
+    </table></div>
 
     <h4>糸が掛かる判定</h4>
     <p>
