@@ -152,18 +152,6 @@ function castTopSpeed(rangeM) {
   return (lo + hi) / 2;
 }
 
-/**
- * 引きの強さの表示（魚種・レア度は伏せ、手応えだけを伝える）
- * pull0 = 種の str × サイズ係数 なので、大きなコモンも「重い」になる
- */
-function pullLabel(pull0) {
-  if (pull0 < 0.55) return '軽い引き';
-  if (pull0 < 1.0) return 'まずまずの引き';
-  if (pull0 < 1.6) return '強い引き！';
-  if (pull0 < 2.4) return 'かなり重い…！';
-  return 'とてつもない重さ…！';
-}
-
 const UP = new THREE.Vector3(0, 1, 0);
 const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -1136,7 +1124,7 @@ export class Game {
     const sizeF = 0.55 + (f.length / sp.len[1]) * 0.75;
     const pattern = fightPattern(sp);
     /* 残り距離は実際のメートルで持つ（近くに掛けたら早く寄る）。
-       バーの上限は「掛けた距離 + 走られてよい余裕（一定）」 */
+       逃走ラインは「掛けた距離 + 走られてよい余裕（一定）」 */
     this.bobberFar = this.bobber.clone();
     const len0 = Math.max(2.5, Math.hypot(
       this.bobber.x - (this.pos.x + Math.sin(this.yaw) * 1.6),
@@ -1147,7 +1135,6 @@ export class Game {
     const surf0 = this.water.surfaceY(f.pos.x, f.pos.z);
     const hookDepth = clamp(surf0 - f.pos.y, 0.4, 48);
     this.fight = {
-      len0,
       // 掛けた瞬間の向き。魚の見た目の位置はこれを基準にする（毎フレームの
       // 現在の向きを使うと、ファイト中に視点を回すだけで魚が振り回されて見える）
       yaw0: this.yaw,
@@ -2170,13 +2157,6 @@ export class Game {
     const far = _v3.copy(this.bobberFar);
 
     F.lateral = damp(F.lateral, (F.running ? Math.sin(F.time * 1.7) * 1.9 : Math.sin(F.time * 0.9) * 0.7), 3, dt);
-    /* バー表示用。取り込みは「距離 LAND_M 以内 かつ 水面から出る」で起きるので、
-       バーにも水平と深さの両方を入れて 0% が取り込みとちょうど一致するようにする。
-       水平だけだと、寄せ切ったあと魚を水面まで上げている間バーが 0% で止まって見える
-       （逆にバーの 0% で取り込みにすると、深い魚が巻き終わる前に釣れてしまう） */
-    const remainH = Math.max(0, F.dist - LAND_M);
-    const remainV = Math.max(0, F.fishDepth);
-    const t = clamp01((remainH + remainV) / (F.span - LAND_M + F.hookDepth));
     // 着水点の方向へ、残り距離ぶん離した所に魚を置く（メートルそのまま）
     let dx = far.x - near.x, dz = far.z - near.z;
     const dl = Math.hypot(dx, dz) || 1;
@@ -2295,24 +2275,14 @@ export class Game {
     /* --- UI --- */
     // 魚種とレア度は取り込むまで伏せる（引きの強さだけを見せる）
     this.hudDepth = depth;
+    /* 出すのはテンションと警告だけ。残り距離・魚の体力・手応えの見出しは廃止した
+       （数字を追うより竿・音・画面端の赤で戦ってもらう）。
+       跳ねた／首を振っている／走っているも竿の動きと水音で分かるので文字にしない */
     this.ui.showFight(true, {
-      name: pullLabel(F.pull0),
-      sub: jumping ? `${iconHtml('ui-warn')} 跳ねた！`
-        : F.shakeOn ? `${iconHtml('ui-warn')} 首を振っている`
-          : F.running ? `${iconHtml('ui-warn')} 走っている`
-            // 巻き上げの乗りは、専用のバーを増やさず既にある表示で伝える
-            : `${P.name}｜${reeling ? (F.spin > 0.55 ? '巻いている' : '巻き始め…') : '待機'}`,
       tension: tRatio,
-      dist: t,
-      distM: F.dist,
-      // 掛けた位置の目印。バー本体と同じ分母（水平＋深さ）で出す
-      hookAt: clamp01((F.len0 - LAND_M + F.hookDepth) / (F.span - LAND_M + F.hookDepth)),
-      stam: F.stamina,
       danger: F.danger,   // 切れるまでの残り秒数から出した警告の強さ（画面端の赤・点滅）
       reeling,
     });
-    // 状態はパネルの見出し（跳ねた／首を振っている／走っている）に出るので、
-    // ファイト中は案内文を出さない
     this.ui.setPrompt('');
 
     /* --- 決着 --- */

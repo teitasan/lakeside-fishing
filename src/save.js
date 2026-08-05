@@ -37,11 +37,11 @@ export function defaultState() {
     achievements: [],
     // volume = 効果音 / bgm = 環境音（雨・風・水・虫）
     // fpv = 一人称視点（ホイールを手前まで回すと切り替わる）
-    /* fightUi: ファイト中の表示量。'full'=全部 / 'tension'=テンションだけ / 'none'=なし
+    /* fightUi: ファイト中の表示量。'tension'=テンションだけ / 'none'=なし
        （none でも竿のしなり・ドラグ音・画面端の赤で限界は分かる） */
     settings: {
       volume: 0.7, bgm: 0.7, sens: 1.0, quality: 'mid', shadow: true,
-      randomLake: false, debug: false, fpv: false, fightUi: 'full',
+      randomLake: false, debug: false, fpv: false, fightUi: 'tension',
     },
   };
 }
@@ -67,6 +67,8 @@ export function load() {
     const out = { ...base, ...data };
     out.gear = { ...base.gear, ...(data.gear || {}) };
     out.settings = { ...base.settings, ...(data.settings || {}) };
+    // 廃止した 'full'（距離・体力バー付き）を選んでいたセーブは 'tension' に寄せる
+    if (out.settings.fightUi !== 'none') out.settings.fightUi = 'tension';
     out.owned = {
       rod: uniq([...base.owned.rod, ...((data.owned && data.owned.rod) || [])]),
       line: uniq([...base.owned.line, ...((data.owned && data.owned.line) || [])]),

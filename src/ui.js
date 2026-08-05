@@ -482,9 +482,7 @@ export class UI {
       prompt: $('prompt'), power: $('power-meter'), powerFill: $('power-fill'),
       powerBand: $('power-band'), powerMark: $('power-mark'),
       powerTrack: document.querySelector('.pm-track'), aim: $('aim'),
-      fight: $('fight-panel'), fightName: $('fight-name'), fightSub: $('fight-sub'),
-      tension: $('tension-fill'), dist: $('dist-fill'), stam: $('stam-fill'),
-      distNum: $('dist-num'), distMark: $('dist-mark'), map: $('map-window'),
+      fight: $('fight-panel'), tension: $('tension-fill'), map: $('map-window'),
       danger: $('danger-flash'), tensionVig: $('tension-vignette'),
       biteAlert: $('bite-alert'), toasts: $('toasts'),
       loading: $('loading'), title: $('title-screen'),
@@ -592,8 +590,8 @@ export class UI {
       g.applyQuality();
       g.saveState();
     });
-    $('opt-fightui').value = s.fightUi || 'full';
-    this.fightUi = s.fightUi || 'full';
+    $('opt-fightui').value = s.fightUi || 'tension';
+    this.fightUi = s.fightUi || 'tension';
     $('opt-fightui').addEventListener('change', (e) => {
       this.setFightUi(e.target.value);
       g.saveState();
@@ -685,28 +683,26 @@ export class UI {
 
   /** ファイト中の表示量を切り替える（設定・U キーの両方から呼ばれる） */
   setFightUi(mode, state = null) {
-    const order = ['full', 'tension', 'none'];
-    this.fightUi = order.includes(mode) ? mode : 'full';
+    const order = ['tension', 'none'];
+    this.fightUi = order.includes(mode) ? mode : 'tension';
     if (state) state.settings.fightUi = this.fightUi;
     const sel = $('opt-fightui');
     if (sel) sel.value = this.fightUi;
     return this.fightUi;
   }
 
-  /** U キー用。full → tension → none → full と回す */
+  /** U キー用。tension → none → tension と回す */
   cycleFightUi(state = null) {
-    const order = ['full', 'tension', 'none'];
-    const next = order[(order.indexOf(this.fightUi || 'full') + 1) % order.length];
+    const order = ['tension', 'none'];
+    const next = order[(order.indexOf(this.fightUi || 'tension') + 1) % order.length];
     return this.setFightUi(next, state);
   }
 
   showFight(on, d = {}) {
-    /* 表示量は 'full' / 'tension' / 'none'。'none' でもファイト自体は続くので、
-       パネルだけ出さずに画面端の赤（とドラグ音・竿のしなり）で限界を伝える */
-    const mode = this.fightUi || 'full';
-    const showPanel = on && mode !== 'none';
+    /* 表示量は 'tension'（テンションだけ）か 'none'。'none' でもファイト自体は続くので、
+       パネルを出さずに画面端の赤（とドラグ音・竿のしなり）で限界を伝える */
+    const showPanel = on && (this.fightUi || 'tension') !== 'none';
     this.el.fight.classList.toggle('on', showPanel);
-    this.el.fight.classList.toggle('ui-tension', mode === 'tension');
     /* 画面端の赤いにじみ。ファイトが終わったら必ず 0 に戻す必要があるので、
        パネルを出すかどうかに関わらず、早期 return より前で処理する。
        濃さは game 側が「切れるまでの残り秒数」から出した danger を使う
@@ -719,29 +715,9 @@ export class UI {
       this._last.tensionVig = vig;
     }
     if (!showPanel) return;
+    // 巻いている間は枠が光る（専用のバーを増やさずに巻けているかを伝える）
     this.el.fight.classList.toggle('reeling', !!d.reeling);
-    if (d.name !== this._last.fightName) {
-      this.el.fightName.textContent = d.name;
-      this._last.fightName = d.name;
-    }
-    if (d.sub !== this._last.fightSub) {
-      this.el.fightSub.innerHTML = d.sub || '';
-      this._last.fightSub = d.sub;
-    }
     this.el.tension.style.width = (clamp01(d.tension) * 100).toFixed(1) + '%';
-    this.el.dist.style.width = (clamp01(d.dist) * 100).toFixed(1) + '%';
-    // 残りメートルと「掛けた地点」の目印（バーの上限は掛けた距離＋余裕）
-    const dm = Math.max(0, Math.round(d.distM ?? 0));
-    if (dm !== this._last.distM) {
-      this.el.distNum.textContent = `${dm} m`;
-      this._last.distM = dm;
-    }
-    const hk = (clamp01(d.hookAt ?? 1) * 100).toFixed(1) + '%';
-    if (hk !== this._last.hookAt) {
-      this.el.distMark.style.left = hk;
-      this._last.hookAt = hk;
-    }
-    this.el.stam.style.width = (clamp01(d.stam) * 100).toFixed(1) + '%';
     // バーの点滅も残り秒数ベースに揃える（テンション 82% 固定だと猶予が魚ごとに揃わない）
     const danger = (d.danger ?? 0) > 0.35;
     if (danger !== this._last.danger) {

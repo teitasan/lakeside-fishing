@@ -200,7 +200,7 @@ footer { border-top: 1px solid var(--line); padding: 22px; text-align: center; c
     <div class="grid c3">
       <div class="card tight"><h4>長さ</h4><p>ワールド 1 単位 = <b>1 m</b>。魚の全長は cm。水深 m。</p></div>
       <div class="card tight"><h4>時間</h4><p>式の <code>dt</code> は実時間の秒。<b>実 1 秒 = ゲーム内 1 分</b>（1 時間 = 実 1 分、1 日 = 実 24 分）。</p></div>
-      <div class="card tight"><h4>0〜1 の量</h4><p>テンション比と体力は 0〜1 の内部値で、HUD のバーはそのまま％表示。残り距離だけは<b>実際のメートル</b>で、バーは「掛けた距離＋16m」を上限にした割合。</p></div>
+      <div class="card tight"><h4>0〜1 の量</h4><p>テンション比と体力は 0〜1 の内部値、残り距離は<b>実際のメートル</b>。<b>画面に出るのはテンションのバーだけ</b>で、距離と体力は内部値のまま（下の 1 章参照）。</p></div>
     </div>
     <p>以下、<code>sp</code> は魚種データ、<code>rod</code>/<code>line</code>/<code>bait</code> は装備データ、<code>F</code> はファイト中の状態を指します。</p>
   </section>
@@ -212,6 +212,14 @@ footer { border-top: 1px solid var(--line); padding: 22px; text-align: center; c
       ヒット後の駆け引きは、次の 4 つの状態量だけで決まります。毎フレーム、この 4 つが更新され、
       3 つの終了条件のどれかに触れた瞬間に決着します。
     </p>
+    <div class="note">
+      <b>ただし画面に出るのはラインテンションのバーだけです。</b>
+      表示は<b>「テンションだけ」と「なし（竿と音だけ）」の 2 択</b>（<kbd>U</kbd> で切り替え）で、
+      残り距離・魚の体力・手応えの見出しを並べた従来のパネルは<b>廃止しました</b>。
+      数字が 3 本並ぶとそれを読む作業になり、竿のしなり・ドラグ音・水面の様子を見なくなるためです。
+      距離と体力は<b>内部では今までどおり</b>効いていて、寄っている感じは竿の角度と魚の見た目、
+      弱ってきた感じは浮いてくる魚と引きの軽さで分かります。
+    </div>
 
     <div class="grid c4">
       <div class="card meter-card" style="--c:#f5c451">
@@ -228,12 +236,12 @@ footer { border-top: 1px solid var(--line); padding: 22px; text-align: center; c
           押し離しの比率＝難易度は保たれ、テンポだけ落ちる）。ゲージが 0 から満タンになるまで<b>約 4〜5 秒</b>。</p>
       </div>
       <div class="card meter-card" style="--c:#7ee0ff">
-        <h4>残り距離</h4>
+        <h4>残り距離 <small style="opacity:.55">（非表示）</small></h4>
         <div class="sub">F.dist（実際のメートル）</div>
         <p>魚までの距離（m）。ヒット時は<b>掛けた距離そのまま</b>で始まり、巻けば減り、放せば魚に引かれて増える。<b>掛けた距離＋16m（糸の 62m 上限まで）で逃走／0.7m まで寄せ、かつ魚が水面から出たら取り込み</b>。近くに掛ければ寄せる距離も短い。</p>
       </div>
       <div class="card meter-card" style="--c:#ff8fa3">
-        <h4>魚の体力</h4>
+        <h4>魚の体力 <small style="opacity:.55">（非表示）</small></h4>
         <div class="sub">F.stamina（1 → 0）</div>
         <p>魚のスタミナ。<b>テンションを掛けている間だけ減る</b>。減ると引く力が弱まり、突進しなくなり、水面に浮いてくる。</p>
       </div>
@@ -330,11 +338,11 @@ F.runDur  = rand(<span class="n">0.6</span>, <span class="n">1.2</span>) * P.run
     <p class="src">src/game.js — _updateFight()</p>
 
     <div class="note">
-      <b>ファイト中は魚種とレア度を伏せています。</b>パネルの見出しは代わりに
-      <code>pull0</code>（= 種の str × サイズ係数）から求めた<b>手応え</b>を表示します：
-      軽い引き（&lt;0.55）／まずまずの引き（&lt;1.0）／強い引き！（&lt;1.6）／かなり重い…！（&lt;2.4）／とてつもない重さ…！。
-      サイズも含まれるので<b>大きなコモンも「重い」</b>になり、レア度は推測できません。
-      ヒット時のメッセージ・突進の警告・エラ洗いの発生も、レア度ではなく <code>pull0</code> を基準にしています。
+      <b>ファイト中は魚種とレア度を伏せています。</b>以前は <code>pull0</code>（= 種の str × サイズ係数）から
+      「軽い引き／強い引き！／とてつもない重さ…！」という<b>手応えの見出し</b>を出していましたが、
+      パネルごと<b>廃止しました</b>（手応えは竿のしなりと巻きの重さで伝わるため）。
+      <code>pull0</code> 自体は残っていて、ヒット時のメッセージ・突進の警告・エラ洗いの発生は
+      レア度ではなくこの値を基準にしています。
     </div>
 
     <h3>ファイトの型（魚種ごとの振る舞い）</h3>

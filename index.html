@@ -57,8 +57,9 @@
       </div>
     </div>
 
+    <!-- ファイト中の表示はテンションだけ。残り距離・魚の体力・手応えの見出しは出さない
+         （数字を追うより竿と音で戦ってもらうため） -->
     <div id="fight-panel">
-      <div class="fp-head"><span id="fight-name">???</span><span id="fight-sub"></span></div>
       <div class="fp-row">
         <label>ライン<br>テンション</label>
         <div class="tension-track">
@@ -66,14 +67,6 @@
           <span class="safe-zone" id="safe-zone"></span>
           <span class="danger-flash" id="danger-flash"></span>
         </div>
-      </div>
-      <div class="fp-row" id="fp-dist">
-        <label>残り距離 <b id="dist-num">-- m</b></label>
-        <div class="dist-track"><i id="dist-fill"></i><span class="dist-mark" id="dist-mark"></span></div>
-      </div>
-      <div class="fp-row" id="fp-stam">
-        <label>魚の体力</label>
-        <div class="stam-track"><i id="stam-fill"></i></div>
       </div>
     </div>
 
@@ -249,8 +242,7 @@
         <label class="row"><span>影</span><input id="opt-shadow" type="checkbox" checked /></label>
         <label class="row"><span>ファイト中の表示 <small style="opacity:.5">(U)</small></span>
           <select id="opt-fightui">
-            <option value="full" selected>全部（テンション・距離・体力）</option>
-            <option value="tension">テンションだけ</option>
+            <option value="tension" selected>テンションだけ</option>
             <option value="none">なし（竿と音だけ）</option>
           </select>
         </label>

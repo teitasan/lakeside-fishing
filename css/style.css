@@ -98,7 +98,6 @@ img.ico.shop { width: 32px; height: 32px; border-radius: 6px; }
 img.ico.title { width: 22px; height: 22px; vertical-align: -4px; margin-right: 4px; }
 .toast img.ico { width: 16px; height: 16px; vertical-align: -3px; margin-right: 2px; }
 #prompt img.ico { width: 16px; height: 16px; vertical-align: -3px; }
-#fight-sub img.ico { width: 14px; height: 14px; vertical-align: -2px; }
 .record, .newfish { display: flex; align-items: center; justify-content: center; gap: 6px; }
 .gear-row span { display: inline-flex; align-items: center; gap: 4px; }
 .clock-row #weather-icon { display: inline-flex; align-items: center; }
@@ -186,31 +185,24 @@ h2 { display: flex; align-items: center; gap: 2px; }
 /* ---------- ファイトパネル ---------- */
 #fight-panel {
   position: absolute; left: 50%; bottom: 74px; transform: translate(-50%, 24px);
-  width: min(520px, 92vw); padding: 14px 18px 12px;
+  width: min(300px, 70vw); padding: 9px 14px 8px;
   background: rgba(8, 14, 22, .78); backdrop-filter: var(--panel-blur);
   border: 1px solid rgba(245, 207, 107, .28); border-radius: 16px;
   box-shadow: 0 14px 40px rgba(0, 0, 0, .55);
   opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s;
 }
 #fight-panel.on { opacity: 1; transform: translate(-50%, 0); }
-.fp-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 9px; }
-#fight-name { font-size: 17px; font-weight: 700; color: var(--gold); }
-#fight-sub { font-size: 11px; opacity: .7; }
-.fp-row { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+.fp-row { display: flex; align-items: center; gap: 10px; }
 .fp-row label { width: 62px; font-size: 10px; opacity: .65; line-height: 1.2; text-align: right; }
-.tension-track, .dist-track, .stam-track {
+.tension-track {
   position: relative; flex: 1; height: 14px; border-radius: 99px; overflow: hidden;
   background: rgba(255, 255, 255, .10); border: 1px solid rgba(255, 255, 255, .12);
 }
-.dist-track, .stam-track { height: 9px; }
 #tension-fill { position: absolute; inset: 0 auto 0 0; width: 0%;
   background: linear-gradient(90deg, #64d99a 0%, #d8e05f 52%, #ff9a3d 76%, #ff4444 100%);
   background-size: 500% 100%; background-position: left; }
 .safe-zone { position: absolute; top: 0; bottom: 0; left: 0; width: 74%;
   border-right: 2px dashed rgba(255, 255, 255, .55); pointer-events: none; }
-.dist-mark { position: absolute; top: -1px; bottom: -1px; left: 100%; width: 0;
-  border-left: 2px solid rgba(255, 255, 255, .5); pointer-events: none; }
-.fp-row label b { display: block; font-size: 11px; opacity: .9; font-weight: 600; }
 .bait-n { margin-left: 4px; font-size: 11px; color: var(--fg-dim); font-weight: 700; }
 .bait-n.low { color: var(--gold); }
 .bait-n.out { color: #ff6b6b; }
@@ -220,15 +212,7 @@ h2 { display: flex; align-items: center; gap: 2px; }
 .danger-flash { position: absolute; inset: 0; background: #ff3b3b; opacity: 0; }
 .danger-flash.on { animation: dflash .28s infinite alternate; }
 @keyframes dflash { from { opacity: 0; } to { opacity: .45; } }
-#dist-fill { position: absolute; inset: 0 auto 0 0; width: 100%; background: linear-gradient(90deg, #7ee0ff, #4a86ff); transition: width .08s linear; }
-#stam-fill { position: absolute; inset: 0 auto 0 0; width: 100%; background: linear-gradient(90deg, #ff8fa3, #ff5d5d); transition: width .12s linear; }
 #fight-panel.reeling { border-color: rgba(126, 224, 255, .55); }
-/* 「テンションだけ」表示：手応え・距離・体力を隠して細く小さくする */
-#fight-panel.ui-tension { width: min(300px, 70vw); padding: 9px 14px 8px; }
-#fight-panel.ui-tension .fp-head,
-#fight-panel.ui-tension #fp-dist,
-#fight-panel.ui-tension #fp-stam { display: none; }
-#fight-panel.ui-tension .fp-row { margin: 0; }
 
 /* ---------- マップ（測量図） ---------- */
 #map-window .card { width: min(760px, 94vw); text-align: left; }
