@@ -219,16 +219,18 @@ footer { border-top: 1px solid var(--line); padding: 22px; text-align: center; c
         <div class="sub">F.tension / line.cap</div>
         <p>糸に掛かっている張力。<b>巻くと増え、離すと減る</b>。<code>line.cap</code>（糸の強さ）に達した瞬間に<b>ラインブレイク</b>。<br>
           警告（バーの点滅・画面端の赤）は<b>テンションの % ではなく「切れるまでの残り秒数」</b>で出す
-          （<code>SNAP_WARN_LEAD = 1.0</code> 秒前から）。張力の上がる速さは魚 × サイズ × 竿 × 糸で 2 倍以上変わるので、
+          （<code>SNAP_WARN_LEAD = 1.5</code> 秒前から）。張力の上がる速さは魚 × サイズ × 竿 × 糸で 2 倍以上変わるので、
           % 固定だと猶予が揃わない（旧方式の実測：80% から切れるまで通常 0.4〜0.6 秒、
           突進中はどれも 0.26〜0.32 秒しかなく反応できなかった）。
-          残り秒数で出すと猶予が約 1 秒に揃い、<b>警告が始まるテンションは相手によって自動的に変わる</b>
-          （実測：通常 54〜68% / 突進中 35〜41%）。</p>
+          残り秒数で出すと猶予が<b>どの相手でも 1.5 秒</b>に揃い、<b>警告が始まるテンションは相手によって自動的に変わる</b>
+          （実測：通常 68〜77% / 突進中 45〜55%）。<br>
+          さらに張力の上下そのものを <code>TENSION_TEMPO = 0.5</code> で半分の速さにしてある（上がる・戻る・突進中の押し戻しを同じ倍率で遅くするので
+          押し離しの比率＝難易度は保たれ、テンポだけ落ちる）。ゲージが 0 から満タンになるまで<b>約 4〜5 秒</b>。</p>
       </div>
       <div class="card meter-card" style="--c:#7ee0ff">
         <h4>残り距離</h4>
         <div class="sub">F.dist（実際のメートル）</div>
-        <p>魚までの距離（m）。ヒット時は<b>掛けた距離そのまま</b>で始まり、巻けば減り、放せば魚に引かれて増える。<b>掛けた距離＋16m（糸の 62m 上限まで）で逃走／0.7m で取り込み</b>。近くに掛ければ寄せる距離も短い。</p>
+        <p>魚までの距離（m）。ヒット時は<b>掛けた距離そのまま</b>で始まり、巻けば減り、放せば魚に引かれて増える。<b>掛けた距離＋16m（糸の 62m 上限まで）で逃走／0.7m まで寄せ、かつ魚が水面から出たら取り込み</b>。近くに掛ければ寄せる距離も短い。</p>
       </div>
       <div class="card meter-card" style="--c:#ff8fa3">
         <h4>魚の体力</h4>
@@ -253,15 +255,16 @@ shortLine = clamp(<span class="n">1.35</span> - F.dist * <span class="n">0.025</
   <span class="cm">// リールの立ち上がり（慣性）。押し始めは巻けず、押し続けると乗ってくる</span>
   F.spin  = <span class="n">1</span> - (<span class="n">1</span> - F.spin) * exp(-dt / <span class="n">0.22</span>)
   resist  = clamp(<span class="n">1.70</span> - pull * <span class="n">0.75</span>, <span class="n">0.35</span>, <span class="n">1.60</span>)   <span class="cm">// 強い魚ほど巻けない</span>
-  F.dist    -= rod.reel * <span class="n">4.6</span> * resist * (<span class="n">1</span> + F.dist * <span class="n">0.012</span>) * <b>F.spin</b> * dt   <span class="cm">// m/s</span>
-  F.tension += (<span class="n">0.08</span> + pull * <span class="n">0.55</span>) * shortLine * dt / rod.power
+  F.dist    = max(<span class="n">0.15</span>, F.dist - rod.reel * <span class="n">4.6</span> * resist * (<span class="n">1</span> + F.dist * <span class="n">0.012</span>) * <b>F.spin</b> * dt)   <span class="cm">// m/s</span>
+  F.tension += (<span class="n">0.08</span> + pull * <span class="n">0.55</span>) * shortLine * line.shock * <b>0.5</b> * dt / rod.power
 } <span class="k">else</span> {
   F.spin   *= exp(-dt / <span class="n">0.12</span>)                       <span class="cm">// 離すとリールは止まっていく</span>
   F.dist    += pull * <span class="n">0.70</span> * dt                     <span class="cm">// 出る糸は距離に関係なく m/s</span>
-  F.tension -= (<span class="n">1.30</span> + pull * <span class="n">0.30</span>) * P.tensionDecay * <b>line.cap</b> * dt
-  <span class="k">if</span> (F.running) F.tension += pull * <span class="n">0.30</span> * shortLine * <b>line.cap</b> * dt   <span class="cm">// 走られると放しても張る</span>
+  F.tension -= (<span class="n">1.30</span> + pull * <span class="n">0.30</span>) * P.tensionDecay * <b>line.cap</b> * <b>0.5</b> * dt
+  <span class="k">if</span> (F.running) F.tension += pull * <span class="n">0.30</span> * shortLine * <b>line.cap</b> * <b>0.5</b> * dt   <span class="cm">// 走られると放しても張る</span>
 }   <span class="cm">// ↑ cap を掛ける＝「バーの割合で見た回復速度」を糸によらず一定にする。</span>
     <span class="cm">//   掛けないと cap の大きい強い糸ほどバーが戻らず、強度を上げたのに不利になる</span>
+    <span class="cm">// ↑ 3 か所の 0.5 が TENSION_TEMPO。同じ倍率なので押し離しの比率は変わらず、テンポだけ落ちる</span>
 F.tension = clamp(F.tension, <span class="n">0</span>, line.cap * <span class="n">1.2</span>)
 
 <span class="cm">// 体力：テンション比が高いほど速く削れる</span>
@@ -271,7 +274,8 @@ F.stamina -= (<span class="n">0.022</span> + tRatio * <span class="n">0.17</span
 <span class="cm">// 決着</span>
 <span class="k">if</span> (F.tension &gt;= line.cap) → ラインブレイク
 <span class="k">if</span> (F.dist &gt;= F.span)     → 逃走（F.span = 掛けた距離 + <span class="n">16</span>m、上限は糸の長さ）
-<span class="k">if</span> (F.dist &lt;= <span class="n">0.7</span>)          → 取り込み（= LAND_M）
+<span class="k">if</span> (F.dist &lt;= <span class="n">0.7</span> <span class="k">&&</span> 魚の深さ &lt;= <span class="n">0</span>) → 取り込み（= 水面から出るまで巻く）
+<span class="cm">// 深さの条件が無いと、桟橋の深穴で真下に掛けた魚が水深 10m のまま「釣り上げた」ことになる</span>
 
 <span class="cm">// バー表示は 0.7m 分だけ内側に詰めて見せる（0% ちょうどで取り込みになるように）</span>
 表示比率 = clamp01((F.dist − LAND_M) / (F.span − LAND_M))</pre>
@@ -364,13 +368,48 @@ F.runDur  = rand(<span class="n">0.6</span>, <span class="n">1.2</span>) * P.run
         <li><b>引く力が落ちる</b>：<code>pull</code> の係数 <code>(0.5 + 0.5×stamina)</code> が 1.0 → 0.5 に。つまり<b>最大で半減</b>。
           引きが弱まると <code>resist</code> が上がるので巻き取り速度も上がり、加速度的に楽になります。</li>
         <li><b>突進しなくなる</b>：<code>stamina ≤ 0.16</code> で新しいランが発生しません。</li>
-        <li><b>浮いてくる</b>：見た目の泳層が <code>lerp(0.35, 2.4, stamina)</code> m と浅くなり、水面で暴れる演出になります。</li>
+        <li><b>浮いてくる</b>：見た目の泳層が <code>lerp(0.4, 掛けた深さ, stamina²)</code> と浅くなり、水面で暴れる演出になります。</li>
       </ul>
       減る速さは <code>÷ max(0.4, sp.sta)</code>。つまり <b>sp.sta（体力値）が大きい魚は「粘る」</b>＝弱らせるのに時間が掛かります。
       テンション比 0.7 を維持した場合の目安は <code>(0.022 + 0.7×0.17 + 0.02) / sta</code> ≒ <code>0.16 / sta</code> /秒 →
       <b>sta 1.0 の魚なら約 6 秒、sta 3.2 の湖の主なら約 20 秒</b>でスタミナ切れ。
       逆に<b>テンションを掛けずに待っても魚は疲れません</b>（0.022/sta しか減らない）。
     </div>
+
+    <h3>水面から出るまで巻く</h3>
+    <p>
+      取り込みは残り距離だけでは決まりません。実際の取り込みと同じで<b>魚が水面から出ること</b>が条件です
+      （<code>魚の深さ &lt;= 0</code>）。これが無いと、桟橋の深穴で真下に掛けた魚が
+      <b>水深 10m のまま「釣り上げた」</b>ことになってしまいます（水平距離だけを見ていたため）。
+    </p>
+    <pre><span class="cm">// 体力から決めた泳層を、寄せるほど水面へ引き上げる。最後の目標は水面より上</span>
+riseFrom  = clamp(wantDepth * <span class="n">1.1</span>, <span class="n">2.5</span>, <span class="n">12</span>)   <span class="cm">// 深い魚は早めに、浅い魚は直前から上がる（≒45度）</span>
+wantDepth = lerp(<span class="n">−0.12</span>, wantDepth, clamp01((F.dist − <span class="n">0.7</span>) / riseFrom))   <span class="cm">// −0.12 = LAND_LIFT_M</span>
+
+<span class="cm">// 実際の Y は damp。ただし浮き上がる速さに上限を掛ける</span>
+ny = damp(魚.y, 水面 − wantDepth, 目標が上なら <span class="n">5.5</span> / 下なら <span class="n">2.4</span>, dt)
+魚.y = min(ny, 魚.y + <span class="n">3.0</span> * dt)   <span class="cm">// RISE_MPS：水面へ飛び出すのを防ぐ</span></pre>
+    <p class="src">src/game.js — _updateFight()</p>
+    <p>
+      真下に深く掛けた場合は水平距離に余裕が無いので、傾斜だけでは間に合わず水面へ飛び出してしまいます。
+      そこで<b>浮上速度そのものを 3.0 m/s で頭打ち</b>にし、取り込みは深さの条件で待たせています。
+      その結果<b>ファイトが縦方向に伸びます</b>（実測：真下 2.5m・深さ 10m のケースで 0.9 秒 → 3.2 秒）。<br>
+      水面を割った瞬間に飛沫が出て、出ている間も水しぶきが続きます（実測：水面付近で飛沫・波紋が各 7 回）。
+      そのあと <code>landing</code> 演出が 0.85 秒かけて目線の高さまで持ち上げます。<br>
+      実測（伝説＋PE3号・警告どおりに離す操作）：
+    </p>
+    <table><thead><tr><th class="l">状況</th><th class="num">掛けた距離／深さ</th><th class="num">取り込み時の深さ</th><th class="num">所要</th></tr></thead>
+      <tbody>
+        <tr><td class="l">遠投・深場（チョウザメ）</td><td class="num">28.4m / 18.0m</td><td class="num">0.00m</td><td class="num">15.6s</td></tr>
+        <tr><td class="l">通常（コイ・浅場）</td><td class="num">18.4m / 3.0m</td><td class="num">0.00m</td><td class="num">6.0s</td></tr>
+        <tr><td class="l">遠投・浅場（ブラックバス）</td><td class="num">23.4m / 2.0m</td><td class="num">0.00m</td><td class="num">5.0s</td></tr>
+        <tr><td class="l">桟橋の深穴（真下に湖の主）</td><td class="num">2.5m / 10.0m</td><td class="num">0.00m</td><td class="num">3.2s</td></tr>
+      </tbody></table>
+    <p>
+      深さの条件を待つ間も巻けてしまうので、<code>F.dist</code> には <b>0.15m の下限</b>を入れています
+      （入れないと魚が足元を通り越して背後に回ります）。浅場では先に距離が下限に達し、
+      そこから<b>その場で巻いて水面まで持ち上げる</b>動きになります。
+    </p>
 
     <div class="note q">
       <span class="qh">Q. ラインの「素材 × 号数」って何が変わるの？</span>
@@ -407,12 +446,11 @@ F.runDur  = rand(<span class="n">0.6</span>, <span class="n">1.2</span>) * P.run
       power は「切れにくさ」、reel は「早さ」に効きます。ラインブレイクを減らしたいなら <b>line.cap と rod.power</b>、
       ファイトを短くしたいなら <b>rod.reel</b> です。<code>attract</code> はファイトには無関係（アタリの速さと抽選）。<br>
       <b>power はもう一つ効きます</b>：張力の増えが遅くなる＝<b>長く押していられる</b>＝リールが乗る、という経路です。
-      チョウザメ（平均 123cm・60 回試行）を<b>連打</b>で獲ろうとすると、竹+ナイロン2号は<b>装備不足でまず切れる</b>
-      （0/60）。グラス+フロロ2号もまれにしか着地しない（2/60・約 153 秒）。カーボン+PE2号でようやく互角
-      （36/60・約 113 秒）、伝説+PE3号なら安定して獲れます（60/60・約 121 秒）。<br>
-      同じ組み合わせで<b>案内どおりの操作</b>なら カーボン+PE2号 <b>約 35 秒</b>／伝説+PE3号 <b>約 23 秒</b>と
-      どちらも確実に獲れるので、<b>装備が足りている限り連打は損</b>です。足りない装備で無理に獲るなら、
-      2 分以上切れずに叩き続ける必要があります。
+      チョウザメ（平均 123cm・60 回試行）を<b>連打</b>で獲ろうとすると、伝説+PE3号でようやく獲れる（60/60・約 143 秒）だけで、
+      竹+ナイロン2号・グラス+フロロ2号・カーボン+PE2号は<b>どれも 0/60</b>。<br>
+      同じ相手を<b>警告どおりに離す操作</b>なら、竹+ナイロン2号 2/60 → グラス+フロロ2号 59/60（約 31 秒）→
+      カーボン+PE2号 60/60（約 22 秒）→ 伝説+PE3号 60/60（約 12 秒）と、装備が素直に効きます。
+      つまり<b>連打は装備が揃っていても損</b>で、テンションを見て離すのが唯一の正解です。
     </div>
 
     <div class="note warn">
@@ -1112,6 +1150,8 @@ const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const clamp01 = (v) => clamp(v, 0, 1);
 const rand = (a, b) => a + Math.random() * (b - a);
 const lerp = (a, b, t) => a + (b - a) * t;
+// game.js の TENSION_TEMPO。張力の上下（増える・戻る・走り中の押し戻し）をまとめて遅くする
+const TENSION_TEMPO = 0.5;
 const f1 = (n) => (Math.round(n * 10) / 10).toFixed(1);
 const f2 = (n) => (Math.round(n * 100) / 100).toFixed(2);
 const pct = (n) => (n * 100).toFixed(0) + '%';
@@ -1234,7 +1274,7 @@ function simulate(sp, len, rod, line, policy, delay, len0 = 22, dt = 1 / 60, rec
       spin = 1 - (1 - spin) * Math.exp(-dt / 0.22);          // リールの立ち上がり
       const resist = clamp(1.70 - pull * 0.75, 0.35, 1.60) * (shakeBite ? P.shakeReel : 1);
       dist -= rod.reel * 4.6 * resist * (1 + dist * 0.012) * spin * dt;
-      let gain = (0.08 + pull * 0.55) * P.tensionGain * shortLine * line.shock;
+      let gain = (0.08 + pull * 0.55) * P.tensionGain * shortLine * line.shock * TENSION_TEMPO;
       if (shakeBite) gain *= P.shakeGain;
       if (jumpBite) gain *= P.jumpTension;
       tension += (gain * dt) / rod.power;
@@ -1242,8 +1282,8 @@ function simulate(sp, len, rod, line, policy, delay, len0 = 22, dt = 1 / 60, rec
       spin *= Math.exp(-dt / 0.12);                          // 離すと止まっていく
       dist += pull * 0.70 * P.lineOut * dt;
       // 回復は cap に比例（バー割合での回復速度を糸によらず一定に）。走り中の押し戻しに shock は掛けない
-      tension -= (1.30 + pull * 0.30) * P.tensionDecay * cap * dt;
-      if (running) tension += pull * 0.30 * shortLine * cap * dt;
+      tension -= (1.30 + pull * 0.30) * P.tensionDecay * cap * TENSION_TEMPO * dt;
+      if (running) tension += pull * 0.30 * shortLine * cap * TENSION_TEMPO * dt;
       if (jumping) stamina -= (P.jumpDrain || 0) * dt;
     }
     tension = clamp(tension, 0, cap * 1.2);
@@ -1334,8 +1374,8 @@ function runSim() {
   const e = evaluate(sp, len, rod, line, simState.policy, simState.delay, 200, simState.len0);
   const sizeF = 0.55 + (len / sp.len[1]) * 0.75;
   const pull0 = sp.str * sizeF;
-  const gain = ((0.08 + pull0 * 0.55) * line.shock) / rod.power;
-  const gainRun = ((0.08 + pull0 * 2 * 0.55) * line.shock) / rod.power;
+  const gain = ((0.08 + pull0 * 0.55) * line.shock * TENSION_TEMPO) / rod.power;
+  const gainRun = ((0.08 + pull0 * 2 * 0.55) * line.shock * TENSION_TEMPO) / rod.power;
   const snapT = line.cap / gain;
   const resist = clamp(1.70 - pull0 * 0.75, 0.35, 1.60);
   const reelRate = rod.reel * 4.6 * resist * (1 + simState.len0 * 0.012);   // 立ち上がり切った状態
@@ -1760,7 +1800,7 @@ function runRoll() {
       <td class="l name">${ico(l.icon)}${l.name}</td><td class="num">${l.price.toLocaleString()}</td><td class="num">${l.level}</td>
       <td class="num" style="color:var(--warn)">${l.cap}</td>
       <td class="num">${l.shock}</td><td class="num">${l.attract}</td><td class="num">${l.biteWindow}</td>
-      <td class="num">${f1(l.cap / ((0.08 + 1.0 * 0.55) * l.shock / 1.0))} 秒</td>
+      <td class="num">${f1(l.cap / ((0.08 + 1.0 * 0.55) * l.shock * TENSION_TEMPO / 1.0))} 秒</td>
       <td class="l" style="white-space:normal;color:var(--fg-dim)">${l.desc}</td></tr>`).join('')}</tbody>
       <tfoot><tr><td colspan="9" class="l">「切れるまで」は竹の釣り竿（power 1.0）で pull0 = 1.0 の魚を巻き続けた場合（<code>line.shock</code> ぶん反映済み）。power が高いほど伸びます。</td></tr></tfoot></table>`;
 

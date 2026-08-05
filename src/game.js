@@ -57,12 +57,35 @@ const SPIN_UP = 0.22;     // 押している間の立ち上がり時定数（秒
 const SPIN_DOWN = 0.12;   // 離したときに落ちる時定数（秒）
 const RUN_MARGIN = 16;
 const LAND_M = 0.7;
+/* 取り込みは「水平距離が詰まった」だけでは成立させない。実際の取り込みと同じで
+   水面から出るまで巻く（F.fishDepth <= 0）。これが無いと、桟橋の深穴で真下に
+   掛けた魚が水深 10m のまま「釣り上げた」ことになってしまう。
+   LAND_LIFT_M は最後に水面より上へ引き上げる高さ（m） */
+const LAND_LIFT_M = 0.12;
+/* 浮上を始める残り距離を「今の深さ × これ」にする。おおよそ 45 度で上がってくるので、
+   深い魚が水面へロケットのように飛び出すことがない */
+const RISE_SLOPE = 1.1;
+const RISE_MIN = 2.5;
+const RISE_MAX = 12;
+/* 浮き上がる速さの上限（m/s）。真下に深く掛けた場合は水平距離に余裕が無く、
+   傾斜だけでは水面へ飛び出してしまうので速さそのものを抑える。
+   取り込みは深さの条件付きなので、そのぶんファイトが伸びる */
+const RISE_MPS = 3.0;
 /* ラインブレイクの警告（画面端の赤・バーの点滅）を出し始める「切れるまでの残り秒数」。
    テンションの % で警告すると、張力の上がる速さが魚と装備で 2 倍以上違うため
    猶予がまったく揃わない（実測：80% から切れるまで通常 0.4〜0.6 秒、
    突進中はどれも 0.26〜0.32 秒しかなく、人の反応速度では間に合わない）。
    残り秒数で出せば、引きが強い相手ほど自動的に早い段階から警告が出る */
-const SNAP_WARN_LEAD = 1.0;
+const SNAP_WARN_LEAD = 1.5;
+/* 張力が上下する速さの倍率（ファイトのテンポ）。gain・decay・走り中の押し戻しを
+   同じ倍率で遅くするので、押している時間と離している時間の比＝duty は保たれる。
+   1.0 だとゲージが 2.1〜2.7 秒で上がり切り、反射神経の勝負になっていた。
+   0.5 で 4.1〜5.4 秒。
+   ただし警告どおりに離すプレイでは、警告が出るまで長く巻けるぶん結果的に easier に
+   なる（実測：チョウザメ123cm カーボン+PE2号 35 秒 → 22 秒）。
+   飛距離ゲート（竹竿 10m では深場の魚に届かない）と引きの強さでレア 4〜5 は
+   引き続き弾かれるので、装備の段差そのものは残っている */
+const TENSION_TEMPO = 0.5;
 /* ただし張力が低いうちは警告しない（掛けた直後から赤くならないように）。
    この比率までは警告を抑え、以降で徐々に効かせる */
 const SNAP_WARN_GATE = [0.30, 0.50];
@@ -1153,6 +1176,7 @@ export class Game {
       shakeOn: false,
       shakeAge: 0,
       hookDepth,         // ヒット深度（m）。2.4m 上限で浅い層へワープさせない
+      fishDepth: hookDepth,  // 今の魚の深さ（m）。取り込み条件に使うので浅い側で初期化しない
       prevTension: 0,    // 張力の上がる速さを実測するための前フレーム値
       rise: 0,           // 張力の上昇（/秒・なました値）
       danger: 0,         // 0..1。切れるまでの残り秒数から出す警告の強さ
@@ -2086,9 +2110,11 @@ export class Game {
       const resist = clamp(1.70 - pull * 0.75, 0.35, 1.60) * (shakeBite ? P.shakeReel : 1);
       // m/s。遠いうちは糸を送り込むだけなので速く、寄せるほど重くなる
       const rate = this.rod.reel * REEL_MPS * resist * (1 + F.dist * 0.012) * F.spin;
-      F.dist -= rate * dt;
+      /* 取り込みは深さの条件も満たすまで待つので、その間も巻けてしまう。
+         下限を切らないと魚が足元を通り越して背後に回る */
+      F.dist = Math.max(0.15, F.dist - rate * dt);
       // ラインの伸び（shock）：ナイロンは衝撃を逃がして上がりにくく、PE は伸びずに直に伝わる
-      let gain = (0.08 + pull * 0.55) * P.tensionGain * shortLine * this.line.shock;
+      let gain = (0.08 + pull * 0.55) * P.tensionGain * shortLine * this.line.shock * TENSION_TEMPO;
       if (shakeBite) gain *= P.shakeGain;
       if (jumpBite) gain *= P.jumpTension;
       F.tension += gain * dt / this.rod.power;
@@ -2101,11 +2127,11 @@ export class Game {
          「バーが戻るのが遅い」ことになり、強度を上げたのに戦いにくくなる逆転が起きる。
          cap を掛けることで「バーの割合で見た回復速度」が糸によらず一定になる
          （基準のナイロン2号 cap=1.0 は従来と同じ挙動） */
-      F.tension -= (1.30 + pull * 0.30) * P.tensionDecay * cap * dt;
+      F.tension -= (1.30 + pull * 0.30) * P.tensionDecay * cap * TENSION_TEMPO * dt;
       /* 走られている間は張力が抜けにくい。ここに line.shock を掛けると PE が
          「巻けば急に張る・離しても抜けない」の二重苦になり、
          cap で勝っているのに実戦では弱いという逆転が起きるため掛けない */
-      if (F.running) F.tension += pull * 0.30 * shortLine * cap * dt;
+      if (F.running) F.tension += pull * 0.30 * shortLine * cap * TENSION_TEMPO * dt;
       // 跳ねている間に糸を送れていれば、魚が余計に消耗する
       if (jumping) F.stamina -= (P.jumpDrain || 0) * dt;
     }
@@ -2144,10 +2170,13 @@ export class Game {
     const far = _v3.copy(this.bobberFar);
 
     F.lateral = damp(F.lateral, (F.running ? Math.sin(F.time * 1.7) * 1.9 : Math.sin(F.time * 0.9) * 0.7), 3, dt);
-    /* バー表示用。取り込みは距離 LAND_M で起きるので、バーの 0% もそこに合わせる
-       （そのままだと LAND_M ぶんの隙間が残ったまま「釣れた」ことになり、
-       巻き終わる前に釣り上がったように見える） */
-    const t = clamp01((F.dist - LAND_M) / (F.span - LAND_M));
+    /* バー表示用。取り込みは「距離 LAND_M 以内 かつ 水面から出る」で起きるので、
+       バーにも水平と深さの両方を入れて 0% が取り込みとちょうど一致するようにする。
+       水平だけだと、寄せ切ったあと魚を水面まで上げている間バーが 0% で止まって見える
+       （逆にバーの 0% で取り込みにすると、深い魚が巻き終わる前に釣れてしまう） */
+    const remainH = Math.max(0, F.dist - LAND_M);
+    const remainV = Math.max(0, F.fishDepth);
+    const t = clamp01((remainH + remainV) / (F.span - LAND_M + F.hookDepth));
     // 着水点の方向へ、残り距離ぶん離した所に魚を置く（メートルそのまま）
     let dx = far.x - near.x, dz = far.z - near.z;
     const dl = Math.hypot(dx, dz) || 1;
@@ -2172,6 +2201,11 @@ export class Game {
     // 走り中は少し潜る（ヒット深度を大きく超えない）
     if (F.running) wantDepth = Math.min(hookD + 0.8, wantDepth + Math.min(1.4, hookD * 0.12));
     wantDepth = clamp(wantDepth, 0.25, Math.max(0.25, depth - 0.25));
+    /* 寄せ切る手前で水面へ引き上げる。浮上を始める距離を今の深さに比例させているので、
+       水深 20m の魚は 12m 手前から、浅場の魚は 2.5m 手前から上がってくる。
+       最後は水面より上（-LAND_LIFT_M）が目標なので、巻き続けると魚は水面を割って出る */
+    const riseFrom = clamp(wantDepth * RISE_SLOPE, RISE_MIN, RISE_MAX);
+    wantDepth = lerp(-LAND_LIFT_M, wantDepth, clamp01((F.dist - LAND_M) / riseFrom));
     let fy;
     if (jumping) {
       // 空中に跳ね上がる（0 → 1 → 0 の弧）
@@ -2182,10 +2216,24 @@ export class Game {
         this.water.addRipple(wx, wz, 0.8, 1.2);
       }
     } else {
-      const targetY = Math.min(surf - 0.12, surf - wantDepth);
-      fy = damp(f.pos.y, targetY, 2.4, dt);
+      const targetY = surf - wantDepth;
+      /* 浮くときは速く、沈むときはゆっくり。糸で引き上げられる分は
+         寄せる速さに追いつく必要があり、2.4 のままだと取り込み間際でも
+         数 m 下に残って「深いのに釣り上げた」ことになる */
+      const ny = damp(f.pos.y, targetY, targetY > f.pos.y ? 5.5 : 2.4, dt);
+      fy = Math.min(ny, f.pos.y + RISE_MPS * dt);
     }
     f.pos.set(wx, fy, wz);
+    const prevDepth = F.fishDepth;
+    F.fishDepth = surf - fy;   // 負なら水面より上
+    // 水面を割って出た瞬間の飛沫と、出ている間の水しぶき
+    if (!jumping && prevDepth > 0 && F.fishDepth <= 0) {
+      this.water.addSplash(wx, surf, wz, 8, 0.9);
+      this.water.addRipple(wx, wz, 0.7, 1.1);
+    } else if (!jumping && F.fishDepth < 0.25 && Math.random() < dt * 14) {
+      this.water.addSplash(wx, surf, wz, 3, 0.5);
+      this.water.addRipple(wx, wz, 0.45, 0.7);
+    }
     f.state = 'hooked';
     f.mesh.position.copy(f.pos);
     /* 向き
@@ -2257,7 +2305,8 @@ export class Game {
       tension: tRatio,
       dist: t,
       distM: F.dist,
-      hookAt: clamp01((F.len0 - LAND_M) / (F.span - LAND_M)),
+      // 掛けた位置の目印。バー本体と同じ分母（水平＋深さ）で出す
+      hookAt: clamp01((F.len0 - LAND_M + F.hookDepth) / (F.span - LAND_M + F.hookDepth)),
       stam: F.stamina,
       danger: F.danger,   // 切れるまでの残り秒数から出した警告の強さ（画面端の赤・点滅）
       reeling,
@@ -2269,7 +2318,8 @@ export class Game {
     /* --- 決着 --- */
     if (F.tension >= cap) return this._lineSnap();
     if (F.dist >= F.span) return this._fishEscaped();
-    if (F.dist <= LAND_M) return this._land();
+    // 水平距離だけでなく、魚が水面から出ていることも条件にする
+    if (F.dist <= LAND_M && F.fishDepth <= 0) return this._land();
   }
 
   /**
