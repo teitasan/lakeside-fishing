@@ -2330,7 +2330,7 @@ export class Game {
   _lineSurfaceCross(tip, end, sag, out) {
     const at = (t, o) => {
       o.lerpVectors(tip, end, t);
-      o.y -= Math.sin(t * Math.PI) * sag;
+      o.y -= Angler.sagAt(t, sag);   // updateLine と同じたるみの形
       return o;
     };
     const gap = (t) => {

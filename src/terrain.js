@@ -2,7 +2,7 @@
    地形・湖底・岸辺の装飾・桟橋
    =========================================================== */
 import * as THREE from 'three';
-import { makeRng, clamp, clamp01, lerp, smoothstep, TAU } from './util.js';
+import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js';
 import { WORLD_SIZE, WATER_REGION, MAX_DEPTH, resolveLake } from './lakefield.js';
 
 export { WORLD_SIZE, WATER_REGION, MAX_DEPTH };
@@ -646,7 +646,7 @@ export class Terrain {
     for (let i = 1; i < N; i++) {
       const t = i / N;
       const x = x0 + dx * t, z = z0 + dz * t;
-      const y = y0 + (y1 - y0) * t - Math.sin(t * Math.PI) * sag;
+      const y = y0 + (y1 - y0) * t - lineSagProfile(t) * sag;   // 描画と同じたるみの形
       const g = this.heightAt(x, z);
       if (y + tol < g) return { x, y, z, ground: g, kind: 'terrain' };
       const ot = this.obstacleTopAt(x, z);

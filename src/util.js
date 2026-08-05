@@ -19,6 +19,17 @@ export function damp(current, target, lambda, dt) {
   return lerp(current, target, 1 - Math.exp(-lambda * dt));
 }
 
+/**
+ * 糸のたるみの形（t: 0=竿先 1=終点 → 0〜1 の倍率。最大 1）。
+ * sin(πt) は t=0 での傾きが π もあり、竿先の時点で糸が垂れ始めてしまう。
+ * 実際の竿先はガイドで糸が折れ返る＝竿と糸は鋭角に交わり、糸自体は
+ * ピンと張って出ていくので、t=0 で値も傾きも 0 になる形にする。
+ * 6.75·t²(1−t) は最大が t=2/3（ウキ寄り）で、6.75 = 1 / ((2/3)²·(1/3)) は
+ * 最大値を 1 に正規化する係数。
+ * 描画（angler）・ウキの位置（game）・地形との当たり（terrain）で共有する
+ */
+export const lineSagProfile = (t) => 6.75 * t * t * (1 - t);
+
 export const rand = (a = 0, b = 1) => a + Math.random() * (b - a);
 export const randInt = (a, b) => Math.floor(a + Math.random() * (b - a + 1));
 export const randSign = () => (Math.random() < 0.5 ? -1 : 1);

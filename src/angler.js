@@ -2,15 +2,13 @@
    釣り人・ロッド・ライン・ウキ
    =========================================================== */
 import * as THREE from 'three';
-import { clamp, clamp01, lerp, damp, smoothstep, TAU } from './util.js';
+import { clamp, clamp01, lerp, damp, TAU, lineSagProfile } from './util.js';
 import { createBaitMesh, disposeBaitMesh, updateBaitMesh, createHookMesh, HOOK } from './baitMesh.js';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
-const _v4 = new THREE.Vector3();
 const _m = new THREE.Matrix4();
-const _q = new THREE.Quaternion();
 const _up = new THREE.Vector3(0, 1, 0);
 
 /** 関節の相対しなり（根本→先端）。先端ほどよく曲がる */
@@ -18,13 +16,8 @@ const ROD_FLEX = [0.22, 0.40, 0.70, 1.15, 1.70, 2.40];
 const ROD_FLEX_SUM = ROD_FLEX.reduce((a, b) => a + b, 0);
 /** 最大しなり角（半円） */
 const ROD_BEND_MAX = Math.PI;
-/** 糸が穂先の向きに引っ張られる区間（m）。ロッドより急に曲がる糸に見えないように、
-    穂先からこの距離だけは「穂先の実際の向き」へ寄せ、そこから先で自然な弛みへ合流する */
-const LINE_TIP_FOLLOW = 0.85;
-/** そのうち何点をこのゾーン専用に確保するか（残りは自然な弛み側） */
-const LINE_TIP_PTS = 10;
-/** 「これくらい弛んでいれば穂先の向きに沿う」の基準（アタリ待ちの弛み量） */
-const LINE_SLACK_REF = 0.62;
+/* 糸は竿先から終点へ真っ直ぐ出す（たるみの形は Angler.sagAt が持つ）。
+   穂先の向きへ寄せる追従ゾーンは、竿先に S 字のたるみを作ってしまうため廃止した */
 
 /* ---------------- 画面上で一定の太さに見えるライン ---------------- */
 class LineRibbon {
@@ -611,68 +604,38 @@ export class Angler {
     return this.rodTip.getWorldPosition(out);
   }
 
-  /**
-   * 穂先（最後のガイド）が実際に向いている方向（ワールド空間、単位ベクトル）。
-   * getRodTip() の直後（同フレーム内）に呼ぶ前提で、ここでは updateMatrixWorld を
-   * 呼び直さない（毎フレーム 2 回計算するのは無駄なため）
-   */
-  getRodTipDir(out = new THREE.Vector3()) {
-    this.rodTip.getWorldQuaternion(_q);
-    return out.copy(_up).applyQuaternion(_q);
+  /** 糸のたるみ量（ウキを糸の上に乗せるので game 側でも使う） */
+  static sagFor(dist, slack) {
+    return Math.min(dist * 0.16, 1.2) * clamp(slack, 0, 1);
+  }
+
+  /** たるみの形（t: 0=竿先 1=終点 → 下がる量）。形の定義は util.js の lineSagProfile */
+  static sagAt(t, sag) {
+    return lineSagProfile(t) * sag;
   }
 
   /**
    * ロッド先端 → ウキ の糸を張る（slack: 0=ピンピン 1=たるみ）
    * clipY を渡すと、その高さ（水面）より下は描画しない
    */
-  /** 糸のたるみ量（ウキを糸の上に乗せるので game 側でも使う） */
-  static sagFor(dist, slack) {
-    return Math.min(dist * 0.16, 1.2) * clamp(slack, 0, 1);
-  }
-
   updateLine(tipPos, endPos, slack, camera, clipY = null) {
     const pts = this._linePts;
     const total = pts.length;
     const dist = tipPos.distanceTo(endPos);
     const sag = Angler.sagFor(dist, slack);
-    /* 自然な弛み曲線（従来の直線＋弛み）。穂先の追従ゾーンを抜けた後の位置に使う */
-    const naturalAt = (t, out) => out.set(
-      lerp(tipPos.x, endPos.x, t),
-      lerp(tipPos.y, endPos.y, t) - Math.sin(t * Math.PI) * sag,
-      lerp(tipPos.z, endPos.z, t)
-    );
-    /* 穂先の実際の向きより急な角度で糸が出ることはない（＝ガイドで曲げられている）
-       ので、穂先から LINE_TIP_FOLLOW ぶんはその向きへ寄せ、そこから先は
-       自然な弛み曲線へ合流させる。等間隔の t で全長を割ると、遠くへ投げた
-       ときに追従ゾーンへ点が 1 個も入らなくなる（全長 30m なら 1 点で 1m 超）
-       ため、点配列の前半 TIP_PTS 個をこのゾーン専用に確保して密に敷く */
-    this.getRodTipDir(_v4);
-    const followT = dist > 1e-4 ? clamp(LINE_TIP_FOLLOW / dist, 0.006, 0.7) : 0;
-    /* 穂先の向きへ寄せるのは「たるんでいる糸」だけにする。
-       張った糸は魚まで一直線に伸びるのが正しく、そこで穂先の向きへ寄せると、
-       しなった竿の穂先が魚の方向とずれているぶん接続部に折れ目が出る
-       （ファイト中に糸が根元で曲がって見えていた原因）。
-       LINE_SLACK_REF（アタリ待ちの弛み）で正規化して 0〜1 にする */
-    const followK = clamp01(slack / LINE_SLACK_REF);
-    // 追従ゾーン専用に確保する点数（末尾は自然な弛み側に必ず 1 点以上残す）
-    const tipN = followT > 0 ? Math.min(LINE_TIP_PTS, total - 2) : 0;
+    /* 竿先からはピンと張って出て、ウキ寄りでたるむ。
+       以前は穂先の向きへ糸を寄せる区間を設けて竿と糸をなめらかに繋いでいたが、
+       穂先の向きと糸の向きの差ぶん、竿先の手前で糸が持ち上がって戻る S 字になり
+       「竿先で糸がたるんでいる」ように見えていた。
+       実際の竿先はガイドで糸が折れ返る＝竿と糸は鋭角に交わるので、
+       糸は竿先から終点へ真っ直ぐ出す（たるみの形は sagAt が持つ） */
     for (let i = 0; i < total; i++) {
-      // 前半 tipN 点で [0, followT] を密に敷き、残りで (followT, 1] を敷く。
-      // i = tipN の点がちょうど followT で、両ゾーンの継ぎ目が連続になる
-      const t = i <= tipN
-        ? (tipN > 0 ? (i / tipN) * followT : i / (total - 1))
-        : followT + ((i - tipN) / (total - 1 - tipN)) * (1 - followT);
-      naturalAt(t, _v3);
-      if (t < followT && followK > 0.01) {
-        // w=0 で穂先の向き / w=1 で自然な曲線。たるみが小さいほど自然な曲線（直線）に寄せる
-        const w = 1 - (1 - smoothstep(0, followT, t)) * followK;
-        const fx = tipPos.x + _v4.x * t * dist;
-        const fy = tipPos.y + _v4.y * t * dist;
-        const fz = tipPos.z + _v4.z * t * dist;
-        pts[i].set(lerp(fx, _v3.x, w), lerp(fy, _v3.y, w), lerp(fz, _v3.z, w));
-      } else {
-        pts[i].copy(_v3);
-      }
+      const t = i / (total - 1);
+      pts[i].set(
+        lerp(tipPos.x, endPos.x, t),
+        lerp(tipPos.y, endPos.y, t) - Angler.sagAt(t, sag),
+        lerp(tipPos.z, endPos.z, t)
+      );
     }
 
     // 水面より下は切る（水中の糸は見せない）

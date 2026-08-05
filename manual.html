@@ -852,8 +852,17 @@ p    = <span class="n">2.1</span> − min(<span class="n">1.2</span>, bait.rare 
 
 <span class="cm">// 地形・岩：たるみ込みの曲線を 1.6m 刻みでサンプリング</span>
 サンプル数 = clamp(ceil(距離 / <span class="n">1.6</span>), <span class="n">8</span>, <span class="n">40</span>)
-y(t) = lerp(先端, 着水点, t) − sin(πt) × min(距離×<span class="n">0.16</span>, <span class="n">1.2</span>) × たるみ
+y(t) = lerp(先端, 着水点, t) − <span class="n">6.75</span>t²(1−t) × min(距離×<span class="n">0.16</span>, <span class="n">1.2</span>) × たるみ
 掛かる条件: y(t) + <span class="n">0.22</span> &lt; 地面の高さ（または岩の上端）</pre>
+    <div class="note">
+      たるみの形 <code>6.75t²(1−t)</code>（<code>util.js</code> の <code>lineSagProfile</code>）は
+      <b>描画・ウキの位置・地形との当たり</b>で共有しています。以前は <code>sin(πt)</code> でしたが、
+      これは <b>t=0 での傾きが π もあり、竿先の時点で糸が垂れ始めてしまう</b>のが難点でした。
+      実際の竿先はガイドで糸が折れ返る＝<b>竿と糸は鋭角に交わり、糸自体はピンと張って出ていく</b>ので、
+      t=0 で値も傾きも 0 になる形に変えました。最大は <b>t=2/3 のウキ寄り</b>（係数
+      <code>6.75 = 1 / ((2/3)²·(1/3))</code> は最大値を 1 に正規化するもの）。
+      実測：竿先の 1 点目の垂れ 0.078 m → 0.007 m、たるみ最大の位置 t=0.50 → t=0.65。
+    </div>
     <p class="src">src/terrain.js — dockBlocksSegment(), lineBlocked()</p>
     <div class="note">
       判定に <b>0.22 m の余裕</b>を入れているので、岸をかすめる程度では掛かりません。
