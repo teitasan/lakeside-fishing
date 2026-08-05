@@ -9,6 +9,7 @@ const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
 const _m = new THREE.Matrix4();
+const _q = new THREE.Quaternion();
 const _up = new THREE.Vector3(0, 1, 0);
 
 /** 関節の相対しなり（根本→先端）。先端ほどよく曲がる */
@@ -16,8 +17,120 @@ const ROD_FLEX = [0.22, 0.40, 0.70, 1.15, 1.70, 2.40];
 const ROD_FLEX_SUM = ROD_FLEX.reduce((a, b) => a + b, 0);
 /** 最大しなり角（半円） */
 const ROD_BEND_MAX = Math.PI;
+/* リールの連動。実物はハンドル 1 回転でローターがギア比ぶん回り、
+   スプールは糸を均一に巻くためゆっくり前後する。ハンドルだけ回すと
+   「軸だけ空回りしている」ように見えるので 3 つを繋ぐ */
+const REEL_GEAR = 5.2;      // ギア比（ハンドル 1 回転あたりのローター回転）
+const REEL_OSC = 0.30;      // スプールの往復（ハンドル回転に対する位相）
+const REEL_STROKE = 0.004;  // スプールの前後幅（m）
+/* 左腕のリンク長（肩→肘 / 肘→手）。逆運動学で使うので、
+   _buildBody() の肘と手の位置を動かしたらここも合わせる */
+const ARM_UPPER = 0.30;
+const ARM_FORE = 0.262;
 /* 糸は竿先から終点へ真っ直ぐ出す（たるみの形は Angler.sagAt が持つ）。
    穂先の向きへ寄せる追従ゾーンは、竿先に S 字のたるみを作ってしまうため廃止した */
+
+/* ===========================================================
+   モデルを組む小道具
+   =========================================================== */
+/** MeshStandardMaterial の短縮 */
+const mat = (color, roughness = 0.8, metalness = 0) =>
+  new THREE.MeshStandardMaterial({ color, roughness, metalness });
+
+/**
+ * 半径プロファイル [[y, r], ...] を Y 軸まわりに回した回転体。
+ * 箱を並べるより体・腕・脚・グリップ・スプールが滑らかに出る。
+ * flatZ で断面を楕円に潰せる（人体は前後が薄いので z を縮める）
+ */
+function lathe(profile, radialSeg = 16, flatZ = 1, phiStart = 0, phiLength = TAU) {
+  const pts = profile.map(([y, r]) => new THREE.Vector2(Math.max(0.0002, r), y));
+  const g = new THREE.LatheGeometry(pts, radialSeg, phiStart, phiLength);
+  if (flatZ !== 1) g.scale(1, 1, flatZ);
+  g.computeVertexNormals();
+  return g;
+}
+
+/**
+ * 同じマテリアルの小パーツを 1 つのジオメトリにまとめる。
+ * 釣り人とリールは 100 パーツ以上あるので、まとめないとドローコールと
+ * 影の描画がその数だけ増えてしまう（動かす必要のある関節だけを分ける）。
+ * parts: [{ geo, pos?, rot?, scale? }]（scale は数値か [x,y,z]）
+ */
+function mergeGeos(parts) {
+  const P = [], N = [], U = [], I = [];
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const e = new THREE.Euler();
+  const v = new THREE.Vector3();
+  const sc = new THREE.Vector3();
+  let base = 0;
+  for (const it of parts) {
+    const g = it.geo.clone();
+    const s = it.scale ?? 1;
+    e.set(...(it.rot || [0, 0, 0]));
+    q.setFromEuler(e);
+    v.set(...(it.pos || [0, 0, 0]));
+    sc.set(...(typeof s === 'number' ? [s, s, s] : s));
+    g.applyMatrix4(m.compose(v, q, sc));
+    const pos = g.attributes.position, nor = g.attributes.normal, uv = g.attributes.uv;
+    for (let i = 0; i < pos.count; i++) {
+      P.push(pos.getX(i), pos.getY(i), pos.getZ(i));
+      N.push(nor ? nor.getX(i) : 0, nor ? nor.getY(i) : 1, nor ? nor.getZ(i) : 0);
+      U.push(uv ? uv.getX(i) : 0, uv ? uv.getY(i) : 0);
+    }
+    if (g.index) for (let i = 0; i < g.index.count; i++) I.push(g.index.getX(i) + base);
+    else for (let i = 0; i < pos.count; i++) I.push(i + base);
+    base += pos.count;
+    g.dispose();
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  out.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+  out.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2));
+  out.setIndex(I);
+  return out;
+}
+
+/* 頭の輪郭（1 本の回転体）。球を 2 つ交差させると必ず交線が段になって出るので、
+   輪郭はこれだけで作り、顔のパーツは下の headZ() で表面に載せる */
+const HEAD_PROFILE = [
+  [-0.112, 0.008], [-0.101, 0.032], [-0.086, 0.052], [-0.066, 0.068], [-0.042, 0.080],
+  [-0.014, 0.090], [0.014, 0.095], [0.042, 0.096], [0.066, 0.090], [0.086, 0.077],
+  [0.102, 0.052], [0.110, 0.001],
+];
+const HEAD_SX = 0.94;   // 横を少し細く
+const HEAD_SZ = 1.06;   // 前後を少し深く
+
+/** 輪郭の半径（プロファイルの線形補間） */
+function headR(y) {
+  const P = HEAD_PROFILE;
+  if (y <= P[0][0]) return P[0][1];
+  for (let i = 1; i < P.length; i++) {
+    if (y <= P[i][0]) {
+      const t = (y - P[i - 1][0]) / (P[i][0] - P[i - 1][0]);
+      return lerp(P[i - 1][1], P[i][1], t);
+    }
+  }
+  return P[P.length - 1][1];
+}
+
+/**
+ * (x, y) における頭の表面の z。目・眉・口をここに載せる。
+ * 目分量で z を決めると必ず「埋まって見えない」か「浮いて縁が線になる」ので、
+ * 輪郭を変えたらパーツが自動で追従するようにしておく
+ */
+function headZ(x, y) {
+  const r = headR(y);
+  const sx = x / (HEAD_SX * r);
+  return HEAD_SZ * r * Math.sqrt(Math.max(0, 1 - sx * sx));
+}
+
+/** まとめたパーツから影を落とすメッシュを作る */
+function part(parts, material) {
+  const mesh = new THREE.Mesh(mergeGeos(parts), material);
+  mesh.castShadow = true;
+  return mesh;
+}
 
 /* ---------------- 画面上で一定の太さに見えるライン ---------------- */
 class LineRibbon {
@@ -91,6 +204,10 @@ export class Angler {
     this.armZ = 0;
     this.armY = 0;
     this.castAnim = -1; // >=0 でキャストモーション中
+    /* 竿のワールド上のピッチ（肩・肘を含めない見かけの角度）。
+       ロッドを肘の子にしたので、rodRoot には「これ − 肘の角度」を入れる。
+       こうしないと肘を曲げたぶん竿の角度まで変わってしまう */
+    this.rodPitch = 0.8;
     this.bodyLean = 0;
     this.fpv = false;
 
@@ -103,125 +220,345 @@ export class Angler {
   }
 
   _build() {
-    const skin = new THREE.MeshStandardMaterial({ color: 0xe0b48c, roughness: 0.85 });
-    const coat = new THREE.MeshStandardMaterial({ color: 0x3f5a4a, roughness: 0.85 });
-    const pants = new THREE.MeshStandardMaterial({ color: 0x2f3a4a, roughness: 0.9 });
-    const hatMat = new THREE.MeshStandardMaterial({ color: 0x8a6b3a, roughness: 0.9 });
-    const dark = new THREE.MeshStandardMaterial({ color: 0x23282e, roughness: 0.8 });
-    this.materials = { skin, coat, pants, hatMat, dark };
+    /* ---- マテリアル ----
+       一人称で消すパーツ（頭・首・胴）は colorWrite を個別に切るので、
+       他のパーツとマテリアルを共有してはいけない（下で clone している） */
+    const M = {
+      skin:      mat(0xdcae86, 0.72),
+      skinDark:  mat(0xc0906a, 0.75),
+      hair:      mat(0x2b2118, 0.85),
+      shirt:     mat(0x40614f, 0.86),
+      shirtDark: mat(0x33503f, 0.88),
+      vest:      mat(0xa08b5c, 0.90),
+      vestDark:  mat(0x6d5c38, 0.90),
+      pants:     mat(0x33404f, 0.92),
+      boot:      mat(0x36291d, 0.78),
+      sole:      mat(0x1a1712, 0.95),
+      hat:       mat(0x8a6b3a, 0.90),
+      hatBand:   mat(0x4a3a22, 0.88),
+      strap:     mat(0x3a2e20, 0.85),
+      eye:       mat(0x201a16, 0.35),
+      metal:     mat(0xb9bfc6, 0.34, 0.72),
+      metalDark: mat(0x60666e, 0.42, 0.68),
+      steel:     mat(0xd7dce2, 0.24, 0.85),
+      plastic:   mat(0x1c1e22, 0.55),
+      rubber:    mat(0x131417, 0.95),
+      eva:       mat(0x2b2724, 0.98),
+      cork:      mat(0xbfa276, 0.92),
+      gold:      mat(0xc9a552, 0.35, 0.80),
+      lineWrap:  mat(0xdfe6ea, 0.55),
+    };
+    this.materials = M;
 
+    this._fpvHide = [];
+    this._buildBody(M);
+    this._buildRod(M);
+  }
+
+  /* ===========================================================
+     釣り人本体
+     =========================================================== */
+  _buildBody(M) {
     const g = this.root;
 
-    // 脚
+    /* ---- 脚（股 → 膝 → 足首）----
+       股関節だけで振っていたのを膝まで入れた。歩幅の割に脚が棒だと
+       いちばん animation の粗さが目立つ部分 */
     this.legs = [];
+    this.knees = [];
     for (const s of [-1, 1]) {
-      const leg = new THREE.Group();
-      leg.position.set(s * 0.13, 0.86, 0);
-      const m = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.86, 0.19), pants);
-      m.position.y = -0.43;
-      m.castShadow = true;
-      leg.add(m);
-      const boot = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.14, 0.28), dark);
-      boot.position.set(0, -0.82, 0.04);
-      boot.castShadow = true;
-      leg.add(boot);
-      g.add(leg);
-      this.legs.push(leg);
+      const hip = new THREE.Group();
+      hip.position.set(s * 0.115, 0.86, 0);
+      // 腿（付け根が太く膝で細い）
+      hip.add(part([
+        { geo: lathe([[-0.40, 0.062], [-0.36, 0.072], [-0.22, 0.085], [-0.08, 0.098], [0.00, 0.104], [0.04, 0.088], [0.055, 0.0]], 14, 0.92) },
+        // 尻の丸み
+        { geo: new THREE.SphereGeometry(0.070, 12, 10), pos: [s * -0.012, 0.008, -0.020], scale: [1, 0.92, 0.88] },
+      ], M.pants));
+
+      const knee = new THREE.Group();
+      knee.position.y = -0.40;
+      hip.add(knee);
+      // 脛（膝の丸み → 足首）
+      knee.add(part([
+        { geo: new THREE.SphereGeometry(0.066, 12, 10), scale: [1, 0.92, 1] },
+        { geo: lathe([[-0.30, 0.046], [-0.20, 0.054], [-0.10, 0.062], [0.00, 0.066], [0.02, 0.060]], 14, 0.95) },
+        // 裾のだぶつき（ブーツに被せる）
+        { geo: lathe([[-0.300, 0.058], [-0.285, 0.070], [-0.258, 0.068], [-0.240, 0.052]], 14, 0.95) },
+      ], M.pants));
+
+      // ブーツ（靴底・甲・つま先・履き口）
+      const boot = new THREE.Group();
+      boot.position.y = -0.325;
+      knee.add(boot);
+      /* 甲は「かかと側が高く、つま先へ下がる」形にする。同じ高さの箱に
+         丸いつま先を足すと、靴底の上に石が乗ったような段が出る */
+      boot.add(part([
+        { geo: lathe([[0.045, 0.052], [0.070, 0.058], [0.082, 0.052], [0.090, 0.034]], 12, 1) }, // 履き口
+        { geo: new THREE.BoxGeometry(0.086, 0.082, 0.100), pos: [0, 0.047, -0.028] },            // かかと側
+        { geo: new THREE.BoxGeometry(0.082, 0.056, 0.082), pos: [0, 0.036, 0.030] },             // 甲
+        { geo: new THREE.SphereGeometry(0.041, 12, 10), pos: [0, 0.030, 0.064], scale: [1.0, 0.74, 1.18] }, // つま先
+      ], M.boot));
+      boot.add(part([
+        // 靴底はつま先の先端（z ≒ 0.112）に合わせる。長すぎると板の上に立って見える
+        { geo: new THREE.BoxGeometry(0.092, 0.019, 0.198), pos: [0, 0.0095, 0.014] },
+        { geo: new THREE.BoxGeometry(0.084, 0.016, 0.060), pos: [0, 0.026, -0.056] },            // かかとの積み上げ
+      ], M.sole));
+      // 靴紐（甲の上に横 3 本）
+      boot.add(part([0, 1, 2].map((i) => ({
+        geo: new THREE.BoxGeometry(0.050 - i * 0.005, 0.005, 0.007),
+        pos: [0, 0.064 - i * 0.003, 0.008 + i * 0.017],
+      })), M.strap));
+
+      g.add(hip);
+      this.legs.push(hip);
+      this.knees.push(knee);
     }
 
-    // 胴
+    /* ---- 胴 ---- */
     this.torso = new THREE.Group();
     this.torso.position.y = 0.86;
     g.add(this.torso);
-    const chest = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.64, 0.27), coat.clone());
-    chest.position.y = 0.32;
-    chest.castShadow = true;
-    this.torso.add(chest);
-    // ベスト
-    const vest = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.4, 0.3), new THREE.MeshStandardMaterial({ color: 0x6b5b3a, roughness: 0.9 }));
-    vest.position.y = 0.36;
+
+    // シャツ（腰 → 胸。前後を薄く潰した回転体）
+    const shirtMat = M.shirt.clone();
+    const shirt = part([
+      { geo: lathe([
+        [0.00, 0.001], [0.005, 0.120], [0.06, 0.134], [0.13, 0.132], [0.20, 0.126],
+        [0.27, 0.136], [0.35, 0.156], [0.44, 0.168], [0.51, 0.163], [0.55, 0.142],
+        [0.578, 0.112], [0.596, 0.082], [0.614, 0.070], [0.620, 0.001],
+      ], 20, 0.70) },
+      // 肩（左右へ張り出す）
+      { geo: new THREE.SphereGeometry(0.078, 14, 10), pos: [-0.148, 0.492, 0], scale: [1, 0.86, 0.92] },
+      { geo: new THREE.SphereGeometry(0.078, 14, 10), pos: [0.148, 0.492, 0], scale: [1, 0.86, 0.92] },
+    ], shirtMat);
+    this.torso.add(shirt);
+
+    /* ベスト（胸〜腰。ポケットと襟とジッパー付き）。
+       釣り人らしさがいちばん出るので、ここだけは形を作り込む */
+    const vestMat = M.vest.clone();
+    const vestDarkMat = M.vestDark.clone();
+    const vest = part([
+      { geo: lathe([
+        [0.095, 0.001], [0.100, 0.090], [0.112, 0.130], [0.130, 0.140], [0.20, 0.142],
+        [0.28, 0.148], [0.36, 0.158], [0.42, 0.160], [0.462, 0.152], [0.492, 0.128],
+        [0.508, 0.092], [0.516, 0.001],
+      ], 22, 0.78) },
+    ], vestMat);
     this.torso.add(vest);
+    const vestTrim = part([
+      // 襟
+      { geo: new THREE.TorusGeometry(0.098, 0.019, 6, 16), pos: [0, 0.505, 0], rot: [Math.PI / 2, 0, 0], scale: [1, 0.8, 1] },
+      // 前ジッパー（細く。太いとポケットのフラップと合わせて十字に見える）
+      { geo: new THREE.BoxGeometry(0.009, 0.375, 0.010), pos: [0, 0.308, 0.122] },
+      // 胸ポケット×2・腹ポケット×2（上辺にフラップ）
+      ...[[-0.058, 0.392, 0.050, 0.055], [0.058, 0.392, 0.050, 0.055],
+          [-0.070, 0.278, 0.066, 0.074], [0.070, 0.278, 0.066, 0.074]].flatMap(([x, y, w, h]) => [
+        { geo: new THREE.BoxGeometry(w, h, 0.018), pos: [x, y, 0.108] },
+        { geo: new THREE.BoxGeometry(w + 0.006, 0.012, 0.026), pos: [x, y + h / 2 - 0.004, 0.109] },
+      ]),
+      // 背中のループ（ランディングネットを掛けるところ）
+      { geo: new THREE.TorusGeometry(0.015, 0.0045, 5, 10), pos: [0, 0.440, -0.092], rot: [0.35, 0, 0] },
+    ], vestDarkMat);
+    this.torso.add(vestTrim);
 
-    // 首・頭
-    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.075, 0.1, 8), skin.clone());
-    neck.position.y = 0.68;
+    // 首
+    const neckMat = M.skin.clone();
+    const neck = part([
+      { geo: lathe([[0.55, 0.044], [0.60, 0.046], [0.645, 0.053], [0.675, 0.062]], 12, 1) },
+    ], neckMat);
     this.torso.add(neck);
+
+    /* ---- 頭 ---- */
     this.head = new THREE.Group();
-    this.head.position.y = 0.78;
+    this.head.position.y = 0.745;
     this.torso.add(this.head);
-    const skull = new THREE.Mesh(new THREE.SphereGeometry(0.125, 14, 12), skin.clone());
-    skull.scale.set(1, 1.12, 1.05);
-    skull.castShadow = true;
+    const headMat = M.skin.clone();
+    /* 頭は「球＋顎の球」を交差させると必ず交線が段になって出るので、
+       輪郭は 1 本の回転体で作る。顔のパーツはそこへ深く埋めて足す
+       （浅く置くと縁が線として浮いてしまう） */
+    const skull = part([
+      { geo: lathe(HEAD_PROFILE, 22, HEAD_SZ), scale: [HEAD_SX, 1, 1] },
+      // 顎先（輪郭から 3mm だけ出す。出しすぎると瘤に見える）
+      { geo: new THREE.SphereGeometry(0.026, 10, 8), pos: [0, -0.082, headZ(0, -0.082) - 0.022], scale: [1.10, 0.80, 1.0] },
+      // 鼻（鼻筋と小鼻を重ねて 1 つの塊に見せる）
+      { geo: new THREE.SphereGeometry(0.015, 10, 8), pos: [0, -0.008, headZ(0, -0.008) - 0.013], scale: [0.58, 1.50, 1.0] },
+      { geo: new THREE.SphereGeometry(0.012, 10, 8), pos: [0, -0.030, headZ(0, -0.030) - 0.009], scale: [1.0, 0.72, 0.9] },
+      // 耳
+      { geo: new THREE.SphereGeometry(0.020, 8, 8), pos: [-0.082, -0.004, -0.006], scale: [0.35, 1.15, 0.85] },
+      { geo: new THREE.SphereGeometry(0.020, 8, 8), pos: [0.082, -0.004, -0.006], scale: [0.35, 1.15, 0.85] },
+    ], headMat);
     this.head.add(skull);
-    // 帽子
-    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.235, 0.235, 0.022, 16), hatMat);
-    brim.position.y = 0.09;
-    brim.castShadow = true;
-    this.head.add(brim);
-    const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.125, 0.14, 0.13, 14), hatMat);
-    crown.position.y = 0.155;
-    crown.castShadow = true;
-    this.head.add(crown);
+    /* 目・眉・口。真っ黒な太い線を貼ると凄い顔になるので、
+       眉は髪と同じ色で細く、口は端を少し上げて 2 本に割る */
+    const eyeMat = M.eye.clone();
+    const eyes = part([
+      { geo: new THREE.SphereGeometry(0.0105, 10, 8), pos: [-0.032, 0.008, headZ(-0.032, 0.008) - 0.0035], scale: [1, 0.92, 0.5] },
+      { geo: new THREE.SphereGeometry(0.0105, 10, 8), pos: [0.032, 0.008, headZ(0.032, 0.008) - 0.0035], scale: [1, 0.92, 0.5] },
+    ], eyeMat);
+    this.head.add(eyes);
+    const browMat = M.hair.clone();
+    const brows = part([
+      { geo: new THREE.BoxGeometry(0.028, 0.0060, 0.010), pos: [-0.033, 0.030, headZ(-0.033, 0.030) - 0.004], rot: [0, 0, -0.14] },
+      { geo: new THREE.BoxGeometry(0.028, 0.0060, 0.010), pos: [0.033, 0.030, headZ(0.033, 0.030) - 0.004], rot: [0, 0, 0.14] },
+      { geo: new THREE.BoxGeometry(0.016, 0.0045, 0.008), pos: [-0.009, -0.054, headZ(-0.009, -0.054) - 0.003], rot: [0, 0, 0.18] },
+      { geo: new THREE.BoxGeometry(0.016, 0.0045, 0.008), pos: [0.009, -0.054, headZ(0.009, -0.054) - 0.003], rot: [0, 0, -0.18] },
+    ], browMat);
+    this.head.add(brows);
+    /* 帽子から出る髪。頭蓋と同心の球を重ねると交差線がギザギザに出るので、
+       lathe の部分回転で「後頭部から側頭部だけ」の薄い殻にする
+       （phi=0 が +Z＝顔の正面なので、正面を開けて後ろ 200 度を覆う） */
+    const hairMat = M.hair.clone();
+    const hair = part([
+      { geo: lathe([
+        [-0.044, 0.082], [-0.014, 0.093], [0.014, 0.098], [0.042, 0.099], [0.062, 0.092],
+      ], 20, 1.06, Math.PI * 0.42, Math.PI * 1.16), pos: [0, 0.000, -0.002], scale: [0.96, 1, 1] },
+    ], hairMat);
+    this.head.add(hair);
 
-    /* 一人称で視界を覆ってしまうパーツ（頭・首・胴）。
-       visible=false にすると影も消えてしまうので、カラー出力だけ止めて影は残す。
-       そのためにマテリアルは他のパーツと共有しないよう clone 済み */
-    this._fpvHide = [skull, brim, crown, neck, chest, vest];
+    /* 帽子（つば・冠・バンド）。つばは前が広く後ろが狭い実物寄りの形 */
+    const hatMat = M.hat.clone();
+    const hat = part([
+      { geo: lathe([[0.010, 0.100], [0.006, 0.130], [-0.004, 0.160], [0.006, 0.162], [0.014, 0.132], [0.020, 0.100]], 20, 1), pos: [0, 0.060, 0], scale: [1, 1, 0.92] },
+      { geo: lathe([[0.00, 0.100], [0.06, 0.098], [0.105, 0.088], [0.126, 0.064], [0.134, 0.001]], 20, 1), pos: [0, 0.058, 0] },
+    ], hatMat);
+    hat.position.z = 0.006;
+    /* つばが顔に影を落とすと顔が完全に潰れて表情が読めないので、
+       帽子だけ影を落とさない（体の影は残るので接地感は失われない） */
+    hat.castShadow = false;
+    this.head.add(hat);
+    const hatBandMat = M.hatBand.clone();
+    const hatBand = part([
+      { geo: lathe([[0.00, 0.101], [0.026, 0.100]], 20, 1), pos: [0, 0.070, 0] },
+    ], hatBandMat);
+    hatBand.position.z = 0.006;
+    this.head.add(hatBand);
 
-    // 腕（+X 側がプレイヤーの左、-X 側が右。ロッドは右手で持つ）
+    /* 一人称で視界を覆うパーツ。visible=false だと影も消えるので
+       カラー出力と深度書き込みだけ止める（そのためマテリアルは clone 済み） */
+    this._fpvHide.push(shirt, vest, vestTrim, neck, skull, eyes, brows, hair, hat, hatBand);
+
+    /* ---- 腕（肩 → 肘 → 手首）。+X 側が左、-X 側が右。ロッドは右手 ---- */
     const mkArm = (s) => {
       const arm = new THREE.Group();
-      arm.position.set(s * 0.25, 0.55, 0);
-      const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.062, 0.28, 3, 8), coat);
-      upper.position.y = -0.19;
-      upper.castShadow = true;
-      arm.add(upper);
-      const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.26, 3, 8), skin);
-      fore.position.y = -0.47;
-      fore.castShadow = true;
-      arm.add(fore);
+      arm.position.set(s * 0.155, 0.505, 0);
+      // 上腕（袖）
+      arm.add(part([
+        { geo: new THREE.SphereGeometry(0.060, 12, 10), pos: [0, -0.006, 0], scale: [1, 0.95, 1] },
+        { geo: lathe([[-0.30, 0.040], [-0.22, 0.045], [-0.10, 0.053], [-0.02, 0.057]], 14, 1) },
+        // 袖口（まくった袖の折り返し）
+        { geo: lathe([[-0.312, 0.042], [-0.296, 0.050], [-0.276, 0.048]], 14, 1) },
+      ], M.shirtDark));
+
+      const elbow = new THREE.Group();
+      elbow.position.y = -0.30;
+      arm.add(elbow);
+      // 前腕（肘の丸み → 手首）
+      elbow.add(part([
+        { geo: new THREE.SphereGeometry(0.041, 12, 10) },
+        { geo: lathe([[-0.245, 0.026], [-0.20, 0.029], [-0.10, 0.036], [0.00, 0.040]], 14, 1) },
+      ], M.skin));
+
       this.torso.add(arm);
-      return arm;
+      return { arm, elbow };
     };
-    this.armR = mkArm(-1);
-    this.armL = mkArm(1);
+    const R = mkArm(-1);
+    const L = mkArm(1);
+    this.armR = R.arm;
+    this.armL = L.arm;
+    this.elbowR = R.elbow;
+    this.elbowL = L.elbow;
     // Y を最後に掛ける（寝かせた竿を横へ振れるように。rotation.y=0 なら XYZ と同じ）
     this.armR.rotation.order = 'YXZ';
 
-    /* ---- ロッド ---- */
-    this.rodRoot = new THREE.Object3D();
-    this.rodRoot.position.set(-0.02, -0.58, 0.05);
-    this.armR.add(this.rodRoot);
+    // 左手（軽く握った形。何も持たないので前腕の先へ付ける）
+    const handL = this._buildHand(M, 1);
+    handL.position.set(0, -0.262, 0.012);
+    handL.rotation.x = -0.25;
+    this.elbowL.add(handL);
+    this.handL = handL;
+  }
 
-    const rodMat = new THREE.MeshStandardMaterial({ color: 0x4a3320, roughness: 0.6, metalness: 0.1 });
-    const rodTipMat = new THREE.MeshStandardMaterial({ color: 0x8d8d94, roughness: 0.4, metalness: 0.4 });
+  /**
+   * 手（握り拳）。s = +1 で左手 / -1 で右手。
+   * 指をロッドに巻き付ける向きに並べたいので、手のローカル +Z を「指の伸びる向き」、
+   * +X を「親指側」に決めておく
+   */
+  _buildHand(M, s) {
+    const g = new THREE.Group();
+    g.add(part([
+      // 掌（球ひとつだと団子になるので、掌・拳頭・指を分けて起伏を出す）
+      { geo: new THREE.SphereGeometry(0.031, 12, 10), pos: [0, -0.004, 0.004], scale: [0.80, 0.66, 1.05] },
+      // 拳頭（指の付け根の山。ここがあると握った形に見える）
+      { geo: new THREE.CapsuleGeometry(0.0125, 0.042, 3, 8), pos: [0, -0.014, 0.019], rot: [0, 0, Math.PI / 2] },
+      // 指 4 本（第 2 関節まで前へ、そこから折り返す）
+      ...[0, 1, 2, 3].map((i) => ({
+        geo: new THREE.CapsuleGeometry(0.0098 - i * 0.0007, 0.020, 2, 7),
+        pos: [s * (0.019 - i * 0.0128), -0.017, 0.030 - i * 0.0018],
+        rot: [Math.PI / 2 - 0.30, 0, 0],
+      })),
+      ...[0, 1, 2, 3].map((i) => ({
+        geo: new THREE.CapsuleGeometry(0.0090 - i * 0.0007, 0.014, 2, 6),
+        pos: [s * (0.019 - i * 0.0128), -0.033, 0.030 - i * 0.0018],
+        rot: [0.30, 0, 0],
+      })),
+      // 親指（他の指と向き合って輪を閉じる）
+      { geo: new THREE.CapsuleGeometry(0.0115, 0.022, 2, 8), pos: [s * 0.026, -0.006, 0.006], rot: [Math.PI / 2 - 0.75, 0, s * 0.40] },
+      { geo: new THREE.CapsuleGeometry(0.0100, 0.016, 2, 8), pos: [s * 0.019, -0.014, 0.026], rot: [Math.PI / 2 - 0.30, 0, s * 0.9] },
+    ], M.skin));
+    return g;
+  }
+
+  /* ===========================================================
+     ロッド（グリップ・リールシート・ブランク・ガイド）
+     =========================================================== */
+  _buildRod(M) {
+    /* ロッドは肘の子にする。肩から真下に伸ばした腕の先だと竿が腰の高さに来て、
+       左手をリールへ回すこともできない持ち方になる。肘を曲げれば竿ごと
+       上がって前へ出るので、竿を構えた姿勢になる。
+       肘 0 度のときに元と同じ位置に来るよう (0, -0.28, ...) に置く
+       （肘は腕のローカル -0.30） */
+    this.rodRoot = new THREE.Object3D();
+    this.rodRoot.position.set(-0.02, -0.28, 0.05);
+    this.elbowR.add(this.rodRoot);
+
+    const rodMat = mat(0x3a2a1c, 0.55, 0.15);
+    const rodTipMat = mat(0x8d8d94, 0.40, 0.40);
     this.rodMats = { rodMat, rodTipMat };
 
-    // グリップ
-    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.022, 0.3, 8), new THREE.MeshStandardMaterial({ color: 0x2a2118, roughness: 1 }));
-    grip.position.y = -0.02;
-    this.rodRoot.add(grip);
-    // リール
-    const reel = new THREE.Group();
-    reel.position.set(0, 0.1, -0.06);
-    const reelBody = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.035, 12), rodTipMat);
-    reelBody.rotation.x = Math.PI / 2;
-    reel.add(reelBody);
-    const handle = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.06, 0.012), new THREE.MeshStandardMaterial({ color: 0x1d1d22 }));
-    handle.position.set(0.04, 0.03, 0);
-    reel.add(handle);
-    this.reelHandle = handle;
-    this.rodRoot.add(reel);
+    /* グリップ周り（下から: エンドキャップ → リアグリップ → リールシート →
+       ロックナット → フォアグリップ → ワインディングチェック）。
+       全長は今までと同じ（穂先の位置＝糸の出どころを動かさないため） */
+    this.rodRoot.add(part([
+      { geo: lathe([[-0.170, 0.001], [-0.166, 0.016], [-0.150, 0.019]], 14, 1) },   // エンドキャップ
+    ], M.rubber));
+    this.rodRoot.add(part([
+      { geo: lathe([[-0.150, 0.019], [-0.120, 0.021], [-0.060, 0.0205], [-0.020, 0.018], [0.010, 0.0165]], 16, 1) }, // リアグリップ
+      { geo: lathe([[0.108, 0.0155], [0.130, 0.0165], [0.140, 0.0150]], 16, 1) },   // フォアグリップ
+    ], M.eva));
+    this.rodRoot.add(part([
+      { geo: lathe([[0.014, 0.0148], [0.086, 0.0148]], 16, 1) },                    // リールシート（金属筒）
+      { geo: lathe([[0.086, 0.0168], [0.106, 0.0172]], 16, 1) },                    // ロックナット
+      { geo: new THREE.TorusGeometry(0.0162, 0.0020, 5, 16), pos: [0, 0.141, 0], rot: [Math.PI / 2, 0, 0] }, // ワインディングチェック
+    ], M.metalDark));
+    // ロックナットの滑り止め（縦溝）
+    this.rodRoot.add(part(
+      Array.from({ length: 12 }, (_, i) => ({
+        geo: new THREE.BoxGeometry(0.0018, 0.014, 0.0018),
+        pos: [Math.cos(i / 12 * TAU) * 0.0172, 0.096, Math.sin(i / 12 * TAU) * 0.0172],
+      })), M.metal));
+
+    this._buildReel(M);
 
     /* しなる向き（水平の方位角）専用のラッパー。グリップ・リールは rodRoot に
        直付けのままにして、これだけを回す＝しなっても手元の向きは動かない */
     this.rodFlexRoot = new THREE.Object3D();
     this.rodRoot.add(this.rodFlexRoot);
 
-    /* 6 セグメント（全長 ≈ 旧 3 本と同じ 2.12m）。先端ほど細く・しなる */
+    /* 6 セグメント（全長 ≈ 2.12m）。先端ほど細く・しなる */
     const segLen = [0.42, 0.40, 0.36, 0.34, 0.32, 0.28];
-    const r0 = 0.019;
-    const r1 = 0.0035;
+    const r0 = 0.0135;
+    const r1 = 0.0026;
     let parent = this.rodFlexRoot;
     this.rodSegs = [];
     for (let i = 0; i < segLen.length; i++) {
@@ -231,20 +568,26 @@ export class Angler {
       const t1 = (i + 1) / segLen.length;
       const radBot = lerp(r0, r1, t0);
       const radTop = lerp(r0, r1, t1);
-      const mesh = new THREE.Mesh(
-        new THREE.CylinderGeometry(radTop, radBot, segLen[i], 7),
-        i >= 4 ? rodTipMat : rodMat
-      );
-      mesh.position.y = segLen[i] / 2;
-      mesh.castShadow = true;
-      seg.add(mesh);
-      // ガイド（根本以外）
+      const blank = [
+        { geo: new THREE.CylinderGeometry(radTop, radBot, segLen[i], 10), pos: [0, segLen[i] / 2, 0] },
+      ];
+      // 継ぎ目の補強巻き
+      if (i > 0) blank.push({ geo: lathe([[0.0, radBot * 1.14], [0.016, radBot * 1.10]], 10, 1) });
+      seg.add(part(blank, i >= 4 ? rodTipMat : rodMat));
+
+      /* ガイド（根本以外）。リング + 2 本脚 + 足元の巻き。
+         リングだけだとブランクから浮いて見えるので脚を入れる */
       if (i > 0) {
-        const gR = lerp(0.018, 0.010, i / (segLen.length - 1));
-        const guide = new THREE.Mesh(new THREE.TorusGeometry(gR, 0.0028, 4, 8), rodTipMat);
-        guide.position.y = segLen[i] * 0.72;
-        guide.rotation.x = Math.PI / 2;
-        seg.add(guide);
+        const gR = lerp(0.017, 0.0085, i / (segLen.length - 1));
+        const y = segLen[i] * 0.72;
+        const legTop = y - gR * 0.55;
+        const legLen = gR * 1.35;
+        seg.add(part([
+          { geo: new THREE.TorusGeometry(gR, 0.0022, 5, 14), pos: [0, y, 0], rot: [Math.PI / 2, 0, 0] },
+          { geo: new THREE.BoxGeometry(0.0026, legLen, 0.0055), pos: [0, legTop - legLen / 2, radTop * 0.7], rot: [0.38, 0, 0] },
+          { geo: new THREE.BoxGeometry(0.0026, legLen, 0.0055), pos: [0, legTop - legLen / 2, -radTop * 0.7], rot: [-0.38, 0, 0] },
+          { geo: lathe([[y - legLen - 0.006, radTop * 1.22], [y - legLen + 0.004, radTop * 1.20]], 10, 1) },
+        ], rodTipMat));
       }
       parent.add(seg);
       parent = seg;
@@ -253,9 +596,141 @@ export class Angler {
     this.rodTip = new THREE.Object3D();
     this.rodTip.position.y = segLen[segLen.length - 1];
     parent.add(this.rodTip);
+    // トップガイド（穂先の輪。糸はここから出る）
+    this.rodTip.add(part([
+      { geo: lathe([[-0.012, 0.0042], [0.000, 0.0038], [0.004, 0.0034]], 8, 1) },
+      { geo: new THREE.TorusGeometry(0.0062, 0.0016, 5, 12), pos: [0, 0.011, 0], rot: [Math.PI / 2, 0, 0] },
+      { geo: new THREE.BoxGeometry(0.0022, 0.008, 0.0038), pos: [0, 0.0065, 0.0028], rot: [0.5, 0, 0] },
+    ], rodTipMat));
+
+    /* 右手はロッドの子にする。rodRoot の回転（構え／振りかぶり／立てる）に
+       そのまま付いていくので、どの姿勢でもグリップを握った形が崩れない。
+       手はローカル +X 方向の棒を握る作りなので、Z を −90 度回して
+       握り軸をロッドの軸（+Y）に合わせ、握り位置がリールの脚の下に来るよう置く */
+    const handR = this._buildHand(M, -1);
+    handR.rotation.set(0, 0, -Math.PI / 2);
+    handR.position.set(0.020, 0.030, -0.012);
+    this.rodRoot.add(handR);
+    this.handR = handR;
 
     // ロッドの基本姿勢
     this.rodRoot.rotation.x = 0.8;
+  }
+
+  /* ===========================================================
+     スピニングリール
+     ロッドのローカル座標では +Y が穂先・+Z がロッドの下側なので、
+     脚は +Z へ伸ばし、スプールの軸は +Y（穂先向き）に取る
+     =========================================================== */
+  _buildReel(M) {
+    const reel = new THREE.Group();
+    reel.position.set(0, 0.050, 0.0145);     // リールシートの位置（ロッドの表面）
+    this.rodRoot.add(reel);
+    this.reel = reel;
+
+    /* ボディ（脚・ステム・ギアボックス）。ステムは少し後ろへ倒れる */
+    reel.add(part([
+      // リールシートに咬ませる脚
+      { geo: new THREE.BoxGeometry(0.015, 0.070, 0.007), pos: [0, 0, 0.003], rot: [0.05, 0, 0] },
+      // ステム
+      { geo: lathe([[0.000, 0.010], [0.022, 0.012], [0.040, 0.016]], 12, 1), pos: [0, -0.006, 0.028], rot: [Math.PI / 2, 0, 0] },
+      // ギアボックス（前後に長い卵形）
+      { geo: new THREE.SphereGeometry(0.025, 16, 12), pos: [0, -0.014, 0.070], scale: [0.84, 1.32, 1.06] },
+      // ハンドル軸のふくらみ（左右）
+      { geo: new THREE.SphereGeometry(0.017, 12, 10), pos: [0, -0.018, 0.072], scale: [1.50, 1, 1] },
+      // 逆転レバー
+      { geo: new THREE.BoxGeometry(0.008, 0.011, 0.018), pos: [-0.019, -0.040, 0.076], rot: [0.2, 0, 0] },
+    ], M.metalDark));
+    // ボディ側面のプレート（銘板のつもりの色差し）
+    reel.add(part([
+      { geo: lathe([[0.000, 0.0105], [0.0035, 0.0095]], 14, 1), pos: [0.0215, -0.018, 0.072], rot: [0, 0, -Math.PI / 2] },
+      { geo: lathe([[0.000, 0.0105], [0.0035, 0.0095]], 14, 1), pos: [-0.0215, -0.018, 0.072], rot: [0, 0, Math.PI / 2] },
+    ], M.metal));
+
+    /* ローター（スプールを外から回す椀）+ ベール + ラインローラー。
+       巻くと実物どおりこれが回る */
+    const rotor = new THREE.Group();
+    rotor.position.set(0, 0.020, 0.056);
+    reel.add(rotor);
+    this.reelRotor = rotor;
+    rotor.add(part([
+      // 椀（内壁まで作って肉厚を出す）
+      { geo: lathe([
+        [-0.036, 0.008], [-0.033, 0.017], [-0.023, 0.028], [-0.009, 0.0325], [0.009, 0.0325],
+        [0.009, 0.0300], [-0.009, 0.0300], [-0.022, 0.0258], [-0.031, 0.0150], [-0.034, 0.008],
+      ], 20, 1) },
+      /* ベールを支える 2 本のアーム。ローターの前縁から立ち上がってスプールの
+         前まで伸びる（実物は片方が太くベールを起こすレバーになっている） */
+      { geo: new THREE.BoxGeometry(0.013, 0.030, 0.010), pos: [0.0300, 0.020, 0], rot: [0, 0, 0.20] },
+      { geo: new THREE.BoxGeometry(0.009, 0.026, 0.009), pos: [-0.0300, 0.018, 0], rot: [0, 0, -0.20] },
+    ], M.metal));
+    rotor.add(part([
+      /* ベール（スプール前を跨ぐ半円のワイヤ）。TorusGeometry は XY 平面に
+         できるので回転させない＝X 方向に張って +Y（穂先側）へ張り出す。
+         回すとスプールと同じ平面に寝てしまって「ただの輪」になる */
+      { geo: new THREE.TorusGeometry(0.0305, 0.0018, 5, 20, Math.PI), pos: [0, 0.032, 0] },
+      // ベールアームのカバー
+      { geo: new THREE.BoxGeometry(0.011, 0.015, 0.011), pos: [0.0300, 0.032, 0], rot: [0, 0, 0.1] },
+    ], M.steel));
+    rotor.add(part([
+      // ラインローラー（糸が乗る溝つきの小輪）。ベールの端＝アームの先に付く
+      { geo: lathe([[-0.003, 0.0055], [-0.001, 0.0038], [0.001, 0.0038], [0.003, 0.0055]], 10, 1),
+        pos: [0.0305, 0.032, 0], rot: [0, 0, Math.PI / 2] },
+    ], M.plastic));
+
+    /* スプール（糸巻き）。巻くとゆっくり前後する */
+    const spool = new THREE.Group();
+    spool.position.set(0, 0.020, 0.056);
+    reel.add(spool);
+    this.reelSpool = spool;
+    this._spoolY0 = spool.position.y;
+    spool.add(part([
+      { geo: lathe([
+        [-0.020, 0.009], [-0.019, 0.0270], [-0.016, 0.0270], [-0.013, 0.0215],
+        [0.009, 0.0215], [0.012, 0.0270], [0.016, 0.0270], [0.017, 0.0215], [0.019, 0.0095],
+      ], 20, 1) },
+    ], M.metal));
+    spool.add(part([
+      { geo: lathe([[-0.0125, 0.0243], [0.0085, 0.0243]], 20, 1) },   // 巻いてある糸
+    ], M.lineWrap));
+    spool.add(part([
+      // ドラグノブ（前面のつまみ）と滑り止め
+      { geo: lathe([[0.019, 0.012], [0.023, 0.0165], [0.032, 0.0165], [0.034, 0.011], [0.035, 0.001]], 14, 1) },
+      ...Array.from({ length: 8 }, (_, i) => ({
+        geo: new THREE.BoxGeometry(0.0024, 0.009, 0.0024),
+        pos: [Math.cos(i / 8 * TAU) * 0.0165, 0.0275, Math.sin(i / 8 * TAU) * 0.0165],
+      })),
+    ], M.plastic));
+
+    /* ハンドル。回転軸をロッドの左右（X）へ向けたいので、
+       固定の pivot で軸を寝かせ、その子（reelHandle）を Z だけ回す。
+       既存のアニメーションが reelHandle.rotation.z を足しているのを壊さない */
+    const pivot = new THREE.Group();
+    pivot.position.set(0.0235, -0.018, 0.072);
+    pivot.rotation.y = Math.PI / 2;
+    reel.add(pivot);
+    const handle = new THREE.Group();
+    pivot.add(handle);
+    this.reelHandle = handle;
+    /* 左手が来る位置の目印（ハンドル軸の外側）。左腕の逆運動学の目標に使う。
+       ノブそのものを目標にすると、回転に合わせて手が振り回されてしまう */
+    this.reelGrip = new THREE.Object3D();
+    this.reelGrip.position.z = 0.038;
+    pivot.add(this.reelGrip);
+    handle.add(part([
+      { geo: lathe([[0.000, 0.0095], [0.010, 0.0080]], 12, 1), rot: [Math.PI / 2, 0, 0] },     // 軸のカバー
+      { geo: new THREE.BoxGeometry(0.0085, 0.050, 0.0072), pos: [0, 0.025, 0.006] },           // クランクアーム
+      { geo: lathe([[0.000, 0.0055], [0.016, 0.0050]], 10, 1), pos: [0, 0.048, 0.006], rot: [Math.PI / 2, 0, 0] }, // ノブの軸
+    ], M.metal));
+    handle.add(part([
+      // ノブ（樽型）
+      { geo: lathe([[0.000, 0.005], [0.005, 0.0110], [0.015, 0.0125], [0.025, 0.0110], [0.030, 0.005]], 14, 1),
+        pos: [0, 0.048, 0.016], rot: [Math.PI / 2, 0, 0] },
+    ], M.plastic));
+    // 反対側のハンドルキャップ
+    reel.add(part([
+      { geo: lathe([[0.000, 0.0095], [0.006, 0.0075]], 12, 1), pos: [-0.0235, -0.018, 0.072], rot: [0, 0, Math.PI / 2] },
+    ], M.metalDark));
   }
 
   _buildBobber() {
@@ -404,6 +879,12 @@ export class Angler {
     const swing = Math.sin(this.walkPhase) * 0.55 * p.moving;
     this.legs[0].rotation.x = swing;
     this.legs[1].rotation.x = -swing;
+    /* 膝。股だけで振ると脚が棒のまま前後して歩きに見えないので、
+       後ろへ蹴り出したあと（股の角度が戻り始める側）で曲げる。
+       曲がる向きは「かかとが尻へ寄る」＝+X 回転のみ（人の膝は逆に曲がらない） */
+    const kneeOf = (ph) => (0.05 + 0.85 * Math.max(0, Math.sin(ph + 2.2))) * p.moving;
+    this.knees[0].rotation.x = kneeOf(this.walkPhase);
+    this.knees[1].rotation.x = kneeOf(this.walkPhase + Math.PI);
     const bob = Math.abs(Math.sin(this.walkPhase)) * 0.045 * p.moving;
     this.torso.position.y = 0.86 + bob;
     this.torso.rotation.z = Math.sin(this.walkPhase) * 0.03 * p.moving;
@@ -466,16 +947,21 @@ export class Angler {
         armT = this.armX;
         rodT = lerp(-1.45, 1.15, e);
         leanT = lerp(-0.12, 0.1, e);
-        this.rodRoot.rotation.x = damp(this.rodRoot.rotation.x, rodT, 26, dt);
+        this.elbowR.rotation.x = lerp(-1.05, -0.10, e);
+        this.rodPitch = damp(this.rodPitch, rodT, 26, dt);
+        this.rodRoot.rotation.x = this.rodPitch - this.elbowR.rotation.x;
         this.armR.rotation.x = this.armX;
         this.armZ = damp(this.armZ, 0, 14, dt);      // 振り抜きは正面で
         this.armR.rotation.z = this.armZ;
         this.armY = damp(this.armY, 0, 14, dt);
         this.armR.rotation.y = this.armY;
         this.armL.rotation.x = lerp(-0.3, -0.9, e);
+        /* 振りかぶりで肘を畳み、振り抜きで伸ばす。肘が固定だと
+           腕全体が板のように回るだけで「振った」感じが出ない */
+        this.elbowL.rotation.x = lerp(-0.35, -1.00, e);
         this.torso.rotation.x = leanT;
         this._applyBend(dt, p);
-        this.reelHandle.rotation.z += dt * 2;
+        this._spinReel(dt * 2);
         return;
       }
     }
@@ -498,16 +984,70 @@ export class Angler {
     this.armR.rotation.z = this.armZ;
     this.armY = damp(this.armY, armY, 7, dt);
     this.armR.rotation.y = this.armY;
-    this.armL.rotation.x = damp(this.armL.rotation.x, st === 'idle' ? -0.3 + swing * 0.6 : -0.75, 8, dt);
-    this.rodRoot.rotation.x = damp(this.rodRoot.rotation.x, rodT, 9, dt);
+    /* 右肘。竿を構えている間は深く畳んで竿を体の前に持ってくる
+       （竿の角度は rodPitch で保たれるので、ここを変えても狙いはずれない） */
+    let elbowRT = -0.25 - p.moving * 0.25;
+    if (st === 'wait' || st === 'flight' || st === 'nibble' || st === 'bite') elbowRT = -0.55;
+    else if (st === 'fight') elbowRT = -0.75 - p.tension * 0.20;
+    else if (st === 'landed') elbowRT = -0.85;
+    else if (st === 'charge') elbowRT = lerp(-0.25, -0.95, p.charge);
+    this.elbowR.rotation.x = damp(this.elbowR.rotation.x, elbowRT, 8, dt);
+    /* 左腕は「竿を出している間はリールのハンドルを握る」。決め打ちの角度だと
+       竿の角度が状態とテンションで動くぶん手が空を掴むので、毎フレーム解く */
+    const holding = st === 'wait' || st === 'flight' || st === 'nibble' || st === 'bite'
+      || st === 'fight' || st === 'landed';
+    if (holding) {
+      this._reachReel(dt);
+    } else {
+      this.armL.rotation.set(st === 'idle' ? -0.3 + swing * 0.6 : -0.75, 0, 0);
+      this.elbowL.rotation.x = damp(this.elbowL.rotation.x, -0.30 - p.moving * 0.25, 8, dt);
+    }
+    this.rodPitch = damp(this.rodPitch, rodT, 9, dt);
+    this.rodRoot.rotation.x = this.rodPitch - this.elbowR.rotation.x;
     this.bodyLean = damp(this.bodyLean, leanT, 8, dt);
     this.torso.rotation.x = this.bodyLean;
     // 頭は少し狙いの方を向く
     this.head.rotation.x = damp(this.head.rotation.x, clamp(-this.pitch * 0.5, -0.5, 0.5), 8, dt);
 
-    if (p.reeling) this.reelHandle.rotation.z += dt * 14;
+    if (p.reeling) this._spinReel(dt * 14);
 
     this._applyBend(dt, p);
+  }
+
+  /**
+   * 左腕をリールのハンドルへ届かせる（肩の向き＋肘の曲げの 2 リンク逆運動学）。
+   *
+   * 肘は X 回転しか持たないので、腕のローカルでは手は必ず x=0 の面内に来る。
+   * つまり「肘の曲げ角 φ」を距離だけから決め、そのときの手の向き
+   * (0, −L1−L2cosφ, L2sinφ) を目標方向へ合わせる回転を肩に入れれば必ず届く。
+   */
+  _reachReel(dt) {
+    // 目標（リールのハンドル軸の外側）を胴のローカル座標へ
+    this.reelGrip.getWorldPosition(_v);
+    this.torso.updateMatrixWorld();
+    this.torso.worldToLocal(_v);
+    _v.sub(this.armL.position);
+    const reach = ARM_UPPER + ARM_FORE;
+    const d = clamp(_v.length(), Math.abs(ARM_UPPER - ARM_FORE) + 0.02, reach - 0.012);
+    // 肘の内角から曲げ角（人の肘は前へしか曲がらないので符号は負に固定）
+    const cosPhi = clamp((d * d - ARM_UPPER * ARM_UPPER - ARM_FORE * ARM_FORE)
+      / (2 * ARM_UPPER * ARM_FORE), -1, 1);
+    const phi = Math.acos(cosPhi);
+    this.elbowL.rotation.x = damp(this.elbowL.rotation.x, -phi, 12, dt);
+    // その曲げのときの「肩から手へ」の向き（腕のローカル）
+    _v2.set(0, -ARM_UPPER - ARM_FORE * Math.cos(phi), ARM_FORE * Math.sin(phi)).normalize();
+    _q.setFromUnitVectors(_v2, _v.normalize());
+    this.armL.quaternion.slerp(_q, 1 - Math.exp(-12 * dt));
+  }
+
+  /**
+   * リールを回す。ハンドルの回転からローターの回転とスプールの前後を作る。
+   * 既存の呼び出しが reelHandle.rotation.z を直接足していたのをここへ集約した
+   */
+  _spinReel(delta) {
+    const h = (this.reelHandle.rotation.z += delta);
+    this.reelRotor.rotation.y = -h * REEL_GEAR;
+    this.reelSpool.position.y = this._spoolY0 + Math.sin(h * REEL_OSC) * REEL_STROKE;
   }
 
   /**
