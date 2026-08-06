@@ -288,6 +288,9 @@ export class Game {
     });
 
     this.angler = new Angler(this.scene);
+    // 釣り人と竿は外部の glTF なので読み終わるまで待つ
+    await this.angler.load(onProgress);
+    this.angler.setRod(this.state.gear.rod);   // セーブから復元した竿の見た目にする
 
     /* 水面のマーカー（狙い点・着水予測）は水面に置いた輪 */
     const mkMarker = (r0, r1, color, opacity) => {
@@ -674,6 +677,7 @@ export class Game {
     } else if (!this.state.owned[kind].includes(id)) return;
     this.state.gear[kind] = id;
     if (kind === 'bait') this.angler.setBait(id);
+    if (kind === 'rod') this.angler.setRod(id);
     this.audio.click();
     const item = GEAR[kind].find((x) => x.id === id);
     this.ui.toast(`${iconLabel(item.icon, item.name)} を装備`, 'good');

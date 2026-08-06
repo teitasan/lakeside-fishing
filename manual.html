@@ -1156,123 +1156,110 @@ dockDist = 桟橋までの距離</pre>
 
   <!-- ============================================================ -->
   <section id="s8">
-    <h2><span class="num">8</span>釣り人・ロッド・リールのモデル</h2>
+    <h2><span class="num">8</span>釣り人・ロッドのモデル</h2>
     <p>
-      以前は箱と円柱の詰め合わせで、リールは<b>円柱 1 個と箱 1 個</b>（＝ハンドルらしき棒が横に生えているだけ）でした。
-      作り直して<b>メッシュ 53 個・三角 13,812 枚</b>になっています。
-      道具は 3 つだけで、これで体・ロッド・リールの全パーツを作っています。
-    </p>
-    <div class="grid c3">
-      <div class="card tight"><h4><code>lathe(profile)</code></h4><p>半径プロファイル <code>[[y, r], …]</code> を Y 軸まわりに回した回転体。
-        箱を並べるより体・腕・脚・グリップ・スプールが滑らかに出ます。<code>flatZ</code> で断面を楕円に潰せる
-        （人体は前後が薄いので z を 0.70〜0.78 に縮める）。部分回転もできるので、
-        <b>帽子から出る髪は「後頭部だけの薄い殻」</b>にしています。</p></div>
-      <div class="card tight"><h4><code>mergeGeos(parts)</code></h4><p>同じマテリアルの小パーツを 1 つのジオメトリにまとめる。
-        まとめないとドローコールと影の描画がパーツ数だけ増えるので、
-        <b>動かす必要のある関節だけを別メッシュ</b>にして、あとは全部まとめています
-        （100 個以上のパーツが 53 メッシュに収まっているのはこれのため）。</p></div>
-      <div class="card tight"><h4><code>headZ(x, y)</code></h4><p>顔のパーツを頭の輪郭に載せるために、その点の表面 z を解析的に返す。
-        目分量で z を決めると<b>埋まって見えない</b>か<b>浮いて縁が線として出る</b>のどちらかになり、
-        実際に一度失敗しました。輪郭を変えてもパーツが自動で追従します。</p></div>
-    </div>
-
-    <h3>頭は 1 本の回転体で作る</h3>
-    <p>
-      最初は<b>頭蓋の球＋顎の球＋頬の球</b>を交差させて作りましたが、球同士の交線が段になって
-      <b>顔に円弧のギザギザが出ます</b>（同心の球を重ねた髪では、交線がジグザグの黒帯になりました）。
-      いまは輪郭を <code>HEAD_PROFILE</code> の回転体 1 つだけで作り、顎・鼻・耳は<b>輪郭の内側から数 mm だけ出す</b>形にしています。
-    </p>
-    <div class="note">
-      <b>帽子だけ影を落としません</b>（<code>castShadow = false</code>）。つばの影で顔が完全に潰れて
-      目も鼻も読めなくなるためです。体の影は残るので接地感は失われません。
-    </div>
-
-    <h3>スピニングリール</h3>
-    <p>
-      ロッドのローカル座標では <b>+Y が穂先・+Z がロッドの下側</b>なので、脚は +Z へ伸ばし、
-      スプールの軸は +Y（穂先向き）に取ります。ベールは <code>TorusGeometry</code> が XY 平面にできるので<b>回転させない</b>
-      ―― 回すとスプールと同じ平面に寝てしまい「ただの輪」になります（実際に一度そうなりました）。
+      もとはプリミティブを組んだ自作モデルでしたが、顔・手・服のつくりが手組みの限界だったので、
+      <b><a href="https://quaternius.com/">Quaternius</a> の CC0 アセット</b>に差し替えました。
+      表示義務のないパブリックドメインですが、出所は README とタイトル画面に記載しています。
     </p>
     <div class="tw"><table>
-      <thead><tr><th class="l">パーツ</th><th class="l">作り</th><th class="l">巻いたときの動き</th></tr></thead>
+      <thead><tr><th class="l">ファイル</th><th class="l">元アセット</th><th class="num">三角</th><th class="num">容量</th></tr></thead>
       <tbody>
-        <tr><td class="l name">ボディ</td><td class="l">リールシートに咬ませる脚・ステム・卵形のギアボックス・逆転レバー</td><td class="l">固定</td></tr>
-        <tr><td class="l name">ローター</td><td class="l">内壁まで作った椀＋太さの違う 2 本のベールアーム</td><td class="l"><b>ハンドル × ギア比 5.2 で回る</b></td></tr>
-        <tr><td class="l name">ベール</td><td class="l">スプール前を跨ぐ半円のワイヤ＋アームカバー</td><td class="l">ローターと一緒に回る</td></tr>
-        <tr><td class="l name">ラインローラー</td><td class="l">糸が乗る溝つきの小輪（ベールの端）</td><td class="l">同上</td></tr>
-        <tr><td class="l name">スプール</td><td class="l">フランジ付きの回転体＋巻いてある糸＋ドラグノブ（滑り止め 8 本）</td><td class="l"><b>前後に 4mm ゆっくり往復</b></td></tr>
-        <tr><td class="l name">ハンドル</td><td class="l">クランクアーム＋樽型ノブ。軸はロッドの左右</td><td class="l">回る（毎秒 14 rad）</td></tr>
+        <tr><td class="l name">assets/models/angler.glb</td><td class="l">Ultimate Modular Men Pack の "Casual"</td><td class="num">5,776</td><td class="num">1.4 MB</td></tr>
+        <tr><td class="l name">assets/models/rod-bamboo.glb</td><td class="l">Fishing Rod Lvl1</td><td class="num">308</td><td class="num">17 KB</td></tr>
+        <tr><td class="l name">assets/models/rod-glass.glb</td><td class="l">Fishing Rod Lvl2</td><td class="num">522</td><td class="num">28 KB</td></tr>
+        <tr><td class="l name">assets/models/rod-carbon.glb</td><td class="l">Fishing Rod Lvl3</td><td class="num">910</td><td class="num">49 KB</td></tr>
+        <tr><td class="l name">assets/models/rod-master.glb</td><td class="l">Fishing Rod Lvl4</td><td class="num">898</td><td class="num">48 KB</td></tr>
+        <tr><td class="l name">assets/models/rod-legend.glb</td><td class="l">Fishing Rod Lvl5</td><td class="num">1,174</td><td class="num">63 KB</td></tr>
       </tbody>
-      <tfoot><tr><td colspan="3" class="l">ハンドルだけ回すと「軸が空回りしている」ように見えるので、<code>_spinReel()</code> で 3 つを連動させています。
-        スプールの往復は実物が糸を均一に巻くための動きで、これがあると<b>巻いている実感がはっきり出ます</b>。
-        回転軸は固定の pivot（<code>rotation.y = π/2</code>）で寝かせ、その子を Z で回しています
-        ―― こうしないとオイラー角の掛かる順で軸がずれます。</td></tr></tfoot>
+      <tfoot><tr><td colspan="4" class="l">竿は Lvl1〜5 がそのままゲームの 5 種に対応します（<b>竿を買うと見た目も変わります</b>）。
+        Lvl1 は<b>リールの無い竹竿</b>で、上位ほどガイドとリールが付いた作りになります。
+        自作時代は 53 メッシュ・13,812 三角でしたが、いまは<b>12 メッシュ・6,686 三角</b>。
+        シーン全体のドローコールも 116 → <b>65</b> に減りました。</td></tr></tfoot>
     </table></div>
-    <p class="src">src/angler.js — _buildReel(), _spinReel()</p>
 
-    <h3>ロッド</h3>
+    <h3>読み込み</h3>
     <p>
-      下から<b>エンドキャップ → リアグリップ（EVA）→ リールシート（金属筒）→ ロックナット（滑り止め 12 本）
-      → フォアグリップ → ワインディングチェック</b>。ブランクは 6 セグメントで、各節に<b>補強巻き</b>と
-      <b>ガイド（リング＋2 本脚＋足元の巻き）</b>、穂先に<b>トップガイド</b>が付きます。
-      リングだけだとブランクから浮いて見えるので脚を入れています。
+      three.js 本体に glTF のローダーは入っていないので、r185 のアドオン 3 本
+      （<code>GLTFLoader</code> / <code>BufferGeometryUtils</code> / <code>SkeletonUtils</code>・約 160KB）を
+      <code>vendor/addons/</code> に置き、importmap に <code>three/addons/</code> を足しています。
+      読み込みは <code>game.build()</code> の途中で <code>await angler.load()</code> して待ちます
+      （ローディング表示に「釣り人を呼んでいます」が出るのがこれ）。
     </p>
     <div class="note">
-      グリップとブランクは<b>作り直しで細くしました</b>（リアグリップ半径 0.027 → 0.019 m、ブランク根元 0.019 → 0.0135 m）。
-      前はグリップがリールより太く、<b>バットに玩具のリールを付けた</b>ように見えていたためです。
-      いまはスプール径 0.054 m がリアグリップ径 0.038 m を上回り、実物の比率に近づいています。
+      <b>ボーン名から <code>.</code> が消えます。</b>glTF では <code>UpperArm.L</code> ですが、
+      three.js のローダーがノード名を正規化して <code>UpperArmL</code> になります
+      （アニメーションのトラック名と衝突しないようにするため）。
+      元の綴りで引くと <code>undefined</code> になるので、両方の綴りで引けるようにしてあります。
     </div>
 
-    <h3>関節とアニメーション</h3>
+    <h3>骨組みと姿勢</h3>
     <p>
-      股関節だけだった脚に<b>膝</b>、肩だけだった腕に<b>肘</b>を入れました。
-      膝は「かかとが尻へ寄る」向き（+X 回転）にしか曲げません（人の膝は逆に曲がらない）。
+      キャラクターは <b>62 本のボーン</b>でリグ済み、<b>24 種のアニメーション</b>付きです。
+      ただし釣りの動作は入っていないので、<b>脚と体はアセットのアニメーション・腕は計算</b>で分担しています。
     </p>
-    <pre><span class="cm">// 骨組み（動かすものだけ別ノードにしてある）</span>
-root ─ legs[0..1]（股） ─ knees[0..1]（膝） ─ boot
-     └ torso ─ head
-              ├ armR（肩） ─ elbowR（肘） ─ <b>rodRoot</b> ─ rodFlexRoot ─ rodSegs[0..5] ─ rodTip
-              │                                └ handR（ロッドの子。どの姿勢でも握った形が崩れない）
-              │                                └ reel ─ rotor / spool / handlePivot ─ reelHandle
-              └ armL（肩） ─ elbowL（肘） ─ handL</pre>
+    <pre><span class="cm">// 毎フレームの順番</span>
+1. mixer.update()          <span class="cm">// Idle_Neutral と Walk を moving の重みで混ぜる（脚・体幹）</span>
+2. 前傾と首の向き           <span class="cm">// 腰を軸にした包みのグループと Head ボーン</span>
+3. 右手の位置を決める        <span class="cm">// 右肩 + 姿勢ごとのオフセット</span>
+4. ロッドをそこに置く        <span class="cm">// グリップの握り位置が手に来るよう、竿の向きに沿って戻す</span>
+5. 両腕を逆運動学で通す      <span class="cm">// 肩→肘→手首の 2 リンク</span>
+6. 手首を竿の向きへ・指を握らせる
+7. 竿のしなり（_applyBend）</pre>
+    <p class="src">src/angler.js — update(), _poseUpper(), _solveArm(), _aimBone()</p>
+    <div class="grid c2">
+      <div class="card tight"><h4>どのボーンも +Y に伸びている</h4><p>このリグは子ボーンが必ず親のローカル <code>+Y</code> にあります。
+        つまり「<b>+Y を狙いの向きに合わせる</b>」だけでどのボーンも向けられるので、
+        ボーンごとに回転軸を調べる必要がありません（<code>_aimBone</code>）。</p></div>
+      <div class="card tight"><h4>ロッドは手のボーンの子にしない</h4><p>手に付けるとリグの癖がそのまま竿の角度に乗り、
+        狙いの計算まで動きます。<b>root に直付けして、毎フレーム「手の位置」と「設計どおりのピッチ」で置く</b>ことで、
+        竿の角度は姿勢ごとの設計値のまま・位置だけ手に追従します。</p></div>
+    </div>
     <div class="note">
-      <b>ロッドを肘の子にしました。</b>肩から真下に伸ばした腕の先だと竿が腰の高さに来て、
-      「竿を持って立っている」だけの絵になり、左手をリールへ回すこともできません。<br>
-      ただし肘を曲げると竿の角度まで変わってしまうので、<b>竿の見かけのピッチ <code>rodPitch</code> を別に持ち、
-      <code>rodRoot.rotation.x = rodPitch − 肘の角度</code></b> を入れています。
-      これで<b>肘の曲げは竿の「位置」だけを動かし、「角度」は姿勢ごとの設計値どおり</b>になります。
+      <b>アニメーション対象のボーンに角度を足してはいけません。</b>
+      three.js の <code>AnimationMixer</code> は<b>値が前フレームと変わらなければシーングラフに書き戻しません</b>。
+      そのため <code>bone.rotation.x += 前傾</code> と書くと戻されずに<b>毎フレーム積み上がり</b>、
+      数十フレームで体が折れ曲がります（実際にそうなりました）。
+      いまは前傾を<b>mixer が触らない包みのグループ</b>で作り、首は<b>足さずに毎フレーム決め打ちで入れて</b>います。
     </div>
 
-    <h3>左手はリールのハンドルを握る（逆運動学）</h3>
+    <h3>竿のしなりを保つ</h3>
     <p>
-      竿を出している間、左腕は<b>毎フレーム逆運動学で解いて</b>リールのハンドルへ向けます。
-      決め打ちの角度だと、竿の角度が状態とテンションで動くぶん<b>手が空を掴みます</b>。
+      アセットの竿は 1 枚の固いメッシュなので、そのまま使うと<b>しならなくなります</b>。
+      ファイトの手応えはしなりで見せているので、読み込み時に<b>ボーンを自動で仕込んで</b>います。
     </p>
-    <pre><span class="cm">// 肘は X 回転しか持たない ⇒ 腕のローカルでは手は必ず x=0 の面内に来る</span>
-d      = |目標 − 肩|                                     <span class="cm">// 胴のローカルで測る</span>
-cos φ  = (d² − L1² − L2²) / (2·L1·L2)                    <span class="cm">// L1=0.30（肩→肘）L2=0.262（肘→手）</span>
-肘     = −φ                                              <span class="cm">// 人の肘は前へしか曲がらないので符号は固定</span>
-手の向き(腕ローカル) = (0, −L1 − L2cos φ, L2 sin φ)
-肩     = setFromUnitVectors(手の向き, 目標の向き)         <span class="cm">// これで必ず届く向きになる</span></pre>
-    <p class="src">src/angler.js — _reachReel()</p>
-    <div class="note">
-      実測の残り距離：<b>待ち 0.08m / ファイト 0.11m</b>。腕の長さ 0.562m に対して
-      肩からハンドルまでが 0.64〜0.67m あるので<b>完全には届いていません</b>。
-      届かないときは肘が伸びて目標を指す形になり、手はリール直下のグリップに添えられます
-      ―― 竿を両手で持つ形なので不自然ではありませんが、<b>ハンドルを握り切ってはいない</b>のが現状です。
-    </div>
+    <pre><span class="cm">// 1. モデルの上下端をしなりのボーン列に合わせて拡大・移動する（全長 6〜8m のものもある）</span>
+s = (穂先 − グリップ尻) / (モデルの上端 − 下端)
+o = 穂先 − モデルの上端 × s
 
-    <h3>作り直しで変わった数値</h3>
+<span class="cm">// 2. 高さから skinIndex / skinWeight を作る（関節 i と i+1 で線形に混ぜる）</span>
+関節 i の高さ Y[i] ≤ y &lt; Y[i+1] のとき
+  skinIndex  = (i, i+1)
+  skinWeight = (1 − t, t),  t = (y − Y[i]) / (Y[i+1] − Y[i])</pre>
+    <p class="src">src/angler.js — setRod(), _weightRod()</p>
+    <p>
+      関節の数（6）と長さは自作時代と同じなので、<b>しなりの計算（1 章の <code>_applyBend</code>）はそのまま動きます</b>。
+      グリップより下の頂点は根元のボーンに重み 1 で固定されるため、握りとリールは曲がりません。
+    </p>
+
+    <h3>差し替えで変わった数値</h3>
     <div class="tw"><table>
-      <thead><tr><th class="l">項目</th><th class="num">前</th><th class="num">後</th><th class="l">理由</th></tr></thead>
+      <thead><tr><th class="l">項目</th><th class="num">自作</th><th class="num">アセット</th><th class="l">備考</th></tr></thead>
       <tbody>
-        <tr><td class="l">竿先が足元より前に出る量（構え）</td><td class="num">約 1.25 m</td><td class="num">1.39 m</td><td class="l">ロッドを肘の子にして竿が前へ出た</td></tr>
-        <tr><td class="l">最弱キャストの飛距離</td><td class="num">約 1.7 m</td><td class="num">1.85 m</td><td class="l">同上（竿先が起点なので竿によらず一定）</td></tr>
-        <tr><td class="l">メッシュ数 / 三角数</td><td class="num">21 / 約 2,600</td><td class="num">53 / 13,812</td><td class="l">パーツを増やしつつマテリアル単位でまとめた</td></tr>
+        <tr><td class="l">竿先が足元より前に出る量（構え）</td><td class="num">1.39 m</td><td class="num">1.28 m</td><td class="l">腕が短いぶん手前になった</td></tr>
+        <tr><td class="l">最弱キャストの飛距離</td><td class="num">1.85 m</td><td class="num">1.74 m</td><td class="l">同上（竿先が起点なので竿によらず一定）</td></tr>
+        <tr><td class="l">メッシュ数 / 三角数</td><td class="num">53 / 13,812</td><td class="num">12 / 6,686</td><td class="l">見た目は上がって軽くなった</td></tr>
+        <tr><td class="l">シーンのドローコール</td><td class="num">116</td><td class="num">65</td><td class="l">—</td></tr>
       </tbody>
       <tfoot><tr><td colspan="4" class="l">狙いの計算と実際の着水は<b>どちらも <code>getRodTip()</code> を起点</b>にしているので、
         竿先が動いても<b>狙い点と着水点はずれません</b>（変わるのは最短距離の下限だけ）。</td></tr></tfoot>
     </table></div>
+    <div class="note">
+      <b>失ったもの：回るリール。</b>自作のスピニングリールはローターがギア比 5.2 で回り、
+      スプールが 4mm 前後していましたが、アセットの竿は<b>リールが竿と一体の 1 メッシュ</b>で、
+      グリップと同じマテリアルなので切り離せません。<b>巻いてもリールは動きません</b>。
+      腕の長さも 0.42m と短いため、<b>左手はリールではなく右手のすぐ下</b>に添える持ち方にしています。
+    </div>
   </section>
 
   <!-- ============================================================ -->
@@ -1285,7 +1272,7 @@ cos φ  = (d² − L1² − L2²) / (2·L1·L2)                    <span class="
         <tr><td class="l name">src/game.js</td><td class="l">状態機械、<code>rollSpecies</code>（抽選）、<code>_onLandWater</code>（アタリ時間）、<code>_startBite</code>（アワセ猶予）、<code>_setHook</code>／<code>_updateFight</code>（ファイト）、キャスト物理、レベル・実績処理</td></tr>
         <tr><td class="l name">src/save.js</td><td class="l">セーブ／ロード、<code>xpForLevel</code></td></tr>
         <tr><td class="l name">src/fish.js</td><td class="l">魚メッシュ生成、遊泳AI（回遊・接近・前アタリ・逃走・跳ね）、魚群の入れ替え、<code>startle</code>（キャストで散らす）</td></tr>
-        <tr><td class="l name">src/angler.js</td><td class="l">釣り人・ロッド・スピニングリールのモデルと骨組み、歩き／キャスト／ファイトの姿勢、竿のしなり、左腕の逆運動学、糸の描画（8 章）</td></tr>
+        <tr><td class="l name">src/angler.js</td><td class="l">釣り人・ロッド（glTF の読み込みとリグ）、歩き／キャスト／ファイトの姿勢、両腕の逆運動学、竿のしなり（自動スキニング）、糸とウキの描画（8 章）</td></tr>
         <tr><td class="l name">src/terrain.js</td><td class="l">湖底の高さ関数（ドロップオフ・淵・藻場）、桟橋、岸辺の装飾</td></tr>
         <tr><td class="l name">src/water.js</td><td class="l">波の式（CPU/GPU 共通）、水面シェーダ、波紋・しぶき</td></tr>
         <tr><td class="l name">src/sky.js</td><td class="l">時間帯ごとの空と光、天候の遷移と倍率、雨</td></tr>

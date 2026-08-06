@@ -196,6 +196,19 @@ src/
 
 重い場合は「軽量」を選ぶか、ブラウザのウィンドウを小さくしてください。
 
+## 使用アセット
+
+3D モデルは [Quaternius](https://quaternius.com/) の **CC0（パブリックドメイン）**アセットを使っています。
+表示義務はありませんが、出所として記載します。
+
+| ファイル | 元アセット |
+|---|---|
+| `assets/models/angler.glb` | Ultimate Modular Men Pack の "Casual"（62 ボーン・24 アニメーション） |
+| `assets/models/rod-*.glb` | Fishing Rod Lvl1〜5（竿 5 種にそれぞれ対応） |
+
+`vendor/addons/` の GLTFLoader・BufferGeometryUtils・SkeletonUtils は three.js r185 の
+アドオン（MIT）をそのまま置いたものです。
+
 ## デプロイ
 
 `main` ブランチのルートをそのまま GitHub Pages で配信しています（ビルド不要）。
