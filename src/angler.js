@@ -48,29 +48,93 @@ const ROD_SEG_LEN = [0.42, 0.40, 0.36, 0.34, 0.32, 0.28];
 const ROD_BLANK_Y0 = 0.14;   // 最初の関節（グリップの上）の高さ
 const ROD_TIP_Y = ROD_BLANK_Y0 + ROD_SEG_LEN.reduce((a, b) => a + b, 0);
 const ROD_BUTT_Y = -0.17;    // グリップ尻。アセットはここに合わせて拡大・移動する
-const ROD_GRIP_Y = 0.06;     // 右手が握る高さ
-const ROD_LEFT_Y = -0.02;    // 左手を添える高さ（右手のすぐ下。腕が短く、リールまでは届かない）
 const BODY_PIVOT_Y = 0.95;   // 前傾の軸（腰の高さ）
 
-/* 姿勢ごとの「竿のピッチ（垂直から前へ倒す角）」と
-   「右手の位置（右肩からのオフセット。root ローカルで +Z が前・+X が左）」。
-   ピッチは作り直し前の「腕 + ロッドの合計角」をそのまま引き継いでいるので、
-   狙いと着水の関係は変わらない */
-const POSE = {
-  idle:   { pitch: 0.45, hand: [0.04, -0.34, 0.15], lean: 0 },
-  charge: { pitch: -0.95, hand: [0.08, -0.16, -0.18], lean: -0.12 },
-  flight: { pitch: 1.00, hand: [0.03, -0.25, 0.24], lean: 0 },
-  wait:   { pitch: 1.00, hand: [0.03, -0.25, 0.24], lean: 0 },
-  nibble: { pitch: 1.00, hand: [0.03, -0.25, 0.24], lean: 0 },
-  bite:   { pitch: 1.00, hand: [0.03, -0.25, 0.24], lean: 0 },
-  fight:  { pitch: 0.56, hand: [0.05, -0.20, 0.20], lean: 0.16 },
-  landed: { pitch: 0.10, hand: [0.06, -0.14, 0.18], lean: 0 },
+/* ===========================================================
+   モーションの調整値
+   すべてここに集約してある。motion-editor.html がこのオブジェクトを
+   直接いじってリアルタイムに反映し、localStorage に保存する。
+   ゲーム側は読み込み時にそれを取り込む（別タブで編集すると即反映される）
+   =========================================================== */
+export const TUNING = {
+  /* 姿勢ごとの「竿のピッチ（垂直から前へ倒す角。rad）」と
+     「右手の位置（右肩からのオフセット m。root ローカルで +X 左・+Y 上・+Z 前）」、
+     「前傾（rad）」。ピッチは自作モデル時代の「腕 + ロッドの合計角」を
+     引き継いでいるので、狙いと着水の関係は変わらない */
+  pose: {
+    idle:   { pitch: 0.45, hand: [0.04, -0.34, 0.15], lean: 0 },
+    charge: { pitch: -0.95, hand: [0.08, -0.16, -0.18], lean: -0.12 },
+    wait:   { pitch: 1.00, hand: [0.03, -0.25, 0.24], lean: 0 },
+    fight:  { pitch: 0.56, hand: [0.05, -0.20, 0.20], lean: 0.16 },
+    landed: { pitch: 0.10, hand: [0.06, -0.14, 0.18], lean: 0 },
+  },
+  /* ファイト中：テンションが上がるほど竿を立て、体を前へ入れる。
+     巻いている間はさらに立てる（ポンピングの「立てる」側） */
+  fight: { pitchByTension: 0.52, leanByTension: 0.14, reelPitch: 0.30, reelLean: 0.05 },
+  /* 一人称は視界に穂先を残したいので、待ちとファイトをさらに寝かせる */
+  fpv: { waitPitch: 1.20, fightPitch: 0.90, fightByTension: 0.38, fightReel: 0.26 },
+  /* キャストの振り抜き。dur 秒かけて charge の姿勢から endPitch まで振る */
+  cast: { dur: 0.34, endPitch: 0.60, leanFrom: -0.12, leanTo: 0.10, damp: 26 },
+  /* 腕。pole は肘を張り出す向き（root ローカル）。これがないと肘が裏返る。
+     gripY / leftY は竿のどこを右手・左手が握るか（竿のローカル高さ m） */
+  arm: { poleR: [-0.5, -0.7, -0.5], poleL: [0.5, -0.8, -0.3], gripY: 0.06, leftY: -0.02 },
+  /* 体。tilt は前傾を腰から上へ流す割合、head は狙いの方を向く強さ */
+  body: { tilt: 0.55, headLook: 0.40, headLookMax: 0.45, headLean: 0.55 },
+  /* 歩き。再生倍率 = base + moving × gain。
+     アニメの歩幅から出る「足が滑らない速さ」は 1.32 m/s で、
+     ゲームの歩きは 3.1 m/s あるため、等倍だと 2.35 倍ぶん滑る */
+  walk: { timeBase: 0.85, timeGain: 0.50 },
+  /* 指の曲げ（第 1〜3 関節 / 親指）。開いた手のままだと竿を握って見えない */
+  fingers: { curl: [-1.05, -0.85, -0.55], thumb: [-0.55, -0.45] },
+  /* 姿勢が切り替わるときの追従の速さ（大きいほど速い） */
+  damp: { pitch: 9, hand: 9, lean: 8 },
 };
+
+/** 待ちと同じ姿勢を使う状態（アタリ前後は構えを変えない） */
+const POSE_ALIAS = { flight: 'wait', nibble: 'wait', bite: 'wait' };
+const poseOf = (st) => TUNING.pose[POSE_ALIAS[st] || st] || TUNING.pose.idle;
+
 const lerpArr = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
 
-/* 指の曲げ（第 1〜3 関節 / 親指）。開いた手のままだと竿を握って見えない */
-const FINGER_CURL = [-1.05, -0.85, -0.55];
-const THUMB_CURL = [-0.55, -0.45];
+/** 既定値（エディターの「初期値に戻す」用） */
+export const TUNING_DEFAULT = JSON.parse(JSON.stringify(TUNING));
+
+const TUNING_KEY = 'lakeside.motion';
+
+/** 保存された調整値を取り込む（数値と配列だけを上書きする浅い再帰マージ） */
+function mergeTuning(src, dst = TUNING) {
+  if (!src || typeof src !== 'object') return;
+  for (const k of Object.keys(dst)) {
+    if (!(k in src)) continue;
+    const a = dst[k], b = src[k];
+    if (Array.isArray(a) && Array.isArray(b)) {
+      for (let i = 0; i < a.length; i++) if (typeof b[i] === 'number') a[i] = b[i];
+    } else if (typeof a === 'number' && typeof b === 'number') {
+      dst[k] = b;
+    } else if (a && typeof a === 'object' && b && typeof b === 'object') {
+      mergeTuning(b, a);
+    }
+  }
+}
+
+/** localStorage から読み直す。エディターで保存すると別タブのゲームにも効く */
+export function loadTuning() {
+  try {
+    const raw = localStorage.getItem(TUNING_KEY);
+    if (raw) mergeTuning(JSON.parse(raw));
+  } catch (e) { /* 壊れていたら既定値のまま */ }
+}
+export function saveTuning() {
+  try { localStorage.setItem(TUNING_KEY, JSON.stringify(TUNING)); } catch (e) { /* noop */ }
+}
+export function resetTuning() {
+  mergeTuning(TUNING_DEFAULT);
+}
+loadTuning();
+if (typeof window !== 'undefined') {
+  // 別タブ（エディター）で保存されたら取り込む＝ゲームを開いたまま調整できる
+  window.addEventListener('storage', (e) => { if (e.key === TUNING_KEY) loadTuning(); });
+}
 
 /* ---------------- 画面上で一定の太さに見えるライン ---------------- */
 class LineRibbon {
@@ -140,14 +204,14 @@ export class Angler {
     this._lineEnd = new THREE.Vector3();
     this._hasLineEnd = false;
     this.castAnim = -1;  // >=0 でキャストモーション中
-    this.rodPitch = POSE.idle.pitch;   // 竿のピッチ（垂直から前へ倒した角。ワールド基準）
+    this.rodPitch = TUNING.pose.idle.pitch;   // 竿のピッチ（垂直から前へ倒した角。ワールド基準）
     this.bodyLean = 0;
     this.fpv = false;
     this.ready = false;  // glTF を読み終わるまで false
     this.bones = {};
     this._fpvHide = [];   // 読み込み前に一人称へ切り替えても落ちないように
     this.rodMeshes = [];
-    this._handOff = POSE.idle.hand.slice();
+    this._handOff = TUNING.pose.idle.hand.slice();
     this._rodId = null;
 
     /* ロッドは釣り人のボーンの子にはせず root に直付けし、毎フレーム
@@ -249,9 +313,9 @@ export class Angler {
     this._fingers = [];
     for (const s of ['L', 'R']) {
       for (const f of ['Index', 'Middle', 'Ring', 'Pinky']) {
-        for (let i = 1; i <= 3; i++) this._fingers.push([this.bones[`${f}${i}${s}`], FINGER_CURL[i - 1]]);
+        for (let i = 1; i <= 3; i++) this._fingers.push([this.bones[`${f}${i}${s}`], 'curl', i - 1]);
       }
-      for (let i = 1; i <= 2; i++) this._fingers.push([this.bones[`Thumb${i}${s}`], THUMB_CURL[i - 1]]);
+      for (let i = 1; i <= 2; i++) this._fingers.push([this.bones[`Thumb${i}${s}`], 'thumb', i - 1]);
     }
     this._fingers = this._fingers.filter(([b]) => b);
   }
@@ -501,61 +565,61 @@ export class Angler {
     const mv = clamp01(p.moving);
     this.actWalk.setEffectiveWeight(mv);
     this.actIdle.setEffectiveWeight(1 - mv);
-    this.actWalk.setEffectiveTimeScale(0.85 + mv * 0.5);
+    this.actWalk.setEffectiveTimeScale(TUNING.walk.timeBase + mv * TUNING.walk.timeGain);
     this.mixer.update(dt);
 
     /* 竿のピッチと手の位置。ピッチは作り直し前の「腕 + ロッドの合計角」を
        そのまま引き継いでいるので、狙いと着水の関係は変わらない */
-    let pose = POSE[st] || POSE.idle;
+    const T = TUNING;
+    const pose = poseOf(st);
     let pitchT = pose.pitch;
     let handT = pose.hand;
     let leanT = pose.lean;
     if (st === 'charge') {
-      pitchT = lerp(POSE.idle.pitch, POSE.charge.pitch, p.charge);
-      handT = lerpArr(POSE.idle.hand, POSE.charge.hand, p.charge);
-      leanT = -0.12 * p.charge;
+      pitchT = lerp(T.pose.idle.pitch, T.pose.charge.pitch, p.charge);
+      handT = lerpArr(T.pose.idle.hand, T.pose.charge.hand, p.charge);
+      leanT = T.pose.charge.lean * p.charge;
     } else if (st === 'fight') {
-      pitchT = POSE.fight.pitch - p.tension * 0.52;
-      leanT = 0.16 + p.tension * 0.14;
+      pitchT = T.pose.fight.pitch - p.tension * T.fight.pitchByTension;
+      leanT = T.pose.fight.lean + p.tension * T.fight.leanByTension;
       /* 巻いている間はさらに竿を立てる（ポンピングの「立てる」側）。
          離すとテンション基準の角度へ戻るので、巻く/離すのリズムが
          そのまま「立てて溜める→送り込む」の見た目になる */
-      if (p.reeling) { pitchT -= 0.30; leanT += 0.05; }
+      if (p.reeling) { pitchT -= T.fight.reelPitch; leanT += T.fight.reelLean; }
     }
     /* 一人称は視界に穂先を残したいので、待ちとファイトをさらに寝かせる
        （構え・キャストは三人称と同じ＝飛距離の計算が視点で変わらないように） */
     if (this.fpv) {
-      if (st === 'wait' || st === 'flight' || st === 'nibble' || st === 'bite') pitchT = 1.20;
-      else if (st === 'fight') pitchT = 0.90 - p.tension * 0.38 - (p.reeling ? 0.26 : 0);
+      if (st === 'wait' || st === 'flight' || st === 'nibble' || st === 'bite') pitchT = T.fpv.waitPitch;
+      else if (st === 'fight') pitchT = T.fpv.fightPitch - p.tension * T.fpv.fightByTension - (p.reeling ? T.fpv.fightReel : 0);
     }
 
     // キャストのスイング（振りかぶり → 振り抜き）
     if (this.castAnim >= 0) {
       this.castAnim += dt;
-      const t = this.castAnim / 0.34;
+      const t = this.castAnim / Math.max(0.05, T.cast.dur);
       if (t >= 1) {
         this.castAnim = -1;
       } else {
         const e = t * t * (3 - 2 * t);
-        pitchT = lerp(POSE.charge.pitch, 0.60, e);
-        handT = lerpArr(POSE.charge.hand, POSE.wait.hand, e);
-        leanT = lerp(-0.12, 0.10, e);
-        this.rodPitch = damp(this.rodPitch, pitchT, 26, dt);
-        this._handOff[0] = damp(this._handOff[0], handT[0], 26, dt);
-        this._handOff[1] = damp(this._handOff[1], handT[1], 26, dt);
-        this._handOff[2] = damp(this._handOff[2], handT[2], 26, dt);
-        this.bodyLean = damp(this.bodyLean, leanT, 18, dt);
+        pitchT = lerp(T.pose.charge.pitch, T.cast.endPitch, e);
+        handT = lerpArr(T.pose.charge.hand, T.pose.wait.hand, e);
+        leanT = lerp(T.cast.leanFrom, T.cast.leanTo, e);
+        const cd = T.cast.damp;
+        this.rodPitch = damp(this.rodPitch, pitchT, cd, dt);
+        this._handOff[0] = damp(this._handOff[0], handT[0], cd, dt);
+        this._handOff[1] = damp(this._handOff[1], handT[1], cd, dt);
+        this._handOff[2] = damp(this._handOff[2], handT[2], cd, dt);
+        this.bodyLean = damp(this.bodyLean, leanT, cd * 0.7, dt);
         this._poseUpper();
         this._applyBend(dt, p);
         return;
       }
     }
 
-    this.rodPitch = damp(this.rodPitch, pitchT, 9, dt);
-    this._handOff[0] = damp(this._handOff[0], handT[0], 9, dt);
-    this._handOff[1] = damp(this._handOff[1], handT[1], 9, dt);
-    this._handOff[2] = damp(this._handOff[2], handT[2], 9, dt);
-    this.bodyLean = damp(this.bodyLean, leanT, 8, dt);
+    this.rodPitch = damp(this.rodPitch, pitchT, T.damp.pitch, dt);
+    for (let i = 0; i < 3; i++) this._handOff[i] = damp(this._handOff[i], handT[i], T.damp.hand, dt);
+    this.bodyLean = damp(this.bodyLean, leanT, T.damp.lean, dt);
     this._poseUpper();
     this._applyBend(dt, p);
   }
@@ -571,11 +635,13 @@ export class Angler {
   _poseUpper() {
     const B = this.bones;
     // 前傾（腰を軸に体ごと）と、狙いの方を向く首
-    this.tilt.rotation.x = this.bodyLean * 0.55;
+    const T = TUNING;
+    this.tilt.rotation.x = this.bodyLean * T.body.tilt;
     if (B.Head && this._restQ.Head) {
       // 足さずに毎フレーム決め打ちで入れる（足すと積み上がる）
       B.Head.quaternion.copy(this._restQ.Head);
-      B.Head.rotateX(clamp(-this.pitch * 0.4, -0.45, 0.45) - this.bodyLean * 0.55);
+      const m = T.body.headLookMax;
+      B.Head.rotateX(clamp(-this.pitch * T.body.headLook, -m, m) - this.bodyLean * T.body.headLean);
     }
     this.root.updateMatrixWorld(true);
 
@@ -588,22 +654,23 @@ export class Angler {
     this.rodMount.rotation.set(this.rodPitch, 0, 0);
     this.root.worldToLocal(_v4.copy(hand));
     _v5.set(0, Math.cos(this.rodPitch), Math.sin(this.rodPitch));   // root ローカルでの竿の向き
-    this.rodMount.position.copy(_v4).addScaledVector(_v5, -ROD_GRIP_Y);
+    this.rodMount.position.copy(_v4).addScaledVector(_v5, -T.arm.gripY);
     this.rodMount.updateMatrixWorld(true);
 
     // 右腕：肘は外側後ろへ張り出す
-    _v6.set(-0.5, -0.7, -0.5).applyQuaternion(this.root.quaternion);
+    _v6.set(...T.arm.poleR).applyQuaternion(this.root.quaternion);
     this._solveArm('R', hand, _v6);
     /* 左手は右手のすぐ下に添える。腕が肩から手首まで 0.42m しかなく、
        体をまたいでリールまでは届かないので、両手で握る形にしている */
-    this.rodMount.localToWorld(_v3.set(0.02, ROD_LEFT_Y, 0.015));
-    _v6.set(0.5, -0.8, -0.3).applyQuaternion(this.root.quaternion);
+    this.rodMount.localToWorld(_v3.set(0.02, T.arm.leftY, 0.015));
+    _v6.set(...T.arm.poleL).applyQuaternion(this.root.quaternion);
     this._solveArm('L', _v3, _v6);
 
     // 両手首を竿の向きへ向けて、指を握らせる
     _v2.set(0, 1, 0).applyQuaternion(this.rodMount.getWorldQuaternion(_q));   // 竿の伸びる向き
     for (const s of ['L', 'R']) this._aimBone(B[`Wrist${s}`], _v2);
-    for (const [bone, ang] of this._fingers) bone.rotation.x = ang;
+    // 指の曲げはエディターで変えられるので、毎フレーム表から引く
+    for (const [bone, kind, i] of this._fingers) bone.rotation.x = T.fingers[kind][i];
   }
 
   /**

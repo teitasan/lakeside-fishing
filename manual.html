@@ -1254,6 +1254,35 @@ o = 穂先 − モデルの上端 × s
       <tfoot><tr><td colspan="4" class="l">狙いの計算と実際の着水は<b>どちらも <code>getRodTip()</code> を起点</b>にしているので、
         竿先が動いても<b>狙い点と着水点はずれません</b>（変わるのは最短距離の下限だけ）。</td></tr></tfoot>
     </table></div>
+    <h3>モーションエディター</h3>
+    <p>
+      姿勢の数値はすべて <code>src/angler.js</code> の <code>TUNING</code> に集約してあり、
+      <a href="./motion-editor.html" target="_blank" rel="noopener">motion-editor.html</a> から
+      スライダーで調整できます。<b>エディターはゲーム本体と同じ <code>Angler</code> クラスを動かしている</b>ので、
+      そこで見えるものがそのままゲームの動きです（別実装を並べて持つと必ずズレます）。
+    </p>
+    <div class="tw"><table>
+      <thead><tr><th class="l">項目</th><th class="l">中身</th></tr></thead>
+      <tbody>
+        <tr><td class="l name">pose</td><td class="l">場面ごとの<b>竿のピッチ</b>・<b>右手の位置</b>（右肩からのずれ）・<b>前傾</b>。竿は手の位置に置かれるので、この 2 つで構えが決まる</td></tr>
+        <tr><td class="l name">fight</td><td class="l">テンションで竿を立てる量・前傾する量、巻いている間の上乗せ</td></tr>
+        <tr><td class="l name">fpv</td><td class="l">一人称のときのピッチ（穂先を画面に残すため三人称より寝かせる）</td></tr>
+        <tr><td class="l name">cast</td><td class="l">振りの時間・振り終わりのピッチ・前傾の変化・追従の速さ</td></tr>
+        <tr><td class="l name">arm</td><td class="l">肘を張り出す向き（裏返り防止）、右手・左手が竿を握る高さ、指の曲げ</td></tr>
+        <tr><td class="l name">body / walk / damp</td><td class="l">前傾の効き・首の追従、歩きの再生倍率、姿勢が切り替わる速さ</td></tr>
+      </tbody>
+      <tfoot><tr><td colspan="2" class="l"><b>保存すると <code>localStorage</code> に入り、ゲームを別タブで開いていればその場で反映されます</b>
+        （<code>storage</code> イベントを拾って読み直しているため）。恒久的に残すときは「コードをコピー」で
+        <code>TUNING</code> に貼れる形の JS を出します。</td></tr></tfoot>
+    </table></div>
+    <div class="note">
+      エディターの左上には<b>足の滑り</b>が出ます。歩きアニメーションの歩幅から出した
+      「足が滑らない速さ」は <b>1.32 m/s</b>（片足の前後幅 0.879m・1 周期 1.33 秒）で、
+      ゲームの歩きは <b>3.1 m/s</b>・走りは <b>6.2 m/s</b>。
+      いまの再生倍率 0.85〜1.35 倍では<b>歩きで 2.35 倍・走りで 4.7 倍ぶん足が滑ります</b>。
+      移動速度を落とすか再生倍率を上げるかはゲームの手触りに関わるので、エディターで見ながら決められるようにしてあります。
+    </div>
+
     <div class="note">
       <b>失ったもの：回るリール。</b>自作のスピニングリールはローターがギア比 5.2 で回り、
       スプールが 4mm 前後していましたが、アセットの竿は<b>リールが竿と一体の 1 メッシュ</b>で、

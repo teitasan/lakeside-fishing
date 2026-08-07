@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>モーションエディター — 湖畔のフィッシング</title>
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.min.js",
+    "three/addons/": "./vendor/addons/"
+  }
+}
+</script>
+<style>
+:root {
+  --bg: #131a1e; --panel: #1b252a; --panel2: #223037; --line: #31424a;
+  --fg: #dfe8ea; --fg-dim: #8fa3ab; --gold: #f5c451; --good: #6de08a; --bad: #ff6b6b;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--fg); overflow: hidden;
+  font-family: "Hiragino Sans", "Yu Gothic", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 13px; display: flex;
+}
+#view { flex: 1; position: relative; min-width: 0; }
+#view canvas { display: block; width: 100%; height: 100%; }
+#hint {
+  position: absolute; left: 12px; bottom: 12px; color: var(--fg-dim); font-size: 11.5px;
+  background: rgba(10,16,20,.65); padding: 6px 12px; border-radius: 6px; line-height: 1.8;
+}
+#readout {
+  position: absolute; left: 12px; top: 12px; font-size: 11.5px; line-height: 1.9;
+  background: rgba(10,16,20,.65); padding: 8px 12px; border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+}
+#readout b { color: var(--gold); font-weight: 600; }
+#readout .warn { color: var(--bad); }
+#readout .ok { color: var(--good); }
+
+#side {
+  width: 372px; flex: none; background: var(--panel); border-left: 1px solid var(--line);
+  display: flex; flex-direction: column; height: 100%;
+}
+#side header { padding: 12px 16px; border-bottom: 1px solid var(--line); }
+#side h1 { margin: 0; font-size: 15px; letter-spacing: .02em; }
+#side header p { margin: 4px 0 0; font-size: 11.5px; color: var(--fg-dim); line-height: 1.6; }
+#scroll { flex: 1; overflow-y: auto; padding: 12px 16px 24px; }
+#foot { padding: 10px 16px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 8px; }
+
+.grp { margin-bottom: 16px; }
+.grp > h2 {
+  margin: 0 0 8px; font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--gold); border-bottom: 1px solid var(--line); padding-bottom: 5px;
+}
+.grp .desc { margin: -4px 0 8px; font-size: 11px; color: var(--fg-dim); line-height: 1.65; }
+
+.row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.row label { width: 118px; flex: none; color: var(--fg-dim); font-size: 11.5px; }
+.row input[type=range] { flex: 1; min-width: 0; accent-color: var(--gold); }
+.row output {
+  width: 72px; flex: none; text-align: right; font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; white-space: nowrap;
+}
+.row label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row.changed label { color: var(--gold); }
+
+.state-tabs { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
+.state-tabs button {
+  flex: 1 1 auto; padding: 6px 4px; font-size: 11.5px; cursor: pointer;
+  background: var(--panel2); color: var(--fg-dim); border: 1px solid var(--line); border-radius: 5px;
+}
+.state-tabs button.on { background: var(--gold); color: #1a1206; border-color: var(--gold); font-weight: 700; }
+
+.btn {
+  padding: 7px 12px; font-size: 12px; cursor: pointer; border-radius: 6px;
+  background: var(--panel2); color: var(--fg); border: 1px solid var(--line);
+}
+.btn:hover { border-color: var(--gold); }
+.btn.primary { background: var(--gold); color: #1a1206; border-color: var(--gold); font-weight: 700; }
+.btn.warn:hover { border-color: var(--bad); color: var(--bad); }
+.chk { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--fg-dim); }
+
+#msg { font-size: 11.5px; color: var(--good); min-height: 16px; padding: 0 16px 8px; }
+#code {
+  width: 100%; height: 150px; margin-top: 6px; display: none; resize: vertical;
+  font-family: ui-monospace, Menlo, monospace; font-size: 11px; line-height: 1.5;
+  background: #0e1418; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 8px;
+}
+#loading {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: var(--bg); color: var(--fg-dim); font-size: 13px;
+}
+</style>
+</head>
+<body>
+<div id="view"><div id="loading">釣り人を読み込んでいます…</div>
+  <div id="readout"></div>
+  <div id="hint">ドラッグ＝回転 / ホイール＝寄り引き / 右ドラッグ＝平行移動</div>
+</div>
+
+<aside id="side">
+  <header>
+    <h1>モーションエディター</h1>
+    <p>ゲーム本体と<b>同じ <code>Angler</code></b> を動かしています。ここで見えるものがそのままゲームの動きです。
+      保存するとゲーム（別タブでも）に反映されます。</p>
+  </header>
+  <div id="scroll"></div>
+  <div id="msg"></div>
+  <div id="foot">
+    <button class="btn primary" id="save">保存してゲームに反映</button>
+    <button class="btn" id="copy">コードをコピー</button>
+    <button class="btn" id="export">JSON 書き出し</button>
+    <button class="btn warn" id="reset">初期値に戻す</button>
+    <textarea id="code" readonly></textarea>
+  </div>
+</aside>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { Angler, TUNING, TUNING_DEFAULT, saveTuning, resetTuning } from './src/angler.js';
+
+/* ---------------- 見せる場 ---------------- */
+const view = document.getElementById('view');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1b262c);
+scene.fog = new THREE.Fog(0x1b262c, 14, 40);
+
+const camera = new THREE.PerspectiveCamera(38, 1, 0.05, 200);
+camera.position.set(2.2, 1.7, 2.9);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+view.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1.0, 0);
+controls.enableDamping = true;
+
+scene.add(new THREE.HemisphereLight(0xbcd6e6, 0x2a3630, 1.5));
+const sun = new THREE.DirectionalLight(0xfff0d8, 2.2);
+sun.position.set(3.5, 6, 2.5);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.camera.left = -3; sun.shadow.camera.right = 3;
+sun.shadow.camera.top = 4; sun.shadow.camera.bottom = -1;
+scene.add(sun);
+
+// 床とグリッド（1 マス = 0.5 m）。大きさの目安になるように 1m ごとに濃い線を入れる
+const floor = new THREE.Mesh(
+  new THREE.CircleGeometry(9, 48),
+  new THREE.MeshStandardMaterial({ color: 0x2c3a33, roughness: 1 }));
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+scene.add(floor);
+const grid = new THREE.GridHelper(12, 24, 0x54707a, 0x35474e);
+grid.position.y = 0.002;
+scene.add(grid);
+// 身長の目安（1m ごとの目盛り）
+{
+  const g = new THREE.Group();
+  for (let y = 0.5; y <= 2.0; y += 0.5) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(y % 1 === 0 ? 0.22 : 0.12, 0.008, 0.008),
+      new THREE.MeshBasicMaterial({ color: y % 1 === 0 ? 0xf5c451 : 0x6b828b }));
+    m.position.set(-0.85, y, 0);
+    g.add(m);
+  }
+  const pole = new THREE.Mesh(new THREE.BoxGeometry(0.01, 2.0, 0.01),
+    new THREE.MeshBasicMaterial({ color: 0x4a5f68 }));
+  pole.position.set(-0.85, 1.0, 0);
+  g.add(pole);
+  scene.add(g);
+}
+
+/* ---------------- 釣り人 ---------------- */
+const angler = new Angler(scene);
+await angler.load();
+angler.setRod('legend');
+document.getElementById('loading').remove();
+
+/* ---------------- 再生する状態 ---------------- */
+const play = {
+  state: 'wait', moving: 0, tension: 0.5, charge: 1, reeling: false,
+  fpv: false, rod: 'legend', spin: false, pitch: -0.15,
+};
+const STATES = [
+  ['idle', '待機'], ['charge', 'ためる'], ['wait', 'アタリ待ち'],
+  ['fight', 'ファイト'], ['landed', '取り込み'],
+];
+
+/* ---------------- パネルを組む ---------------- */
+const scroll = document.getElementById('scroll');
+const rows = [];   // [el, get, def]
+
+function group(title, desc) {
+  const g = document.createElement('div');
+  g.className = 'grp';
+  g.innerHTML = `<h2>${title}</h2>` + (desc ? `<p class="desc">${desc}</p>` : '');
+  scroll.appendChild(g);
+  return g;
+}
+
+/** obj[key]（数値）に効くスライダー。arr が渡されたら arr[key] を触る */
+function slider(parent, label, obj, key, min, max, step, unit = '') {
+  const row = document.createElement('div');
+  row.className = 'row';
+  const id = 'sl' + rows.length;
+  row.innerHTML = `<label for="${id}">${label}</label>
+    <input type="range" id="${id}" min="${min}" max="${max}" step="${step}">
+    <output></output>`;
+  const input = row.querySelector('input');
+  const out = row.querySelector('output');
+  const def = obj[key];
+  const sync = () => {
+    input.value = obj[key];
+    out.textContent = (+obj[key]).toFixed(step < 0.01 ? 3 : 2) + unit;
+    row.classList.toggle('changed', Math.abs(obj[key] - def) > 1e-9);
+  };
+  input.addEventListener('input', () => { obj[key] = +input.value; sync(); });
+  parent.appendChild(row);
+  rows.push(sync);
+  sync();
+  return row;
+}
+
+/* --- 再生の状態 --- */
+{
+  const g = group('見る場面', 'ゲームのどの場面を再生するか。値はこの場面に効くものだけ下に出ます。');
+  const tabs = document.createElement('div');
+  tabs.className = 'state-tabs';
+  for (const [id, name] of STATES) {
+    const b = document.createElement('button');
+    b.textContent = name;
+    b.onclick = () => { play.state = id; angler.castAnim = -1; syncTabs(); buildPose(); };
+    b.dataset.id = id;
+    tabs.appendChild(b);
+  }
+  g.appendChild(tabs);
+  window.syncTabs = () => tabs.querySelectorAll('button')
+    .forEach((b) => b.classList.toggle('on', b.dataset.id === play.state));
+  syncTabs();
+
+  slider(g, '歩く量 moving', play, 'moving', 0, 1, 0.01);
+  slider(g, 'テンション', play, 'tension', 0, 1, 0.01);
+  slider(g, 'ためる量 charge', play, 'charge', 0, 1, 0.01);
+  slider(g, '視線の上下', play, 'pitch', -1, 1, 0.01);
+
+  const opts = document.createElement('div');
+  opts.className = 'row';
+  opts.innerHTML = `
+    <label class="chk"><input type="checkbox" id="reeling"> 巻いている</label>
+    <label class="chk"><input type="checkbox" id="fpv"> 一人称</label>
+    <button class="btn" id="doCast" style="padding:4px 10px">キャスト再生</button>`;
+  g.appendChild(opts);
+  opts.querySelector('#reeling').onchange = (e) => { play.reeling = e.target.checked; };
+  opts.querySelector('#fpv').onchange = (e) => { play.fpv = e.target.checked; angler.setFirstPerson(play.fpv); };
+  opts.querySelector('#doCast').onclick = () => { play.state = 'charge'; syncTabs(); buildPose(); angler.playCast(); };
+
+  const rodRow = document.createElement('div');
+  rodRow.className = 'row';
+  rodRow.innerHTML = `<label>竿</label><select id="rodSel" style="flex:1;background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:5px;padding:4px">
+    <option value="bamboo">竹（リール無し）</option><option value="glass">グラス</option>
+    <option value="carbon">カーボン</option><option value="master">名匠</option>
+    <option value="legend" selected>伝説</option></select>`;
+  g.appendChild(rodRow);
+  rodRow.querySelector('#rodSel').onchange = (e) => angler.setRod(e.target.value);
+}
+
+/* --- 場面ごとの姿勢（タブで中身が入れ替わる） --- */
+const poseGroup = group('この場面の姿勢', '');
+function buildPose() {
+  const st = play.state;
+  const key = TUNING.pose[st] ? st : 'wait';
+  poseGroup.innerHTML = `<h2>この場面の姿勢（${STATES.find((s) => s[0] === st)[1]}）</h2>
+    <p class="desc">竿のピッチは「垂直から前へ倒す角」。手の位置は右肩からのずれで、
+      <b>+X が左・+Y が上・+Z が前</b>。竿は手の位置に置かれるので、この 2 つで構えが決まります。</p>`;
+  const P = TUNING.pose[key];
+  slider(poseGroup, '竿のピッチ', P, 'pitch', -1.6, 1.8, 0.01, ' rad');
+  slider(poseGroup, '手の左右 X', P.hand, 0, -0.3, 0.3, 0.005, ' m');
+  slider(poseGroup, '手の上下 Y', P.hand, 1, -0.5, 0.1, 0.005, ' m');
+  slider(poseGroup, '手の前後 Z', P.hand, 2, -0.4, 0.5, 0.005, ' m');
+  slider(poseGroup, '前傾', P, 'lean', -0.4, 0.6, 0.01, ' rad');
+  if (st === 'fight') {
+    slider(poseGroup, 'テンションで立てる', TUNING.fight, 'pitchByTension', 0, 1.2, 0.01);
+    slider(poseGroup, 'テンションで前傾', TUNING.fight, 'leanByTension', 0, 0.6, 0.01);
+    slider(poseGroup, '巻き中さらに立てる', TUNING.fight, 'reelPitch', 0, 0.8, 0.01);
+    slider(poseGroup, '巻き中さらに前傾', TUNING.fight, 'reelLean', 0, 0.3, 0.01);
+  }
+}
+buildPose();
+
+/* --- 共通の調整値 --- */
+{
+  const g = group('腕と手', '肘の張り出し向きを変えると腕の曲がり方が変わります。裏返るときはここ。');
+  slider(g, '右肘 X', TUNING.arm.poleR, 0, -1, 1, 0.05);
+  slider(g, '右肘 Y', TUNING.arm.poleR, 1, -1, 1, 0.05);
+  slider(g, '右肘 Z', TUNING.arm.poleR, 2, -1, 1, 0.05);
+  slider(g, '左肘 X', TUNING.arm.poleL, 0, -1, 1, 0.05);
+  slider(g, '左肘 Y', TUNING.arm.poleL, 1, -1, 1, 0.05);
+  slider(g, '左肘 Z', TUNING.arm.poleL, 2, -1, 1, 0.05);
+  slider(g, '右手の握り高さ', TUNING.arm, 'gripY', -0.15, 0.5, 0.005, ' m');
+  slider(g, '左手の握り高さ', TUNING.arm, 'leftY', -0.2, 0.5, 0.005, ' m');
+  slider(g, '指の曲げ 第1関節', TUNING.fingers.curl, 0, -1.8, 0.4, 0.05);
+  slider(g, '指の曲げ 第2関節', TUNING.fingers.curl, 1, -1.8, 0.4, 0.05);
+  slider(g, '指の曲げ 第3関節', TUNING.fingers.curl, 2, -1.8, 0.4, 0.05);
+  slider(g, '親指 第1関節', TUNING.fingers.thumb, 0, -1.5, 0.5, 0.05);
+  slider(g, '親指 第2関節', TUNING.fingers.thumb, 1, -1.5, 0.5, 0.05);
+}
+{
+  const g = group('体と首', '前傾は腰を軸に体ごと倒します。首は視線の上下に合わせて動きます。');
+  slider(g, '前傾の効き', TUNING.body, 'tilt', 0, 1.2, 0.01);
+  slider(g, '首が視線を追う', TUNING.body, 'headLook', 0, 1.2, 0.01);
+  slider(g, '首の可動上限', TUNING.body, 'headLookMax', 0, 1.0, 0.01, ' rad');
+  slider(g, '前傾ぶん首を起こす', TUNING.body, 'headLean', 0, 1.2, 0.01);
+}
+{
+  const g = group('歩き', '再生倍率 = 基準 + moving × 傾き。アニメの歩幅から出る「足が滑らない速さ」は 1.32 m/s です。');
+  slider(g, '再生倍率の基準', TUNING.walk, 'timeBase', 0.2, 4, 0.05, '×');
+  slider(g, 'moving での増分', TUNING.walk, 'timeGain', 0, 4, 0.05, '×');
+}
+{
+  const g = group('キャストの振り', '');
+  slider(g, '振りの時間', TUNING.cast, 'dur', 0.1, 1.2, 0.01, ' 秒');
+  slider(g, '振り終わりのピッチ', TUNING.cast, 'endPitch', -0.5, 1.6, 0.01, ' rad');
+  slider(g, '振り始めの前傾', TUNING.cast, 'leanFrom', -0.6, 0.3, 0.01);
+  slider(g, '振り終わりの前傾', TUNING.cast, 'leanTo', -0.3, 0.6, 0.01);
+  slider(g, '振りの追従の速さ', TUNING.cast, 'damp', 5, 60, 1);
+}
+{
+  const g = group('一人称のとき', '穂先が画面に残るよう、三人称より竿を寝かせています。');
+  slider(g, 'アタリ待ちのピッチ', TUNING.fpv, 'waitPitch', 0.4, 2.0, 0.01, ' rad');
+  slider(g, 'ファイトのピッチ', TUNING.fpv, 'fightPitch', 0, 1.8, 0.01, ' rad');
+  slider(g, 'テンションで立てる', TUNING.fpv, 'fightByTension', 0, 1.0, 0.01);
+  slider(g, '巻き中さらに立てる', TUNING.fpv, 'fightReel', 0, 0.8, 0.01);
+}
+{
+  const g = group('姿勢の切り替わり', '大きいほど素早く次の構えへ移ります。小さいとぬるっと動きます。');
+  slider(g, '竿のピッチ', TUNING.damp, 'pitch', 1, 30, 0.5);
+  slider(g, '手の位置', TUNING.damp, 'hand', 1, 30, 0.5);
+  slider(g, '前傾', TUNING.damp, 'lean', 1, 30, 0.5);
+}
+
+/* ---------------- 保存・書き出し ---------------- */
+const msg = document.getElementById('msg');
+const say = (t, good = true) => {
+  msg.textContent = t;
+  msg.style.color = good ? 'var(--good)' : 'var(--bad)';
+  clearTimeout(say._t);
+  say._t = setTimeout(() => { msg.textContent = ''; }, 4000);
+};
+const jsLiteral = (o, ind = '  ') => {
+  if (Array.isArray(o)) return '[' + o.map((v) => +v.toFixed(4)).join(', ') + ']';
+  if (typeof o === 'number') return String(+o.toFixed(4));
+  const inner = Object.entries(o)
+    .map(([k, v]) => `${ind}  ${k}: ${jsLiteral(v, ind + '  ')},`).join('\n');
+  return `{\n${inner}\n${ind}}`;
+};
+document.getElementById('save').onclick = () => {
+  saveTuning();
+  say('保存しました。ゲームを開いているタブにもすぐ反映されます');
+};
+document.getElementById('copy').onclick = async () => {
+  const code = `export const TUNING = ${jsLiteral(TUNING)};`;
+  const ta = document.getElementById('code');
+  ta.style.display = 'block';
+  ta.value = code;
+  try { await navigator.clipboard.writeText(code); say('コピーしました。src/angler.js の TUNING と差し替えてください'); }
+  catch (e) { ta.select(); say('下の欄をコピーして src/angler.js の TUNING と差し替えてください'); }
+};
+document.getElementById('export').onclick = () => {
+  const blob = new Blob([JSON.stringify(TUNING, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'motion.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  say('motion.json を書き出しました');
+};
+document.getElementById('reset').onclick = () => {
+  if (!confirm('すべての値を初期値に戻します。よろしいですか？')) return;
+  resetTuning();
+  saveTuning();
+  buildPose();
+  rows.forEach((f) => f());
+  say('初期値に戻しました');
+};
+
+/* ---------------- 毎フレーム ---------------- */
+const readout = document.getElementById('readout');
+// アニメの歩幅から出た「足が滑らない速さ」（stride の実測値）
+const NO_SLIDE = 1.32;
+const GAME_WALK = 3.10, GAME_RUN = 6.20;
+
+const clock = new THREE.Clock();
+function frame() {
+  const dt = Math.min(0.05, clock.getDelta());
+  angler.pitch = play.pitch;
+  angler.update(dt, {
+    state: play.state, charge: play.charge, tension: play.tension,
+    moving: play.moving, reeling: play.reeling, rarity: 0,
+    time: clock.elapsedTime, lineEnd: null,
+  });
+  angler.hideLine();
+
+  /* 足の滑り：いまの再生倍率で滑らずに歩ける速さと、ゲームの実速度を比べる。
+     moving は 0.6 で歩き・1.0 で走りに対応している（game.js の判定に合わせた） */
+  let walkInfo = '歩いていません（moving を上げると足の滑りが出ます）';
+  if (play.moving > 0.05) {
+    const ts = TUNING.walk.timeBase + play.moving * TUNING.walk.timeGain;
+    const okSpeed = NO_SLIDE * ts;
+    const real = play.moving <= 0.6
+      ? GAME_WALK * (play.moving / 0.6)
+      : GAME_WALK + (GAME_RUN - GAME_WALK) * ((play.moving - 0.6) / 0.4);
+    const slip = real / okSpeed;
+    walkInfo = `再生倍率 <b>${ts.toFixed(2)}×</b> → 滑らない速さ <b>${okSpeed.toFixed(2)}</b> m/s<br>`
+      + `ゲームの速度 <b>${real.toFixed(2)}</b> m/s → `
+      + `<span class="${slip > 1.35 ? 'warn' : 'ok'}">足の滑り ${slip.toFixed(2)} 倍</span>`;
+  }
+  readout.innerHTML = `状態 <b>${play.state}</b>　竿のピッチ <b>${angler.rodPitch.toFixed(2)}</b> rad<br>${walkInfo}`;
+
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+function resize() {
+  const w = view.clientWidth, h = view.clientHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h, false);
+}
+addEventListener('resize', resize);
+resize();
+frame();
+</script>
+</body>
+</html>
