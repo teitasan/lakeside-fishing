@@ -236,6 +236,7 @@ export class Angler {
     this.rodPitch = TUNING.pose.idle.pitch;   // 竿のピッチ（垂直から前へ倒した角。ワールド基準）
     this.bodyLean = 0;
     this.fpv = false;
+    this._bodyVisible = true;   // setBodyVisible(false) で体ごと消せる
     this.ready = false;  // glTF を読み終わるまで false
     this.bones = {};
     this._fpvHide = [];   // 読み込み前に一人称へ切り替えても落ちないように
@@ -316,6 +317,7 @@ export class Angler {
     model.position.y = -BODY_PIVOT_Y;
     this.tilt.add(model);
     this.model = model;
+    model.visible = this._bodyVisible;   // 読み込み前に消してあっても効くように
 
     /* 歩きと待機はアセット付属のアニメーションを混ぜて使う。
        竿を構える姿勢は付いていないので、腕だけこのあと計算で上書きする */
@@ -674,6 +676,17 @@ export class Angler {
       m.material.colorWrite = !on;
       m.material.depthWrite = !on;   // 深度に穴を空けないように
     }
+  }
+
+  /**
+   * 釣り人の体を丸ごと出す／消す（影ごと。竿・リール・糸・ウキは残る）。
+   * 消してもボーンは動き続けるので、竿は今までどおり手の位置に置かれる。
+   * つまり見た目だけが消えて、狙いや着水の計算は何も変わらない。
+   * モーションエディターは体を見ながら姿勢を詰めるので、ここは呼ばない
+   */
+  setBodyVisible(on) {
+    this._bodyVisible = on;
+    if (this.model) this.model.visible = on;
   }
 
   playCast() { this.castAnim = 0; }

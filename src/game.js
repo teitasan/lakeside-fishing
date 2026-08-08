@@ -119,6 +119,13 @@ const UW_MAX = 6.5;
 const CAM_MIN = 1.6;
 const CAM_MAX = 9;
 
+/* 釣り人のモデルを作り直すまでの暫定措置。
+   true のあいだは一人称に固定し、体も腕も出さない（竿とリールだけが宙に浮いて見える）。
+   ボーンは今までどおり動いていて竿を手の位置に置いているので、
+   狙い・飛距離・しなりの計算は何も変わらない。見た目が出ないだけ。
+   自作のモデルに差し替えたら、この 1 行を false に戻せば三人称も体も戻る */
+const FPV_ONLY = true;
+
 /** 湖を作り直して再読み込みした直後は、タイトルを飛ばして再開する */
 export const AUTOSTART_KEY = 'lakeside-fishing-autostart';
 
@@ -329,7 +336,8 @@ export class Game {
 
     this.school.populate(this.pos, (d) => this.rollSpecies(d));
     if (this.state.settings.debug) this.debug.setEnabled(true);
-    if (this.state.settings.fpv) this._setFirstPerson(true, true);
+    if (FPV_ONLY) this.angler.setBodyVisible(false);
+    if (FPV_ONLY || this.state.settings.fpv) this._setFirstPerson(true, true);
     this._updateCamera(0.016, true);
     this.renderer.compile(this.scene, this.camera);
     await onProgress('準備完了');
@@ -390,6 +398,8 @@ export class Game {
         this.uwDist = clamp(this.uwDist + d * 0.35, UW_MIN, UW_MAX);
         return;
       }
+      // 一人称に固定している間は、視点の寄り引きそのものが無い
+      if (FPV_ONLY) return;
       // 三人称の最短(CAM_MIN)からさらに手前へ回すと一人称、奥へ回すと三人称に戻る
       if (this.firstPerson) {
         if (d > 0) this._setFirstPerson(false);
@@ -1498,6 +1508,7 @@ export class Game {
   }
 
   _setFirstPerson(on, quiet = false) {
+    if (FPV_ONLY && !on) return;   // 一人称に固定している間は三人称へ戻さない
     if (this.firstPerson === on) return;
     this.firstPerson = on;
     this.camDist = CAM_MIN;
