@@ -19,6 +19,7 @@ const _v9 = new THREE.Vector3();
 const _v10 = new THREE.Vector3();
 const _v11 = new THREE.Vector3();
 const _v12 = new THREE.Vector3();
+const _axis = new THREE.Vector3();   // しなりの回転軸（_applyBend 専用）
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _up = new THREE.Vector3(0, 1, 0);
@@ -255,6 +256,8 @@ export class Angler {
        リグの癖がそのまま竿の角度に乗り、狙いの計算まで動いてしまう */
     this.rodMount = new THREE.Object3D();
     this.root.add(this.rodMount);
+    /* しなりのボーン列を載せる台。しなる向きは各関節の回転軸で作るので、
+       ここは回さない（回すとガイドやリールまで軸まわりに回ってしまう） */
     this.rodFlexRoot = new THREE.Object3D();
     this.rodMount.add(this.rodFlexRoot);
     this._buildRodBones();
@@ -925,7 +928,17 @@ export class Angler {
       }
     }
     if (!Number.isFinite(this._bendAz)) this._bendAz = 0;
-    this.rodFlexRoot.rotation.y = this._bendAz;
+
+    /* しなる向きは、竿を軸まわりにひねって作らない。
+       以前は根元を _bendAz だけ Y 回転させ、あとは各関節を X まわりに曲げていた。
+       ブランクは丸いのでひねっても分からなかったが、ガイドとリールが付いた今は
+       「キャスト後に視点を左右へ振ると竿ごと回る」形で見えてしまう
+       （ウキはワールドに固定なので、振り向くと竿から見た方位が変わるため）。
+
+       代わりに、全関節を「その方位へ倒れる水平軸」まわりに曲げる。
+       竿先は Y 軸の上にあってひねっても動かないので、
+       しなりの量・向き・竿先の位置＝糸の出どころは、ひねっていた頃と完全に同じ */
+    _axis.set(Math.cos(this._bendAz), 0, -Math.sin(this._bendAz));
 
     const n = this.rodSegs.length;
     for (let i = 0; i < n; i++) {
@@ -934,8 +947,10 @@ export class Angler {
       // 土台（滑らかに追従）と竿先の一時的な動き（減衰させず生で乗せる）を別々に持つ。
       // 同じ場所へ混ぜて damp() すると、震えの成分まで丸められて鈍ってしまうため
       this._segBase[i] = damp(this._segBase[i], total * share, 14, dt);
-      seg.rotation.x = this._segBase[i] + tip * share;
-      if (!Number.isFinite(seg.rotation.x)) seg.rotation.x = 0;
+      let ang = this._segBase[i] + tip * share;
+      // 一度 NaN が入ると damp が NaN を返し続けるので、土台ごと戻す
+      if (!Number.isFinite(ang)) { ang = 0; this._segBase[i] = 0; }
+      seg.quaternion.setFromAxisAngle(_axis, ang);
     }
 
     this._spinReel(dt, p);
