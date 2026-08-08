@@ -1286,10 +1286,13 @@ export class Game {
       charge: this.charge,
       tension: fightT,
       moving: this.moveAmt,
-      /* リールが回る＝糸を巻いている時。ファイト中に押している間と、
-         仕掛けを手元へ戻している間（回収）の両方でハンドルが回る。
-         ファイト以外では姿勢に影響しない（見た目のリールだけが回る） */
-      reeling: (this.fs === 'fight' && this.actionHeld) || this.retrieving,
+      /* どれだけ巻けているか 0..1。真偽値ではなくファイトの F.spin
+         （押してから実際にリールが乗るまでの立ち上がり）をそのまま渡す。
+         真偽値だと押した瞬間に姿勢だけが段差で変わり、張力＝しなりは
+         1 秒かけて来るので、竿が立ってから曲がる不自然な動きになる。
+         回収中は全速で巻いているので 1（姿勢には影響せずリールだけ回る） */
+      reeling: this.fs === 'fight' ? (this.fight ? this.fight.spin : 0)
+        : (this.retrieving ? 1 : 0),
       rarity: this.hookFish ? this.hookFish.species.rarity : 0,
       time: this.time,
       lineEnd,

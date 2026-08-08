@@ -185,7 +185,7 @@ document.getElementById('loading').remove();
 
 /* ---------------- 再生する状態 ---------------- */
 const play = {
-  state: 'wait', moving: 0, tension: 0.5, charge: 1, reeling: false,
+  state: 'wait', moving: 0, tension: 0.5, charge: 1, reeling: false, reelAmt: 0,
   fpv: false, rod: 'legend', spin: false, pitch: -0.15,
 };
 const STATES = [
@@ -286,10 +286,14 @@ function buildPose() {
   slider(poseGroup, '手の前後 Z', P.hand, 2, -0.4, 0.5, 0.005, ' m');
   slider(poseGroup, '前傾', P, 'lean', -0.4, 0.6, 0.01, ' rad');
   if (st === 'fight') {
-    slider(poseGroup, 'テンションで立てる', TUNING.fight, 'pitchByTension', 0, 1.2, 0.01);
+    poseGroup.insertAdjacentHTML('beforeend', `<p class="desc">上の 竿のピッチ / 前傾 は
+      <b>張力ゼロのときの構え</b>です。<b>アタリ待ちと同じ値にしておくと、
+      掛かった瞬間に竿が跳ねません</b>。下の 4 つが張力と巻きでの上乗せ分。
+      巻きの効きには張力が掛かるので、引かれていない時にただ巻いても竿は寝ません。</p>`);
+    slider(poseGroup, 'テンションで立てる', TUNING.fight, 'byTension', 0, 1.4, 0.01);
+    slider(poseGroup, '巻き中に送り込む（倒す）', TUNING.fight, 'byReelLay', 0, 1.0, 0.01);
     slider(poseGroup, 'テンションで前傾', TUNING.fight, 'leanByTension', 0, 0.6, 0.01);
-    slider(poseGroup, '巻き中さらに立てる', TUNING.fight, 'reelPitch', 0, 0.8, 0.01);
-    slider(poseGroup, '巻き中さらに前傾', TUNING.fight, 'reelLean', 0, 0.3, 0.01);
+    slider(poseGroup, '巻き中さらに前傾', TUNING.fight, 'leanByReelLay', 0, 0.3, 0.01);
   }
 }
 buildPose();
@@ -332,11 +336,12 @@ buildPose();
   slider(g, '振りの追従の速さ', TUNING.cast, 'damp', 5, 60, 1);
 }
 {
-  const g = group('一人称のとき', '穂先が画面に残るよう、三人称より竿を寝かせています。');
+  const g = group('一人称のとき',
+    'いまゲームは一人称に固定しているので、ファイト中の竿の角度はここだけが効きます（上の「ファイト」タブの竿のピッチではありません）。');
   slider(g, 'アタリ待ちのピッチ', TUNING.fpv, 'waitPitch', 0.4, 2.0, 0.01, ' rad');
-  slider(g, 'ファイトのピッチ', TUNING.fpv, 'fightPitch', 0, 1.8, 0.01, ' rad');
-  slider(g, 'テンションで立てる', TUNING.fpv, 'fightByTension', 0, 1.0, 0.01);
-  slider(g, '巻き中さらに立てる', TUNING.fpv, 'fightReel', 0, 0.8, 0.01);
+  slider(g, 'ファイトの基準ピッチ', TUNING.fpv.fight, 'base', 0, 2.0, 0.01, ' rad');
+  slider(g, 'テンションで立てる', TUNING.fpv.fight, 'byTension', 0, 1.4, 0.01);
+  slider(g, '巻き中に送り込む（倒す）', TUNING.fpv.fight, 'byReelLay', 0, 1.0, 0.01);
 }
 {
   const g = group('リール', '「巻いている」を入れると回ります。ハンドルの速さを負にすると逆回転です。');
@@ -406,9 +411,15 @@ const clock = new THREE.Clock();
 function frame() {
   const dt = Math.min(0.05, clock.getDelta());
   angler.pitch = play.pitch;
+  /* ゲームは真偽値ではなく「リールの乗り 0..1」を渡すので、ここでも同じように
+     立ち上げる（game.js の SPIN_UP / SPIN_DOWN と同じ時定数）。
+     チェックを入れた瞬間に 1 にすると、ゲームより竿がカクッと動いて見える */
+  play.reelAmt = play.reeling
+    ? 1 - (1 - play.reelAmt) * Math.exp(-dt / 0.22)
+    : play.reelAmt * Math.exp(-dt / 0.12);
   angler.update(dt, {
     state: play.state, charge: play.charge, tension: play.tension,
-    moving: play.moving, reeling: play.reeling, rarity: 0,
+    moving: play.moving, reeling: play.reelAmt, rarity: 0,
     time: clock.elapsedTime, lineEnd: null,
   });
   angler.hideLine();

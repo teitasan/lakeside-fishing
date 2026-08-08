@@ -66,14 +66,32 @@ export const TUNING = {
     idle:   { pitch: 0.45, hand: [0.04, -0.34, 0.15], lean: 0 },
     charge: { pitch: -0.95, hand: [0.08, -0.16, -0.18], lean: -0.12 },
     wait:   { pitch: 1.00, hand: [0.03, -0.25, 0.24], lean: 0 },
-    fight:  { pitch: 0.56, hand: [0.05, -0.20, 0.20], lean: 0.16 },
+    /* ファイトの pitch / lean は「張力ゼロのときの構え」。アタリ待ちと
+       同じ値にしてある＝掛かった瞬間に竿が跳ねない。ここを立てるほど、
+       まだ何も引かれていないのに竿だけ起きる不自然さが出る */
+    fight:  { pitch: 1.00, hand: [0.05, -0.20, 0.20], lean: 0 },
     landed: { pitch: 0.10, hand: [0.06, -0.14, 0.18], lean: 0 },
   },
-  /* ファイト中：テンションが上がるほど竿を立て、体を前へ入れる。
-     巻いている間はさらに立てる（ポンピングの「立てる」側） */
-  fight: { pitchByTension: 0.52, leanByTension: 0.14, reelPitch: 0.30, reelLean: 0.05 },
-  /* 一人称は視界に穂先を残したいので、待ちとファイトをさらに寝かせる */
-  fpv: { waitPitch: 1.20, fightPitch: 0.90, fightByTension: 0.38, fightReel: 0.26 },
+  /* ファイト中の上乗せ。竿の角度は
+       pose.fight.pitch － テンション×byTension ＋ 巻き×テンション×byReelLay
+     テンションが上がるほど立て、巻いているあいだは送り込む（倒す）。
+
+     倒すのはポンピングがそういう動作だから。竿を立てて寄せ、
+     倒しながら巻いて出た糸を回収する＝巻くときは竿が下りる。
+     以前は逆に「巻くと立てる」で、しかも巻きボタンは押した瞬間に
+     切り替わるのに張力は 1 秒かけて育つため、
+     竿だけが先に跳ね上がってから曲がる、という動きになっていた。
+
+     巻きの効きにテンションを掛けてあるのが要点。おかげで
+       ・引かれていない時にただ巻いても竿は寝ない
+       ・ファイト中の竿がアタリ待ちより寝ることは絶対にない
+     の 2 つが自動的に成り立つ */
+  fight: { byTension: 0.96, byReelLay: 0.20, leanByTension: 0.30, leanByReelLay: 0.10 },
+  /* 一人称は視界に穂先を残したいので、待ちとファイトをさらに寝かせる。
+     base をアタリ待ちと同じ角度にしてあるのが大事で、
+     ここを別の値にすると「掛かった瞬間、張力ゼロなのに竿だけ跳ね上がる」に戻る
+     （実際 0.90 で、アタリ待ちから 17 度いきなり起きていた） */
+  fpv: { waitPitch: 1.20, fight: { base: 1.20, byTension: 0.68, byReelLay: 0.18 } },
   /* キャストの振り抜き。dur 秒かけて charge の姿勢から endPitch まで振る */
   cast: { dur: 0.34, endPitch: 0.60, leanFrom: -0.12, leanTo: 0.10, damp: 26 },
   /* 腕。pole は肘を張り出す向き（root ローカル）。これがないと肘が裏返る。
@@ -126,10 +144,21 @@ const hasReel = (src) => {
 
 const lerpArr = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
 
+/**
+ * 張力 → 竿の効き 0..1。しなりの量と構えの角度で必ず同じ曲線を使う。
+ * ここが食い違うと、竿が立つ速さと曲がる速さがずれて
+ * 「先に立ってから遅れて曲がる」ちぐはぐな動きになる。
+ * 低い張力から大きく効く（＝弱い引きでも竿が仕事をして見える）ための平方根
+ */
+const loadCurve = (t) => Math.sqrt(clamp01(t));
+
 /** 既定値（エディターの「初期値に戻す」用） */
 export const TUNING_DEFAULT = JSON.parse(JSON.stringify(TUNING));
 
-const TUNING_KEY = 'lakeside.motion';
+/* 保存先。ファイトのピッチは意味の変わった値があるので（巻くと立てる→倒す、
+   ファイトの基準角＝アタリ待ちと同じ）、古い保存がそのまま効くと直りが
+   見えなくなる。キーに版を付けて、古いものは読まずに新しい既定値から始める */
+const TUNING_KEY = 'lakeside.motion.v2';
 
 /** 保存された調整値を取り込む（数値と配列だけを上書きする浅い再帰マージ） */
 function mergeTuning(src, dst = TUNING) {
@@ -698,7 +727,8 @@ export class Angler {
    * @param {object} p
    *  state: 'idle'|'charge'|'flight'|'wait'|'nibble'|'bite'|'fight'|'landed'
    *  charge: 0..1  tension: 0..1  moving: 0..1  dt
-   *  reeling: bool  ファイト中に巻いているか（根本を余計に立てる）
+   *  reeling: 0..1  どれだけ巻けているか（ゲームは F.spin をそのまま渡す）。
+   *           true/false でも受けるが、段差になるので実際の乗りを渡すのが望ましい
    *  rarity?: 0..5  掛かっている（掛かりかけの）魚のレア度。ナブル・アタリの
    *           震え・引き込みの強さに使う（無指定は 0 扱い）
    *  lineEnd?: Vector3  糸の先（ウキ／魚の口）。しなり方向の目標
@@ -728,6 +758,10 @@ export class Angler {
     /* 竿のピッチと手の位置。ピッチは作り直し前の「腕 + ロッドの合計角」を
        そのまま引き継いでいるので、狙いと着水の関係は変わらない */
     const T = TUNING;
+    /* 「どれだけ巻けているか」0..1。ゲームは F.spin（リールの立ち上がり）を
+       そのまま渡してくる。真偽値だと押した瞬間に 0→1 の段差になり、
+       竿だけが跳ね上がってから曲がる、という動きになる */
+    const reel = p.reeling === true ? 1 : clamp01(p.reeling || 0);
     const pose = poseOf(st);
     let pitchT = pose.pitch;
     let handT = pose.hand;
@@ -737,18 +771,24 @@ export class Angler {
       handT = lerpArr(T.pose.idle.hand, T.pose.charge.hand, p.charge);
       leanT = T.pose.charge.lean * p.charge;
     } else if (st === 'fight') {
-      pitchT = T.pose.fight.pitch - p.tension * T.fight.pitchByTension;
-      leanT = T.pose.fight.lean + p.tension * T.fight.leanByTension;
-      /* 巻いている間はさらに竿を立てる（ポンピングの「立てる」側）。
-         離すとテンション基準の角度へ戻るので、巻く/離すのリズムが
-         そのまま「立てて溜める→送り込む」の見た目になる */
-      if (p.reeling) { pitchT -= T.fight.reelPitch; leanT += T.fight.reelLean; }
+      /* 張力で立て、巻いているぶんだけ送り込む（ポンピングの「倒して巻く」側）。
+         効き具合は loadCurve＝しなりとまったく同じ曲線なので、
+         竿は立つのと曲がるのが必ず一緒に進む。
+         巻きの効きも load に乗せてあるおかげで、引かれていない時に
+         ただ巻いても竿は寝ないし、アタリ待ちより寝ることもない */
+      const F = T.fight;
+      const load = loadCurve(p.tension);
+      pitchT = T.pose.fight.pitch - load * (F.byTension - reel * F.byReelLay);
+      leanT = T.pose.fight.lean + load * (F.leanByTension + reel * F.leanByReelLay);
     }
     /* 一人称は視界に穂先を残したいので、待ちとファイトをさらに寝かせる
        （構え・キャストは三人称と同じ＝飛距離の計算が視点で変わらないように） */
     if (this.fpv) {
       if (st === 'wait' || st === 'flight' || st === 'nibble' || st === 'bite') pitchT = T.fpv.waitPitch;
-      else if (st === 'fight') pitchT = T.fpv.fightPitch - p.tension * T.fpv.fightByTension - (p.reeling ? T.fpv.fightReel : 0);
+      else if (st === 'fight') {
+        const F = T.fpv.fight;
+        pitchT = F.base - loadCurve(p.tension) * (F.byTension - reel * F.byReelLay);
+      }
     }
 
     // キャストのスイング（振りかぶり → 振り抜き）
@@ -883,7 +923,8 @@ export class Angler {
          そこから切れる 100% までまったく見た目が変わらず、
          いちばん知りたい危険域が竿から読み取れなかった。
          低いテンションでも大きく曲がる「速い立ち上がり」は指数で維持する */
-      targetAmt = tension > 0.001 ? clamp01(Math.pow(tension, 0.5)) : 0.08;
+      // 構えの角度もこの loadCurve で動く＝立つのと曲がるのが必ず一緒に進む
+      targetAmt = tension > 0.001 ? loadCurve(tension) : 0.08;
     } else if (st === 'nibble' || st === 'bite') {
       targetAmt = 0.10;
     }
@@ -953,7 +994,7 @@ export class Angler {
       seg.quaternion.setFromAxisAngle(_axis, ang);
     }
 
-    this._spinReel(dt, p);
+    this._spinReel(dt, p.reeling === true ? 1 : clamp01(p.reeling || 0));
   }
 
   /**
@@ -963,10 +1004,10 @@ export class Angler {
    * ローターはギア比を掛けた速さで連動。ノブ（取手）は公転だけさせたいので、
    * 親（ハンドル）の回転を打ち消して向きを一定に保つ（地球の周りを回る月と同じ考え方）
    */
-  _spinReel(dt, p) {
+  _spinReel(dt, reel) {
     if (!this.reelHandle) return;
     const R = TUNING.reel;
-    this._reelSpin = damp(this._reelSpin, p.reeling ? 1 : 0, R.spinUp, dt);
+    this._reelSpin = damp(this._reelSpin, reel, R.spinUp, dt);
     if (this._reelSpin < 1e-4) return;
     // 回す軸は REEL_PARTS だけに書く（ここで決め打ちすると表と食い違う）
     const dA = dt * R.handleSpeed * this._reelSpin;
