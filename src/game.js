@@ -1276,7 +1276,10 @@ export class Game {
       charge: this.charge,
       tension: fightT,
       moving: this.moveAmt,
-      reeling: this.fs === 'fight' && this.actionHeld,
+      /* リールが回る＝糸を巻いている時。ファイト中に押している間と、
+         仕掛けを手元へ戻している間（回収）の両方でハンドルが回る。
+         ファイト以外では姿勢に影響しない（見た目のリールだけが回る） */
+      reeling: (this.fs === 'fight' && this.actionHeld) || this.retrieving,
       rarity: this.hookFish ? this.hookFish.species.rarity : 0,
       time: this.time,
       lineEnd,

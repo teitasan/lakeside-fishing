@@ -88,11 +88,37 @@ export const TUNING = {
   fingers: { curl: [-1.05, -0.85, -0.55], thumb: [-0.55, -0.45] },
   /* 姿勢が切り替わるときの追従の速さ（大きいほど速い） */
   damp: { pitch: 9, hand: 9, lean: 8 },
+  /* リール。巻いている間だけハンドルを handleSpeed（rad/s）で回し、
+     ローターはギア比を掛けた速さで連動する。spinUp は回りだし／止まりの鈍さ
+     （大きいほどキビキビ）。handleSpeed を負にすると逆回転になる */
+  reel: { handleSpeed: 6.0, gearRatio: 5.2, spinUp: 9 },
 };
 
 /** 待ちと同じ姿勢を使う状態（アタリ前後は構えを変えない） */
 const POSE_ALIAS = { flight: 'wait', nibble: 'wait', bite: 'wait' };
 const poseOf = (st) => TUNING.pose[POSE_ALIAS[st] || st] || TUNING.pose.idle;
+
+/* ===========================================================
+   リールの部品（GLB のノード名 → 回し方）
+   ブランクと違って曲げず、原点（＝Blender で合わせた回転軸）まわりに回す。
+   spin  : 回す軸。null は回らない部品（本体）
+   orbitOf: 指定すると、その部品にぶら下がって公転だけする
+   軸はモデルの実測（回転体としての当てはまり）で決めてある。
+     handle … 竿と直交する横向き（X）。リール本体が X 方向に薄い＝側面から出る
+     rotor  … 竿から見てリールが張り出す向き（Z）。X と Y の径が 0.4% 差で一致
+   =========================================================== */
+const REEL_PARTS = {
+  reel:     { spin: null },                     // 本体。回らないが竿と一緒に動く
+  handle:   { spin: 'x' },                      // ハンドル（クランク）
+  rotor:    { spin: 'z' },                      // ローター（糸を巻き取る回転部）
+  ReelKnob: { spin: 'x', orbitOf: 'handle' },   // ノブ（取手）。公転だけする
+};
+/** その GLB がリールを別パーツで持っているか */
+const hasReel = (src) => {
+  let found = false;
+  src.scene.traverse((n) => { if (n.isMesh && REEL_PARTS[n.name]) found = true; });
+  return found;
+};
 
 const lerpArr = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
 
@@ -210,7 +236,13 @@ export class Angler {
     this.ready = false;  // glTF を読み終わるまで false
     this.bones = {};
     this._fpvHide = [];   // 読み込み前に一人称へ切り替えても落ちないように
-    this.rodMeshes = [];
+    this.rodMeshes = [];   // ブランク（しなるスキンメッシュ）だけ
+    this._rodParts = [];   // 竿を替えるときに片付ける対象（ブランク + リール）
+    // GLB に REEL_PARTS のノードがあれば、巻いている間だけ回す
+    this.reelHandle = null;
+    this.reelRotor = null;
+    this.reelKnob = null;
+    this._reelSpin = 0;    // リールの回転の乗り（0=止まっている 1=最高速）
     this._handOff = TUNING.pose.idle.hand.slice();
     this._rodId = null;
 
@@ -354,37 +386,143 @@ export class Angler {
     const src = this._rodSrc[id] || this._rodSrc.bamboo;
     if (!src) return;
     this._rodId = id;
-    for (const m of this.rodMeshes) {
-      this.rodMount.remove(m);
-      m.geometry.dispose();
-    }
-    this.rodMeshes = [];
 
-    /* モデルの寸法はまちまち（全長 6〜8m のものもある）なので、
-       上端＝穂先・下端＝グリップ尻がボーン列の両端に来るよう正規化する */
+    // 前の竿を片付ける。ジオメトリもマテリアルもここで複製したものなので捨てる
+    for (const part of this._rodParts) {
+      part.removeFromParent();
+      part.traverse((n) => {
+        if (!n.isMesh) return;
+        n.geometry.dispose();
+        n.material.dispose();
+      });
+    }
+    this._rodParts = [];
+    this.rodMeshes = [];
+    this.reelHandle = null;
+    this.reelRotor = null;
+    this.reelKnob = null;
+    this._reelSpin = 0;
+
+    this._buildBlank(src);
+    /* リールを別パーツで持っているのは今のところ竹竿の GLB だけなので、
+       入っていない竿は竹竿のリールを借りる。自前のリールが入れば
+       そちらが自動で使われる（この分岐に触らなくてよい） */
+    this._buildReel(hasReel(src) ? src : this._rodSrc.bamboo);
+  }
+
+  /**
+   * モデルの寸法はまちまち（全長 6〜8m のものもある）なので、
+   * 上端＝穂先・下端＝グリップ尻がボーン列の両端に来る倍率と下駄を出す
+   */
+  _rodFit(src) {
     src.scene.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(src.scene);
     const s = (ROD_TIP_Y - ROD_BUTT_Y) / Math.max(1e-3, box.max.y - box.min.y);
-    const o = ROD_TIP_Y - box.max.y * s;
+    return { s, o: ROD_TIP_Y - box.max.y * s };
+  }
 
+  /** GLB のノードから、竿ローカル座標に載せ替えたジオメトリを作る */
+  _rodGeo(node, s, o) {
+    const geo = node.geometry.clone();
+    geo.applyMatrix4(node.matrixWorld);   // ノードのスケール（×100）・位置を焼き込む
+    geo.scale(s, s, s);
+    geo.translate(0, o, 0);
+    return geo;
+  }
+
+  /** しなるブランク（竿本体）。高さで重みを振ってボーン列に沿って曲げる */
+  _buildBlank(src) {
+    const { s, o } = this._rodFit(src);
     src.scene.traverse((n) => {
-      if (!n.isMesh) return;
-      const geo = n.geometry.clone();
-      geo.applyMatrix4(n.matrixWorld);   // ノードのスケール（×100）を焼き込む
-      geo.scale(s, s, s);
-      geo.translate(0, o, 0);
+      if (!n.isMesh || REEL_PARTS[n.name]) return;
+      const geo = this._rodGeo(n, s, o);
       this._weightRod(geo);
       const mat = n.material.clone();
+      /* glTF の既定は metalness=1。このシーンには環境マップが無く、
+         金属は反射する先が無くて黒く沈むので、他のパーツに合わせて落とす */
       mat.metalness = 0;
       mat.roughness = Math.max(0.55, mat.roughness);
       const mesh = new THREE.SkinnedMesh(geo, mat);
       mesh.castShadow = true;
-      mesh.frustumCulled = false;
+      mesh.frustumCulled = false;   // スキンで動くので元の AABB が当てにならない
       this.rodMount.add(mesh);
       mesh.updateMatrixWorld(true);
       mesh.bind(this.rodSkeleton);
       this.rodMeshes.push(mesh);
+      this._rodParts.push(mesh);
     });
+  }
+
+  /**
+   * リール。曲がらない固まりなので、スキンではなく根元のボーンにぶら下げる。
+   *
+   * ここがスキンメッシュだと絶対に回らない。three.js の SkinnedMesh は既定の
+   * bindMode='attached' だと updateMatrixWorld のたびに
+   * bindMatrixInverse = matrixWorld⁻¹ を作り直すため、頂点の行き先が
+   *   matrixWorld × matrixWorld⁻¹ × ボーン行列 × bindMatrix
+   * になり、自分のワールド行列がきれいに打ち消される。つまり包んだグループを
+   * いくら回しても見た目が 1 ミリも変わらない（＝リールが回らなかった原因）。
+   * 素の Mesh にすれば、ふつうに親の回転が効く。
+   *
+   * ぶら下げ先の rodSegs[0] は、グリップの頂点が 100% 乗っているボーンでもある
+   * ので、竿の傾き・しなり・しなる向きにリールが一体でついてくる
+   */
+  _buildReel(src) {
+    if (!src) return;
+    const nodes = {};
+    src.scene.updateMatrixWorld(true);
+    src.scene.traverse((n) => { if (n.isMesh && REEL_PARTS[n.name]) nodes[n.name] = n; });
+    if (!Object.keys(nodes).length) return;
+
+    const { s, o } = this._rodFit(src);
+    // 根元ボーンの中を竿ローカル座標に戻す入れ物。中身はそのままの座標で置ける
+    const root = new THREE.Group();
+    root.position.y = -ROD_BLANK_Y0;
+    this.rodSegs[0].add(root);
+    this._rodParts.push(root);
+
+    /* 回転軸＝ノードの原点（Blender 側で合わせてある）。
+       部品ごとに「軸を原点に置き直したメッシュ」を包むグループを作る。
+       そうしないと竿の原点を中心に振り回ってしまう */
+    const groups = {};
+    const pivots = {};
+    for (const name of Object.keys(REEL_PARTS)) {
+      const n = nodes[name];
+      if (!n) continue;
+      const pivot = n.getWorldPosition(new THREE.Vector3()).multiplyScalar(s);
+      pivot.y += o;
+      const geo = this._rodGeo(n, s, o);
+      geo.translate(-pivot.x, -pivot.y, -pivot.z);
+
+      const mat = n.material.clone();
+      /* 環境マップが無いので金属度を上げるとリールが真っ黒になる。
+         わずかに残して、太陽のハイライトだけ金属らしく光らせる */
+      mat.metalness = Math.min(mat.metalness, 0.15);
+      mat.roughness = clamp(mat.roughness, 0.30, 0.60);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.castShadow = true;
+
+      const g = new THREE.Group();
+      g.position.copy(pivot);
+      g.add(mesh);
+      groups[name] = g;
+      pivots[name] = pivot;
+    }
+
+    // 公転させたい部品は、親ができてから相対位置に置き直してぶら下げる
+    for (const [name, g] of Object.entries(groups)) {
+      const parent = REEL_PARTS[name].orbitOf;
+      if (parent && groups[parent]) {
+        g.position.sub(pivots[parent]);
+        groups[parent].add(g);
+      } else {
+        root.add(g);
+      }
+    }
+
+    this.reelHandle = groups.handle || null;
+    this.reelRotor = groups.rotor || null;
+    this.reelKnob = groups.ReelKnob || null;
   }
 
   /**
@@ -783,6 +921,29 @@ export class Angler {
       seg.rotation.x = this._segBase[i] + tip * share;
       if (!Number.isFinite(seg.rotation.x)) seg.rotation.x = 0;
     }
+
+    this._spinReel(dt, p);
+  }
+
+  /**
+   * リールを回す。巻いている間だけハンドルが TUNING.reel.handleSpeed まで乗る。
+   * 押した瞬間に最高速だと機械的に見えるので、回りだしと止まりは鈍らせる
+   * （ゲーム側もファイト中は F.spin で同じように巻き取りを立ち上げている）。
+   * ローターはギア比を掛けた速さで連動。ノブ（取手）は公転だけさせたいので、
+   * 親（ハンドル）の回転を打ち消して向きを一定に保つ（地球の周りを回る月と同じ考え方）
+   */
+  _spinReel(dt, p) {
+    if (!this.reelHandle) return;
+    const R = TUNING.reel;
+    this._reelSpin = damp(this._reelSpin, p.reeling ? 1 : 0, R.spinUp, dt);
+    if (this._reelSpin < 1e-4) return;
+    // 角度は溜め込まず一周で折り返す（長く遊んでも float の精度が落ちない）
+    const dA = dt * R.handleSpeed * this._reelSpin;
+    const a = (this.reelHandle.rotation.x + dA) % TAU;
+    this.reelHandle.rotation.x = a;
+    if (this.reelRotor) this.reelRotor.rotation.z = (this.reelRotor.rotation.z + dA * R.gearRatio) % TAU;
+    // 差分を引くのではなく毎フレーム打ち消し切る（ズレが溜まらない）
+    if (this.reelKnob) this.reelKnob.rotation.x = -a;
   }
 
   getRodTip(out = new THREE.Vector3()) {

@@ -264,7 +264,7 @@ function slider(parent, label, obj, key, min, max, step, unit = '') {
   const rodRow = document.createElement('div');
   rodRow.className = 'row';
   rodRow.innerHTML = `<label>竿</label><select id="rodSel" style="flex:1;background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:5px;padding:4px">
-    <option value="bamboo">竹（リール無し）</option><option value="glass">グラス</option>
+    <option value="bamboo">竹</option><option value="glass">グラス</option>
     <option value="carbon">カーボン</option><option value="master">名匠</option>
     <option value="legend" selected>伝説</option></select>`;
   g.appendChild(rodRow);
@@ -337,6 +337,12 @@ buildPose();
   slider(g, 'ファイトのピッチ', TUNING.fpv, 'fightPitch', 0, 1.8, 0.01, ' rad');
   slider(g, 'テンションで立てる', TUNING.fpv, 'fightByTension', 0, 1.0, 0.01);
   slider(g, '巻き中さらに立てる', TUNING.fpv, 'fightReel', 0, 0.8, 0.01);
+}
+{
+  const g = group('リール', '「巻いている」を入れると回ります。ハンドルの速さを負にすると逆回転です。');
+  slider(g, 'ハンドルの速さ', TUNING.reel, 'handleSpeed', -12, 12, 0.1, ' rad/s');
+  slider(g, 'ギア比（ローター）', TUNING.reel, 'gearRatio', 0, 10, 0.1);
+  slider(g, '回りだしの速さ', TUNING.reel, 'spinUp', 1, 30, 0.5);
 }
 {
   const g = group('姿勢の切り替わり', '大きいほど素早く次の構えへ移ります。小さいとぬるっと動きます。');
