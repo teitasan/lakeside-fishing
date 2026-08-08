@@ -341,7 +341,7 @@ buildPose();
 {
   const g = group('リール', '「巻いている」を入れると回ります。ハンドルの速さを負にすると逆回転です。');
   slider(g, 'ハンドルの速さ', TUNING.reel, 'handleSpeed', -12, 12, 0.1, ' rad/s');
-  slider(g, 'ギア比（ローター）', TUNING.reel, 'gearRatio', 0, 10, 0.1);
+  slider(g, 'ギア比（ローター）', TUNING.reel, 'gearRatio', -10, 10, 0.1);
   slider(g, '回りだしの速さ', TUNING.reel, 'spinUp', 1, 30, 0.5);
 }
 {

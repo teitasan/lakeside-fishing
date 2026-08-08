@@ -101,16 +101,19 @@ const poseOf = (st) => TUNING.pose[POSE_ALIAS[st] || st] || TUNING.pose.idle;
 /* ===========================================================
    リールの部品（GLB のノード名 → 回し方）
    ブランクと違って曲げず、原点（＝Blender で合わせた回転軸）まわりに回す。
-   spin  : 回す軸。null は回らない部品（本体）
+   spin   : 回す軸。null は回らない部品（本体）
    orbitOf: 指定すると、その部品にぶら下がって公転だけする
-   軸はモデルの実測（回転体としての当てはまり）で決めてある。
-     handle … 竿と直交する横向き（X）。リール本体が X 方向に薄い＝側面から出る
-     rotor  … 竿から見てリールが張り出す向き（Z）。X と Y の径が 0.4% 差で一致
+
+   軸はモデルを 3 軸それぞれの方向から見て確かめた（スピニングリールの実物と同じ）。
+     handle … 竿と直交する横向き（X）。X から見ると腕が 1 本の棒に見える
+     rotor  … 竿と平行（Y）。Y から見たときだけ八角形＝円い断面になる。
+              Z から見るとベール腕が 2 本立った横姿で、こちらは軸ではない
+   ノブは公転を打ち消すだけなので、必ずハンドルと同じ軸にする
    =========================================================== */
 const REEL_PARTS = {
   reel:     { spin: null },                     // 本体。回らないが竿と一緒に動く
   handle:   { spin: 'x' },                      // ハンドル（クランク）
-  rotor:    { spin: 'z' },                      // ローター（糸を巻き取る回転部）
+  rotor:    { spin: 'y' },                      // ローター（糸を巻き取る回転部）
   ReelKnob: { spin: 'x', orbitOf: 'handle' },   // ノブ（取手）。公転だけする
 };
 /** その GLB がリールを別パーツで持っているか */
@@ -937,13 +940,17 @@ export class Angler {
     const R = TUNING.reel;
     this._reelSpin = damp(this._reelSpin, p.reeling ? 1 : 0, R.spinUp, dt);
     if (this._reelSpin < 1e-4) return;
-    // 角度は溜め込まず一周で折り返す（長く遊んでも float の精度が落ちない）
+    // 回す軸は REEL_PARTS だけに書く（ここで決め打ちすると表と食い違う）
     const dA = dt * R.handleSpeed * this._reelSpin;
-    const a = (this.reelHandle.rotation.x + dA) % TAU;
-    this.reelHandle.rotation.x = a;
-    if (this.reelRotor) this.reelRotor.rotation.z = (this.reelRotor.rotation.z + dA * R.gearRatio) % TAU;
+    // 角度は溜め込まず一周で折り返す（長く遊んでも float の精度が落ちない）
+    const a = (this.reelHandle.rotation[REEL_PARTS.handle.spin] + dA) % TAU;
+    this.reelHandle.rotation[REEL_PARTS.handle.spin] = a;
+    if (this.reelRotor) {
+      const ax = REEL_PARTS.rotor.spin;
+      this.reelRotor.rotation[ax] = (this.reelRotor.rotation[ax] + dA * R.gearRatio) % TAU;
+    }
     // 差分を引くのではなく毎フレーム打ち消し切る（ズレが溜まらない）
-    if (this.reelKnob) this.reelKnob.rotation.x = -a;
+    if (this.reelKnob) this.reelKnob.rotation[REEL_PARTS.ReelKnob.spin] = -a;
   }
 
   getRodTip(out = new THREE.Vector3()) {
