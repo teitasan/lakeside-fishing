@@ -35,7 +35,7 @@ export function defaultState() {
     terrain: {}, // 地形図鑑: id -> {casts, depth, fish[]}（初めて投げた時に登録）
     map: { seed: null, cells: '' }, // 湖の測量（M キー）: 歩いた／投げた所だけ地形が分かる
     achievements: [],
-    // volume = 効果音 / bgm = 環境音（雨・風・水・虫）
+    // volume = 効果音 / bgm = 環境音（雨・風・水・虫）とテーマ曲
     // fpv = 一人称視点（ホイールを手前まで回すと切り替わる）
     /* fightUi: ファイト中の表示量。'tension'=テンションだけ / 'none'=なし
        （none でも竿のしなり・ドラグ音・画面端の赤で限界は分かる） */

@@ -15,6 +15,8 @@ export class AudioEngine {
     this._reelClickAt = 0;
     this._dragClickAt = 0;
     this._noise = null;
+    this._themeBuffer = null;
+    this._themeSource = null;
   }
 
   /** ユーザー操作後に呼ぶ */
@@ -82,6 +84,60 @@ export class AudioEngine {
 
   resume() {
     if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+  }
+
+  /**
+   * テーマ曲を環境音・SEと同時に再生する（音量を絞って重ねるだけで、
+   * 他の音は止めない）。出力は必ず bgmBus へ。master へ直挿しすると
+   * 設定の音量スライダーがどれも効かなくなる。
+   *
+   * volume の既定値は実測で決めてある。
+   *   theme.mp3        … RMS 0.091（-20.8dBFS）/ ピーク 0.962 ＝ ふつうに整音された曲
+   *   環境音ぜんぶ合計 … RMS 0.00535（スライダー 0.7 のとき）
+   * この曲は合成音の環境音よりずっと大きいので、そのままだと環境音をかき消す。
+   * 0.05 で bgmBus(0.7) を通ると RMS 0.0032 ＝ 環境音の 0.6 倍あたりに収まる。
+   * 音楽は環境音より高い帯域に力があって同じ RMS でも大きく聞こえるので、
+   * 数字の上では少し下に置くとちょうど並んで聞こえる
+   * @param {string} url
+   * @param {{volume?: number, fadeIn?: number, fadeOut?: number}} opts
+   */
+  async playTheme(url, { volume = 0.05, fadeIn = 2, fadeOut = 2 } = {}) {
+    if (!this.ready) return;
+    const ctx = this.ctx;
+    if (!this._themeBuffer) {
+      try {
+        const res = await fetch(url);
+        const raw = await res.arrayBuffer();
+        this._themeBuffer = await ctx.decodeAudioData(raw);
+      } catch (e) {
+        console.warn('テーマ曲の読み込みに失敗', e);
+        return;
+      }
+    }
+    if (this._themeSource) {
+      try { this._themeSource.stop(); } catch (e) { /* noop */ }
+    }
+
+    const dur = this._themeBuffer.duration;
+    const fi = Math.min(fadeIn, dur / 2);
+    const fo = Math.min(fadeOut, dur / 2);
+    const t0 = ctx.currentTime;
+    const holdEnd = Math.max(fi, dur - fo);
+
+    const src = ctx.createBufferSource();
+    src.buffer = this._themeBuffer;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(volume, t0 + fi);
+    g.gain.setValueAtTime(volume, t0 + holdEnd);
+    g.gain.linearRampToValueAtTime(0, t0 + dur);
+    src.connect(g);
+    g.connect(this.bgmBus);   // master 直挿しにすると音量設定が効かない
+
+    src.start(t0);
+    src.stop(t0 + dur + 0.05);
+    this._themeSource = src;
+    src.onended = () => { if (this._themeSource === src) this._themeSource = null; };
   }
 
   /* ---------------- 環境音 ---------------- */
