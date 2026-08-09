@@ -24,7 +24,10 @@ export function defaultState() {
     nightCaught: 0,
     snapped: 0,
     escaped: 0,
-    clock: 9, // 9時スタート
+    /* 6時スタート。テーマ曲に合わせた夜明け（timeBandLabel が「夜明け」・
+       魚の活性は 'dawn'＝朝マズメ）から始まる。実 1 秒 = ゲーム内 1 分なので、
+       空が「朝」に変わるのは実 30 秒後、魚の dawn 判定が切れるのは実 90 秒後 */
+    clock: 6,
     rigLayer: 'mid', // 狙う層（タナ）: top|mid|bottom。実際の深さは水深×比率
     seed: null, // 湖のシード（null = 起動時にランダムで決める）
     gear: { rod: 'bamboo', line: 'nylon2', bait: 'worm' },
