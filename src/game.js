@@ -83,6 +83,13 @@ const RISE_MAX = 12;
    傾斜だけでは水面へ飛び出してしまうので速さそのものを抑える。
    取り込みは深さの条件付きなので、そのぶんファイトが伸びる */
 const RISE_MPS = 3.0;
+/* 魚が跳ねられる深さ（m）。水面近くにいる時だけ跳ぶ＝実際の魚と同じで、
+   深いところで掛かった魚は寄せて浮かせてから跳ぶようになる。
+   ここを深くすると、跳び始めに水中から水面へ瞬間移動する量が増える */
+const JUMP_MAX_DEPTH = 1.2;
+/* 上の深さに居るあいだ、走っている魚が跳ねだす速さ（回/秒）。
+   走り 1 回（約 1.2 秒）を通して浅ければ 8 割がた跳ぶ、くらいの値 */
+const JUMP_RATE = 1.4;
 /* ラインブレイクの警告（画面端の赤・バーの点滅）を出し始める「切れるまでの残り秒数」。
    テンションの % で警告すると、張力の上がる速さが魚と装備で 2 倍以上違うため
    猶予がまったく揃わない（実測：80% から切れるまで通常 0.4〜0.6 秒、
@@ -505,6 +512,7 @@ export class Game {
     this.audio.setVolume(this.state.settings.volume);
     this.audio.setBgm(this.state.settings.bgm ?? 0.7);
     this.audio.resume();
+    this.audio.playTheme('./assets/audio/theme.mp3');
     this.playing = true;
     document.body.classList.add('playing');
     this.ui.el.title.classList.remove('open');
@@ -1199,6 +1207,7 @@ export class Game {
       pattern,
       jumpQueued: 0,   // 走りの途中で跳ねるまでの秒数
       jumpT: 0,        // 跳ねている残り時間
+      jumpFromY: null, // 跳ね始めた高さ（弧をここから立ち上げる）
       shakeT: rand(0.6, 1.3),
       shakeOn: false,
       shakeAge: 0,
@@ -2103,10 +2112,10 @@ export class Game {
       F.running = true;
       F.runDur = rand(0.7, 1.9) * P.runDur * (0.7 + sp.agg * 0.5);
       this.audio.drag();
-      // ジャンパーは走りの途中で跳ねる
-      if (P.jump > 0 && F.jumps < 4 && Math.random() < 0.8) F.jumpQueued = F.runDur * rand(0.3, 0.55);
-      // 「何が起きたか」だけ知らせる。どう捌くかは操作する側に任せる
-      else if (F.pull0 >= 1.2 && Math.random() < 0.4) this.ui.toast('<b>走った！</b>', 'bad');
+      /* 「何が起きたか」だけ知らせる。どう捌くかは操作する側に任せる。
+         跳ぶ魚が水面近くにいる時は「跳ねた！」が出るので、ここでは出さない */
+      const willJump = P.jump > 0 && F.fishDepth <= JUMP_MAX_DEPTH;
+      if (!willJump && F.pull0 >= 1.2 && Math.random() < 0.4) this.ui.toast('<b>走った！</b>', 'bad');
     }
 
     /* --- 首振り（振っている間は巻いても進まず、張力だけ上がる） --- */
@@ -2126,19 +2135,34 @@ export class Game {
     // 演出は始まった瞬間から、ペナルティは猶予の後から
     const shakeBite = F.shakeOn && F.shakeAge > (P.shakeGrace || 0);
 
-    /* --- ジャンプ（予告 → 0.62秒の空中） --- */
+    /* --- ジャンプ（予告 → 0.62秒の空中） ---
+       走っているあいだ、水面近くに来たら跳ぶ。判定を「走り出した一瞬」に限ると、
+       走り出すと魚は少し潜る仕様と噛み合わず、深く掛かった魚は走り出しがいつも
+       深いので一度も跳ねないまま終わる（ヒット深度 5m・10m で実測 0 回）。
+       毎フレーム抽選にすると「浮いてきた所で跳ぶ」になり、
+       深い魚は寄せてから跳ぶ・浅い魚は最初から跳ぶ、と自然に分かれる */
+    const jumpDur = P.jumpDur || 0.62;
+    if (F.running && P.jump > 0 && F.jumps < 4 && F.jumpQueued <= 0 && F.jumpT <= 0
+      && F.fishDepth <= JUMP_MAX_DEPTH && Math.random() < dt * JUMP_RATE) {
+      F.jumpQueued = rand(0.15, 0.35);   // 予告（水しぶきの前の一瞬）
+    }
     if (F.jumpQueued > 0) {
       F.jumpQueued -= dt;
       if (F.jumpQueued <= 0) {
-        F.jumpT = P.jumpDur || 0.62;
+        /* 深さで跳ぶかどうかを決めるのは予約した時（走り出した瞬間）だけ。
+           ここで測り直してはいけない。走っている間は魚が少し潜る仕様なので、
+           走り出しに浅くても跳ぶ頃には閾値を超えていて、
+           ジャンパーがほぼ跳ばなくなる（ヒット深度 2m で 0 回になった）。
+           跳び始めの高さから弧を立ち上げるので、多少沈んでいても飛びはしない */
+        F.jumpT = jumpDur;
         F.jumps++;
+        F.jumpFromY = f.pos.y;   // 弧をここから立ち上げる（下の fy を参照）
         this.audio.splash(1.0);
         this.ui.toast('<b>跳ねた！</b>', 'bad');
       }
     }
     if (F.jumpT > 0) F.jumpT = Math.max(0, F.jumpT - dt);
     const jumping = F.jumpT > 0;
-    const jumpDur = P.jumpDur || 0.62;
     const jumpBite = jumping && F.jumpT < jumpDur - (P.jumpGrace || 0);
 
     const reeling = this.actionHeld;
@@ -2243,9 +2267,14 @@ export class Game {
     wantDepth = lerp(-LAND_LIFT_M, wantDepth, clamp01((F.dist - LAND_M) / riseFrom));
     let fy;
     if (jumping) {
-      // 空中に跳ね上がる（0 → 1 → 0 の弧）
-      const jt = 1 - F.jumpT / (P.jumpDur || 0.62);
-      fy = surf + Math.sin(Math.PI * jt) * (0.45 + Math.min(1.1, F.pull0 * 0.32));
+      /* 空中に跳ね上がる（0 → 1 → 0 の弧）。
+         立ち上がりは水面ではなく「跳ね始めた高さ」から。surf 決め打ちだと、
+         少しでも沈んでいたぶんがそのまま 1 コマのワープになる
+         （深さを見ずに跳ばせていた頃は、水深 5m から 1 コマで 4.7m 飛んでいた）。
+         着地は水面ちょうどなので、跳び終わりも damp へ滑らかにつながる */
+      const jt = 1 - F.jumpT / jumpDur;
+      const from = F.jumpFromY ?? surf;
+      fy = lerp(from, surf, jt) + Math.sin(Math.PI * jt) * (0.45 + Math.min(1.1, F.pull0 * 0.32));
       if (Math.random() < dt * 26) {
         this.water.addSplash(wx, surf, wz, 6, 1.0);
         this.water.addRipple(wx, wz, 0.8, 1.2);
