@@ -64,6 +64,12 @@ const LINEOUT_MPS = 0.70;
    引きの強い魚は長く押せない＝乗り切らないので、ここが装備の壁にもなる */
 const SPIN_UP = 0.22;     // 押している間の立ち上がり時定数（秒）
 const SPIN_DOWN = 0.12;   // 離したときに落ちる時定数（秒）
+/* 道糸のたるみ。アタリ待ちは自重で垂れるが、魚が掛かれば張る。
+   LINE_TIGHTEN_SEC はアワセてから張り切るまでの秒数（＝糸が鳴る一瞬）。
+   ファイト中の残りたるみは張力で 0 まで詰まる（9m 先で最大 7cm なので実質まっすぐ） */
+const LINE_SLACK_WAIT = 0.62;
+const LINE_SLACK_FIGHT = 0.06;
+const LINE_TIGHTEN_SEC = 0.15;
 const RUN_MARGIN = 16;
 const LAND_M = 0.7;
 /* 取り込みは「水平距離が詰まった」だけでは成立させない。実際の取り込みと同じで
@@ -1804,7 +1810,7 @@ export class Game {
         bob.position.copy(this.bobber);
         this.water.surfaceNormal(this.bobber.x, this.bobber.z, _v2);
         bob.quaternion.setFromUnitVectors(UP, _v2);
-        this.angler.updateLine(_v1, this.bobber, 0.62, this.camera, this._uwFx ? null : surf);
+        this.angler.updateLine(_v1, this.bobber, LINE_SLACK_WAIT, this.camera, this._uwFx ? null : surf);
         // 水中の仕掛けは水中カメラの時だけ見せる
         this.angler.updateRig(this.bobber, this.baitPos, this.camera, !!this._uwFx, dt);
         // 水面のリング（遠くでもウキが見えるように）
@@ -2350,7 +2356,11 @@ export class Game {
        行かない）。仕掛けがウキから斜め上の魚へ伸びる形になる */
     const tip = this.angler.getRodTip(_v4);
     const mouth = f.mouthPos(_v5);
-    const slack = clamp01(1 - tRatio) * 0.55;
+    /* 魚が付いた道糸は張る。アワセた瞬間のたるみ（アタリ待ちのまま）から
+       LINE_TIGHTEN_SEC 秒で張り切らせるので、掛けた手応えが糸にも出る。
+       残りのたるみは張力で 0 まで詰まる */
+    const slack = lerp(LINE_SLACK_WAIT, clamp01(1 - tRatio) * LINE_SLACK_FIGHT,
+      clamp01(F.time / LINE_TIGHTEN_SEC));
     this.bobber.set(mouth.x, this.water.surfaceY(mouth.x, mouth.z), mouth.z);
     this.angler.bobber.visible = true;
     this.angler.bobber.position.copy(this.bobber);
