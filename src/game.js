@@ -64,9 +64,6 @@ const LINEOUT_MPS = 0.70;
    引きの強い魚は長く押せない＝乗り切らないので、ここが装備の壁にもなる */
 const SPIN_UP = 0.22;     // 押している間の立ち上がり時定数（秒）
 const SPIN_DOWN = 0.12;   // 離したときに落ちる時定数（秒）
-/* 掛けた瞬間、ウキが「投げた着水点」から「糸と水面の交点」へ寄るのにかける秒数。
-   0 にすると元のワープに戻る。長くすると糸から離れたウキが長く残る */
-const BOBBER_SLIDE_SEC = 0.8;
 const RUN_MARGIN = 16;
 const LAND_M = 0.7;
 /* 取り込みは「水平距離が詰まった」だけでは成立させない。実際の取り込みと同じで
@@ -1193,10 +1190,6 @@ export class Game {
       runDur: surge ? rand(0.6, 1.2) * pattern.runDur : 0,
       lateral: 0,
       spin: 0,             // リールの乗り（0〜1）。押し続けると立ち上がる
-      /* ウキを「掛けた瞬間の居場所」から糸と水面の交点へ寄せるための 2 つ。
-         いきなり交点へ置くと遠投しているほど大きくワープするため */
-      bobFrom: this.bobber.clone(),
-      bobEase: 0,
       px: this.bobber.x,   // 前フレームの魚の位置（向きを動いている方へ向けるため）
       pz: this.bobber.z,
       face: 'player',      // いま向いている基準（player / move / jump）
@@ -2343,35 +2336,28 @@ export class Game {
     }
 
     /* --- ウキ / 糸 ---
-       糸は竿先から「魚の口」へ。ウキはその糸が水面と交わる点に置く */
+       アタリ待ちと同じ描き方をそのまま続ける。
+         竿先 ──たるんだ道糸── ウキ（水面・魚の真上） ──仕掛け── 魚
+       ウキが指すのは「魚がいる場所」で、寄せたぶんだけ手前に来る。
+
+       以前はファイト中だけ「糸が水面と交わる点」に置いていた。幾何としては
+       正しいが、魚は水中にいるので交点は魚よりずっと手前に来る。そのため
+       掛けた瞬間にウキの意味が入れ替わり、魚は動いていないのにウキだけが
+       内側へ飛んでいた（実測：掛ける前 6.75m → 4.31m。同じとき魚は 7.64m
+       先の水深 4.51m にいて、ウキは魚より 3.3m 手前を指していた）。
+
+       跳ねて魚が空中にいる間もウキは水面に残る（浮きなので水面より上には
+       行かない）。仕掛けがウキから斜め上の魚へ伸びる形になる */
     const tip = this.angler.getRodTip(_v4);
     const mouth = f.mouthPos(_v5);
     const slack = clamp01(1 - tRatio) * 0.55;
-    const sag = Angler.sagFor(tip.distanceTo(mouth), slack);
-    /* ウキの置き場所は糸が水面と交わる所。ただしそこへいきなり置くと、
-       掛けた瞬間にウキがワープする（22m 投げていれば 16m 飛ぶ）。
-       アタリ待ちのウキは糸の先そのものだが、ファイト中の糸の先は水中の魚の口で、
-       水面との交点はずっと手前に来るため。
-       そこで掛けた瞬間の居場所（bobFrom）から交点へ、BOBBER_SLIDE_SEC 秒かけて
-       寄せる。糸が張って手元へ引かれてくる見え方になる。
-       寄せ切ったら以後は交点そのもの＝糸の上からずれない
-       （追従に damp を使うと魚が動く間ずっと遅れて、糸から浮いて見える）。
-       跳ねていて交点が無いときは糸の先＝魚の口 */
-    const tCross = this._lineSurfaceT(tip, mouth, sag);
-    const bobTo = tCross !== null
-      ? this._linePointAt(tip, mouth, sag, tCross, _v7)
-      : _v7.copy(mouth);
-    if (F.bobEase < 1) {
-      F.bobEase = Math.min(1, F.bobEase + dt / BOBBER_SLIDE_SEC);
-      const e = F.bobEase * F.bobEase * (3 - 2 * F.bobEase);   // 動き出しと止まりを丸める
-      this.bobber.lerpVectors(F.bobFrom, bobTo, e);
-    } else {
-      this.bobber.copy(bobTo);
-    }
+    this.bobber.set(mouth.x, this.water.surfaceY(mouth.x, mouth.z), mouth.z);
     this.angler.bobber.visible = true;
     this.angler.bobber.position.copy(this.bobber);
+    this.water.surfaceNormal(this.bobber.x, this.bobber.z, _v7);
+    this.angler.bobber.quaternion.setFromUnitVectors(UP, _v7);
     // 糸は水面で切って、水中は描かない（水中カメラ中は見せる）
-    this.angler.updateLine(tip, mouth, slack, this.camera, this._uwFx ? null : surf);
+    this.angler.updateLine(tip, this.bobber, slack, this.camera, this._uwFx ? null : surf);
     this.angler.updateRig(this.bobber, mouth, this.camera, false, dt);
 
     /* --- UI --- */
@@ -2394,36 +2380,6 @@ export class Game {
     if (F.dist <= LAND_M && F.fishDepth <= 0) return this._land();
   }
 
-  /**
-   * 竿先 → 終点の糸（たるみ込み）の上の点。
-   * updateLine と同じ曲線を使うので、見えている糸の上にちょうど乗る
-   */
-  _linePointAt(tip, end, sag, t, out) {
-    out.lerpVectors(tip, end, t);
-    out.y -= Angler.sagAt(t, sag);   // updateLine と同じたるみの形
-    return out;
-  }
-
-  /**
-   * その糸が水面と交わる位置を「糸に沿った 0..1」で返す。
-   * 点ではなく位置を返すのは、ウキをそこへ飛ばすのではなく
-   * 糸の上を滑らせて寄せたいから（_updateFight を参照）
-   * @returns {number|null} 交点の t（両端が水面の同じ側なら null）
-   */
-  _lineSurfaceT(tip, end, sag) {
-    const gap = (t) => {
-      this._linePointAt(tip, end, sag, t, _v6);
-      return _v6.y - this.water.surfaceY(_v6.x, _v6.z);
-    };
-    let lo = 0, hi = 1;
-    const gLo = gap(lo), gHi = gap(hi);
-    if (gLo === gHi || gLo * gHi > 0) return null;
-    for (let i = 0; i < 14; i++) {
-      const mid = (lo + hi) / 2;
-      if (gap(mid) * gLo > 0) lo = mid; else hi = mid;
-    }
-    return (lo + hi) / 2;
-  }
 
   _lineSnap() {
     this.audio.snap();
