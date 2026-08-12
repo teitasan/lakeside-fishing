@@ -286,14 +286,14 @@ function buildPose() {
   slider(poseGroup, '手の前後 Z', P.hand, 2, -0.4, 0.5, 0.005, ' m');
   slider(poseGroup, '前傾', P, 'lean', -0.4, 0.6, 0.01, ' rad');
   if (st === 'fight') {
-    poseGroup.insertAdjacentHTML('beforeend', `<p class="desc">上の 竿のピッチ / 前傾 は
-      <b>張力ゼロのときの構え</b>です。<b>アタリ待ちと同じ値にしておくと、
-      掛かった瞬間に竿が跳ねません</b>。下の 4 つが張力と巻きでの上乗せ分。
-      巻きの効きには張力が掛かるので、引かれていない時にただ巻いても竿は寝ません。</p>`);
-    slider(poseGroup, 'テンションで立てる', TUNING.fight, 'byTension', 0, 1.4, 0.01);
-    slider(poseGroup, '巻き中に送り込む（倒す）', TUNING.fight, 'byReelLay', 0, 1.0, 0.01);
+    poseGroup.insertAdjacentHTML('beforeend', `<p class="desc"><b>竿のピッチはここでは効きますが、
+      ゲーム中は効きません</b>。ファイト中の竿の角度は「構え＋しなりの合計が魚を向く」ように
+      幾何で決まるからです（竿先で糸が折れないように）。ここは糸の先が無いときの控えの値。
+      下の 2 つと 前傾 は張力・巻きでの上乗せ分で、ゲームでもそのまま効きます。</p>`);
     slider(poseGroup, 'テンションで前傾', TUNING.fight, 'leanByTension', 0, 0.6, 0.01);
     slider(poseGroup, '巻き中さらに前傾', TUNING.fight, 'leanByReelLay', 0, 0.3, 0.01);
+    slider(poseGroup, '竿を倒せる限界', TUNING.fightAim, 'max', 0.8, 2.4, 0.01, ' rad');
+    slider(poseGroup, '竿を立てられる限界', TUNING.fightAim, 'min', -0.6, 0.8, 0.01, ' rad');
   }
 }
 buildPose();
@@ -337,11 +337,8 @@ buildPose();
 }
 {
   const g = group('一人称のとき',
-    'いまゲームは一人称に固定しているので、ファイト中の竿の角度はここだけが効きます（上の「ファイト」タブの竿のピッチではありません）。');
+    '穂先が画面に残るよう、アタリ待ちだけ三人称より寝かせています。ファイト中は竿先が魚を向くよう幾何で決まるので、視点による違いはありません。');
   slider(g, 'アタリ待ちのピッチ', TUNING.fpv, 'waitPitch', 0.4, 2.0, 0.01, ' rad');
-  slider(g, 'ファイトの基準ピッチ', TUNING.fpv.fight, 'base', 0, 2.0, 0.01, ' rad');
-  slider(g, 'テンションで立てる', TUNING.fpv.fight, 'byTension', 0, 1.4, 0.01);
-  slider(g, '巻き中に送り込む（倒す）', TUNING.fpv.fight, 'byReelLay', 0, 1.0, 0.01);
 }
 {
   const g = group('リール', '「巻いている」を入れると回ります。ハンドルの速さを負にすると逆回転です。');

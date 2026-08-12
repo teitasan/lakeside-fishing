@@ -1278,11 +1278,14 @@ export class Game {
       },
     });
 
-    // 釣り人（しなり方向は糸の先＝ファイト中は口、それ以外はウキ）
+    /* 釣り人。しなりの向きと竿先の狙いは、道糸が実際につながっている先＝ウキ。
+       ファイト中に魚の口を渡すと、ウキは水面・魚は水中なので竿先が魚を向いても
+       竿先とウキの間で糸が折れる（実測 30 度）。仕掛けはウキから下に伸びるので、
+       曲がるのはウキの所で正しい */
     const fightT = this.fight ? clamp01(this.fight.tension / this.line.cap) : 0;
     let lineEnd = null;
     if (this.fs === 'fight' && this.hookFish) {
-      lineEnd = this.hookFish.mouthPos(_lineEnd);
+      lineEnd = _lineEnd.copy(this.bobber);
     } else if (
       this.fs === 'flight' || this.fs === 'wait'
       || this.fs === 'nibble' || this.fs === 'bite'

@@ -41,8 +41,12 @@ const ROD_URLS = {
 /** 関節の相対しなり（根本→先端）。先端ほどよく曲がる */
 const ROD_FLEX = [0.22, 0.40, 0.70, 1.15, 1.70, 2.40];
 const ROD_FLEX_SUM = ROD_FLEX.reduce((a, b) => a + b, 0);
-/** 最大しなり角（半円） */
-const ROD_BEND_MAX = Math.PI;
+/* 最大しなり角。以前は半円（180 度）だったが、それだと竿先が糸を通り越して
+   曲がり切ってしまい、構えをどれだけ倒しても竿先を糸へ向けられない
+   （実測：張力 0.9 で 170 度曲がり、ピッチを限界まで倒しても 53 度折れていた）。
+   竿先が糸を向ける範囲に収めてある。109 度でも竿は充分深く曲がるし、
+   張力の読み取りは 0〜109 度の振れ幅で残る */
+const ROD_BEND_MAX = 1.9;
 
 /* しなりの関節。長さは作り直し前と同じなので、竿先までの距離＝糸の出どころは変わらない */
 const ROD_SEG_LEN = [0.42, 0.40, 0.36, 0.34, 0.32, 0.28];
@@ -66,32 +70,23 @@ export const TUNING = {
     idle:   { pitch: 0.45, hand: [0.04, -0.34, 0.15], lean: 0 },
     charge: { pitch: -0.95, hand: [0.08, -0.16, -0.18], lean: -0.12 },
     wait:   { pitch: 1.00, hand: [0.03, -0.25, 0.24], lean: 0 },
-    /* ファイトの pitch / lean は「張力ゼロのときの構え」。アタリ待ちと
-       同じ値にしてある＝掛かった瞬間に竿が跳ねない。ここを立てるほど、
-       まだ何も引かれていないのに竿だけ起きる不自然さが出る */
+    /* ファイトの pitch は、糸の先が分からないとき（モーションエディター）だけの
+       控えの値。ゲーム中は竿先が魚を向くように幾何で決まる（_aimPitch）。
+       lean は「張力ゼロのときの前傾」で、アタリ待ちと同じ＝掛かっても跳ねない */
     fight:  { pitch: 1.00, hand: [0.05, -0.20, 0.20], lean: 0 },
     landed: { pitch: 0.10, hand: [0.06, -0.14, 0.18], lean: 0 },
   },
-  /* ファイト中の上乗せ。竿の角度は
-       pose.fight.pitch － テンション×byTension ＋ 巻き×テンション×byReelLay
-     テンションが上がるほど立て、巻いているあいだは送り込む（倒す）。
-
-     倒すのはポンピングがそういう動作だから。竿を立てて寄せ、
-     倒しながら巻いて出た糸を回収する＝巻くときは竿が下りる。
-     以前は逆に「巻くと立てる」で、しかも巻きボタンは押した瞬間に
-     切り替わるのに張力は 1 秒かけて育つため、
-     竿だけが先に跳ね上がってから曲がる、という動きになっていた。
-
-     巻きの効きにテンションを掛けてあるのが要点。おかげで
-       ・引かれていない時にただ巻いても竿は寝ない
-       ・ファイト中の竿がアタリ待ちより寝ることは絶対にない
-     の 2 つが自動的に成り立つ */
-  fight: { byTension: 0.96, byReelLay: 0.20, leanByTension: 0.30, leanByReelLay: 0.10 },
-  /* 一人称は視界に穂先を残したいので、待ちとファイトをさらに寝かせる。
-     base をアタリ待ちと同じ角度にしてあるのが大事で、
-     ここを別の値にすると「掛かった瞬間、張力ゼロなのに竿だけ跳ね上がる」に戻る
-     （実際 0.90 で、アタリ待ちから 17 度いきなり起きていた） */
-  fpv: { waitPitch: 1.20, fight: { base: 1.20, byTension: 0.68, byReelLay: 0.18 } },
+  /* ファイト中の前傾。竿の角度のほうは数値で持たず、竿先が魚を向くように
+     幾何で決まる（_aimPitch）。テンションが上がるほど、巻いているほど前へ入る */
+  fight: { leanByTension: 0.30, leanByReelLay: 0.10 },
+  /* ファイト中に竿が取れるピッチの範囲（垂直から前へ倒した角・rad）。
+     角度そのものは「竿先が魚を向く」ように幾何で決まるので、ここは行き止まりだけ。
+     min を下げると魚が近い時に竿が後ろへ倒れ、max を上げると真下の魚に竿先を
+     突っ込めるようになる */
+  fightAim: { min: -0.25, max: 1.75 },
+  /* 一人称は視界に穂先を残したいので、アタリ待ちをさらに寝かせる。
+     ファイトは幾何で決まるので視点による違いを持たない */
+  fpv: { waitPitch: 1.20 },
   /* キャストの振り抜き。dur 秒かけて charge の姿勢から endPitch まで振る */
   cast: { dur: 0.34, endPitch: 0.60, leanFrom: -0.12, leanTo: 0.10, damp: 26 },
   /* 腕。pole は肘を張り出す向き（root ローカル）。これがないと肘が裏返る。
@@ -771,24 +766,21 @@ export class Angler {
       handT = lerpArr(T.pose.idle.hand, T.pose.charge.hand, p.charge);
       leanT = T.pose.charge.lean * p.charge;
     } else if (st === 'fight') {
-      /* 張力で立て、巻いているぶんだけ送り込む（ポンピングの「倒して巻く」側）。
-         効き具合は loadCurve＝しなりとまったく同じ曲線なので、
-         竿は立つのと曲がるのが必ず一緒に進む。
-         巻きの効きも load に乗せてあるおかげで、引かれていない時に
-         ただ巻いても竿は寝ないし、アタリ待ちより寝ることもない */
+      /* ファイト中の竿の角度は決め打ちではなく、幾何で決める。
+         「構え＋しなり」の合計が魚を向くようにピッチを取るので、竿先で糸が
+         折れず 竿先→糸→ウキ→魚 が一続きに見える（_aimPitch を参照）。
+         しなり量は張力のままなので、竿の曲がりで限界を読む遊びは残る。
+         前傾だけは今までどおり張力と巻きで決める */
       const F = T.fight;
       const load = loadCurve(p.tension);
-      pitchT = T.pose.fight.pitch - load * (F.byTension - reel * F.byReelLay);
+      pitchT = this._aimPitch(T.pose.fight.pitch);
       leanT = T.pose.fight.lean + load * (F.leanByTension + reel * F.leanByReelLay);
     }
-    /* 一人称は視界に穂先を残したいので、待ちとファイトをさらに寝かせる
-       （構え・キャストは三人称と同じ＝飛距離の計算が視点で変わらないように） */
-    if (this.fpv) {
-      if (st === 'wait' || st === 'flight' || st === 'nibble' || st === 'bite') pitchT = T.fpv.waitPitch;
-      else if (st === 'fight') {
-        const F = T.fpv.fight;
-        pitchT = F.base - loadCurve(p.tension) * (F.byTension - reel * F.byReelLay);
-      }
+    /* 一人称は視界に穂先を残したいので、待ちをさらに寝かせる
+       （構え・キャストは三人称と同じ＝飛距離の計算が視点で変わらないように）。
+       ファイトは幾何で決まるので視点による違いを持たない */
+    if (this.fpv && (st === 'wait' || st === 'flight' || st === 'nibble' || st === 'bite')) {
+      pitchT = T.fpv.waitPitch;
     }
 
     // キャストのスイング（振りかぶり → 振り抜き）
@@ -819,6 +811,34 @@ export class Angler {
     this.bodyLean = damp(this.bodyLean, leanT, T.damp.lean, dt);
     this._poseUpper();
     this._applyBend(dt, p);
+  }
+
+  /**
+   * ファイト中の竿のピッチ。「構え＋しなり」の合計が糸の先（魚）を向く角度を返す。
+   *
+   * しなり量は張力の表示を兼ねていて 0°〜最大まで大きく振れるが、魚を向くのに
+   * 要る角はほぼ一定（実測 89〜112°）なので、しなり量そのもので竿先を魚へ
+   * 向けることはできない。そこで差を構えの角度で吸収する。
+   * 結果として「張力が低いと竿を倒して魚を指し、高いと立てて溜める」という、
+   * 実際のやり取りと同じ動きになる。
+   *
+   * ピッチは「垂直から前へ倒した角」なので、
+   *   ピッチ ＋ しなり角 ＝ 竿先から魚への角度（垂直から測る）
+   * を解くだけ。竿先の位置は前フレームのものを使うが、ピッチは damp を通るので
+   * 誤差は次のフレームで詰まる。
+   * @param {number} fallback 糸の先が無いとき（モーションエディターなど）の角度
+   */
+  _aimPitch(fallback) {
+    if (!this._hasLineEnd) return fallback;
+    this.getRodTip(_v1);
+    _v2.copy(this._lineEnd).sub(_v1);
+    // 竿のピッチは root ローカルの前後傾きなので、体の向きを外して測る
+    _v2.applyQuaternion(_q.copy(this.root.quaternion).invert());
+    const fwd = Math.hypot(_v2.x, _v2.z);
+    if (!Number.isFinite(fwd) || (fwd < 1e-3 && Math.abs(_v2.y) < 1e-3)) return fallback;
+    const aim = Math.atan2(fwd, _v2.y);            // 垂直から前へ倒した角
+    const A = TUNING.fightAim;
+    return clamp(aim - this.bend * ROD_BEND_MAX, A.min, A.max);
   }
 
   /**
