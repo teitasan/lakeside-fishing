@@ -2,6 +2,8 @@
    汎用ユーティリティ
    =========================================================== */
 
+import { t } from './i18n.js';
+
 export const TAU = Math.PI * 2;
 
 export const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -149,13 +151,13 @@ export function fmtClock(hour) {
 
 /** 0..24 の時刻から時間帯ラベル */
 export function timeBandLabel(hour) {
-  if (hour < 4) return '深夜';
-  if (hour < 6.5) return '夜明け';
-  if (hour < 10) return '朝';
-  if (hour < 15) return '昼';
-  if (hour < 17.5) return '夕方';
-  if (hour < 19.5) return '日暮れ';
-  return '夜';
+  if (hour < 4) return t('timeBand.lateNight');
+  if (hour < 6.5) return t('timeBand.dawn');
+  if (hour < 10) return t('timeBand.morning');
+  if (hour < 15) return t('timeBand.day');
+  if (hour < 17.5) return t('timeBand.evening');
+  if (hour < 19.5) return t('timeBand.dusk');
+  return t('timeBand.night');
 }
 
 /** 魚の活性判定に使う時間帯タグ */

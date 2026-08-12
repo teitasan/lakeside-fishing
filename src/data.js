@@ -2,6 +2,10 @@
    ゲームデータ定義（魚種・装備・実績）
    =========================================================== */
 
+import {
+  t, joinList, speciesName, rigName, tagLabel, prefixWord, isEn,
+} from './i18n.js';
+
 export const RARITY = [
   { key: 0, label: 'ゴミ', color: '#9aa5b1', xp: 2 },
   { key: 1, label: 'コモン', color: '#cfe0f0', xp: 8 },
@@ -690,9 +694,13 @@ export function swimLayer(sp, band = null) {
 /** 図鑑・表に出す遊泳層の短い名前（重み 0.8 以上の層を拾う） */
 export function swimLayerLabel(sp, band = null) {
   const L = swimLayer(sp, band);
-  const on = RIG_LAYERS.filter((x) => L[x.id] >= 0.8).map((x) => x.name.replace('層', ''));
-  if (!on.length) return RIG_LAYERS.reduce((a, x) => (L[x.id] > L[a.id] ? x : a), RIG_LAYERS[1]).name;
-  return on.length === 3 ? '全層' : on.join('〜') + '層';
+  const on = RIG_LAYERS.filter((x) => L[x.id] >= 0.8);
+  if (!on.length) {
+    return rigName(RIG_LAYERS.reduce((a, x) => (L[x.id] > L[a.id] ? x : a), RIG_LAYERS[1]));
+  }
+  if (on.length === 3) return t('swim.all');
+  const names = on.map((x) => rigName(x).replace(t('swim.layerSuffix'), ''));
+  return names.join(t('swim.rangeJoin')) + t('swim.layerSuffix');
 }
 
 /* ---------------- 底質・ストラクチャー ----------------
@@ -749,8 +757,6 @@ function depthScore(sp, band) {
   return rel + dielShift(sp, band) * 0.22;                 // 場所の深浅も足す
 }
 
-const BAND_NAME = { dawn: '朝', day: '日中', dusk: '夕', night: '夜' };
-
 /** 図鑑に出す一言（例「日中は深く・朝夕は浅く」）。動きが小さい魚は null */
 export function dielNote(sp) {
   const bands = ['dawn', 'day', 'dusk', 'night'];
@@ -762,11 +768,17 @@ export function dielNote(sp) {
   const nm = (list) => {
     const l = [...list];
     if (l.includes('dawn') && l.includes('dusk')) {                // 朝と夕はまとめる
-      return ['朝夕', ...l.filter((b) => b !== 'dawn' && b !== 'dusk').map((b) => BAND_NAME[b])].join('・');
+      return joinList([
+        t('diel.dawnDusk'),
+        ...l.filter((b) => b !== 'dawn' && b !== 'dusk').map((b) => t(`bandName.${b}`)),
+      ]);
     }
-    return l.map((b) => BAND_NAME[b]).join('・');
+    return joinList(l.map((b) => t(`bandName.${b}`)));
   };
-  return `${nm(near(hi[1]))}は深く・${nm(near(lo[1]))}は浅く`;
+  return t('diel.deeperShallower', {
+    deep: nm(near(hi[1])),
+    shallow: nm(near(lo[1])),
+  });
 }
 
 /**
@@ -797,20 +809,6 @@ export const TAG_LABEL = {
 /* ===========================================================
    ショップの表示（内部数値は出さず、同じ種類の中での相対位置を言葉にする）
    =========================================================== */
-const STAT_WORDS = {
-  cast: ['短い', 'やや短い', 'ふつう', '遠い', 'とても遠い'],
-  reel: ['ゆっくり', 'やや遅い', 'ふつう', '速い', 'とても速い'],
-  power: ['弱い', 'やや弱い', 'ふつう', '強い', 'とても強い'],
-  attractRod: ['ふつう', 'やや高い', '高い', 'かなり高い', '抜群'],
-  cap: ['弱い', 'やや弱い', 'ふつう', '強い', 'とても強い'],
-  attractBait: ['ふつう', 'やや速い', '速い', 'かなり速い', '抜群'],
-  rare: ['出にくい', 'ふつう', 'やや出やすい', '出やすい', 'かなり出やすい'],
-  junk: ['多い', 'やや多い', 'ふつう', '少ない', 'とても少ない'],
-  shock: ['よく粘る', '粘る', 'ふつう', 'やや硬い', '直に伝わる'],
-  biteWindow: ['短い', 'やや短い', 'ふつう', 'やや長い', '長い'],
-  attractLine: ['遅い', 'やや遅い', 'ふつう', 'やや速い', '速い'],
-};
-
 /** 同種アイテム内での順位を言葉に（invert = 小さいほど良い） */
 function rankWord(items, get, it, words, invert = false) {
   const vals = [...new Set(items.map(get))].sort((a, b) => a - b);
@@ -828,29 +826,33 @@ function cutWord(v, cuts, words) {
 
 /** ショップに出す「ラベル＋言葉」の一覧。数値（内部パラメータ）は出さない */
 export function gearStats(kind, it) {
+  const words = (key) => {
+    const list = t(`statWords.${key}`);
+    return Array.isArray(list) ? list : [];
+  };
   if (kind === 'rod') {
     // ロッド・ラインは価格順の階段なので、同種の中での順位を言葉にする
     return [
-      ['飛距離', `${rankWord(RODS, (r) => r.cast, it, STAT_WORDS.cast)}（${it.cast}m）`],
-      ['巻き取り', rankWord(RODS, (r) => r.reel, it, STAT_WORDS.reel)],
-      ['竿の力', rankWord(RODS, (r) => r.power, it, STAT_WORDS.power)],
-      ['集魚力', rankWord(RODS, (r) => r.attract, it, STAT_WORDS.attractRod)],
+      [t('gearStat.cast'), `${rankWord(RODS, (r) => r.cast, it, words('cast'))} (${it.cast} m)`],
+      [t('gearStat.reel'), rankWord(RODS, (r) => r.reel, it, words('reel'))],
+      [t('gearStat.power'), rankWord(RODS, (r) => r.power, it, words('power'))],
+      [t('gearStat.attractRod'), rankWord(RODS, (r) => r.attract, it, words('attractRod'))],
     ];
   }
   if (kind === 'line') {
     return [
-      ['強度', rankWord(LINES, (l) => l.cap, it, STAT_WORDS.cap)],
-      ['アタリ', rankWord(LINES, (l) => l.attract, it, STAT_WORDS.attractLine)],
-      ['粘り', rankWord(LINES, (l) => l.shock, it, STAT_WORDS.shock)],
-      ['アワセ猶予', rankWord(LINES, (l) => l.biteWindow, it, STAT_WORDS.biteWindow)],
+      [t('gearStat.cap'), rankWord(LINES, (l) => l.cap, it, words('cap'))],
+      [t('gearStat.attractLine'), rankWord(LINES, (l) => l.attract, it, words('attractLine'))],
+      [t('gearStat.shock'), rankWord(LINES, (l) => l.shock, it, words('shock'))],
+      [t('gearStat.biteWindow'), rankWord(LINES, (l) => l.biteWindow, it, words('biteWindow'))],
     ];
   }
   // エサは 1.0 を基準にした倍率なので、しきい値で「ふつう」を基準に置く
   return [
-    ['得意', baitStrengths(it).join('・')],
-    ['アタリ', cutWord(it.attract, [1.01, 1.12, 1.21, 1.4], STAT_WORDS.attractBait)],
-    ['大物', cutWord(it.rare, [0.95, 1.06, 1.2, 1.6], STAT_WORDS.rare)],
-    ['ゴミ', cutWord(it.junk, [0.3, 0.5, 0.75, 1.0], [...STAT_WORDS.junk].reverse())],
+    [t('gearStat.specialty'), joinList(baitStrengths(it))],
+    [t('gearStat.attractBait'), cutWord(it.attract, [1.01, 1.12, 1.21, 1.4], words('attractBait'))],
+    [t('gearStat.rare'), cutWord(it.rare, [0.95, 1.06, 1.2, 1.6], words('rare'))],
+    [t('gearStat.junk'), cutWord(it.junk, [0.3, 0.5, 0.75, 1.0], [...words('junk')].reverse())],
   ];
 }
 
@@ -871,7 +873,7 @@ export function baitStrengths(bait, n = 3) {
     .filter(([, avg]) => avg >= 1.05)   // 1.0（ふつう）より明確に高いタグだけ拾う
     .sort((a, b) => b[1] - a[1])
     .slice(0, n)
-    .map(([k]) => TAG_LABEL[k] || k);
+    .map(([k]) => tagLabel(k));
 }
 
 export const GEAR = { rod: RODS, line: LINES, bait: BAITS };
@@ -940,27 +942,27 @@ export function rollLength(sp, luck = 0) {
  */
 export function catchDisplayPrefix(sp, len, weight, albino = false) {
   const parts = [];
-  if (albino) parts.push('アルビノ');
+  if (albino) parts.push(prefixWord('albino'));
 
   const [lo, hi] = sp.len;
   const t = hi > lo ? (len - lo) / (hi - lo) : 0.5;
-  if (t >= 0.92) parts.push('巨大な');       // 種内上位 roughly 8%
-  else if (t >= 0.75) parts.push('大きな'); // 上位 25%（巨大を除く）
-  else if (t <= 0.22) parts.push('小さな'); // 下位 roughly 22%
+  if (t >= 0.92) parts.push(prefixWord('giant'));       // 種内上位 roughly 8%
+  else if (t >= 0.75) parts.push(prefixWord('large')); // 上位 25%（巨大を除く）
+  else if (t <= 0.22) parts.push(prefixWord('small')); // 下位 roughly 22%
 
   if (sp.rarity > 0) {
     const base = weightOf(sp, len);
     const ratio = base > 1e-9 ? weight / base : 1;
-    if (ratio >= 1.14) parts.push('太った');
-    else if (ratio <= 0.88) parts.push('痩せた');
+    if (ratio >= 1.14) parts.push(prefixWord('fat'));
+    else if (ratio <= 0.88) parts.push(prefixWord('skinny'));
   }
 
-  return parts.join('');
+  return isEn() && parts.length ? parts.join(' ') + ' ' : parts.join('');
 }
 
 /** 接頭詞＋名前（ログ等用） */
 export function catchDisplayName(sp, len, weight, albino = false) {
-  return catchDisplayPrefix(sp, len, weight, albino) + sp.name;
+  return catchDisplayPrefix(sp, len, weight, albino) + speciesName(sp);
 }
 
 /** 同種のレア個体（アルビノ）。魚種確定後に 1% */

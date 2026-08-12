@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clamp, clamp01, lerp, damp, TAU, lineSagProfile } from './util.js';
 import { createBaitMesh, disposeBaitMesh, updateBaitMesh, createHookMesh, HOOK } from './baitMesh.js';
+import { t } from './i18n.js';
 
 const _v = new THREE.Vector3();
 const _v1 = new THREE.Vector3();
@@ -318,9 +319,9 @@ export class Angler {
    */
   async load(onProgress) {
     const loader = new GLTFLoader();
-    if (onProgress) await onProgress('釣り人を呼んでいます');
+    if (onProgress) await onProgress(t('ui.loadingAngler'));
     this._setupBody(await loader.loadAsync(ANGLER_URL));
-    if (onProgress) await onProgress('竿を並べています');
+    if (onProgress) await onProgress(t('ui.loadingRods'));
     this._rodSrc = {};
     for (const [id, url] of Object.entries(ROD_URLS)) {
       this._rodSrc[id] = await loader.loadAsync(url);

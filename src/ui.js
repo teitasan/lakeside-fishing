@@ -2,9 +2,10 @@
    HUD / モーダル / 図鑑・ショップ
    =========================================================== */
 import {
-  SPECIES, RARITY, GEAR, GEAR_LABEL, ACHIEVEMENTS, RIG_LAYERS,
-  valueOf, fightPattern, gearStats, swimLayer, depthFit, BED_LABEL,
-  colorsOf, ALBINO_EYE, TERRAIN_KINDS, TERRAIN_GROUPS, SPECIES_BY_ID,
+  SPECIES, RARITY, GEAR, ACHIEVEMENTS, RIG_LAYERS,
+  valueOf, fightPattern, gearStats, swimLayer, depthFit,
+  colorsOf, ALBINO_EYE, TERRAIN_KINDS, SPECIES_BY_ID,
+  catchDisplayName, catchDisplayPrefix,
 } from './data.js';
 import { PROFILES, BODY, profileAt, CRUST_SHAPES, lookOf } from './fish.js';
 import { textureTypeFor, fishTextureImage } from './fishTextures.js';
@@ -12,13 +13,15 @@ import { terrainIconImage } from './terrainIcons.js';
 import { fmtInt, fmt1, fmtWeight, fmtClock, timeBand, timeBandLabel, clamp01, lerp as lerpN, smoothstep } from './util.js';
 import { xpForLevel } from './save.js';
 import { iconHtml, iconLabel, loadIcon, preloadIcons, JUNK_ICONS } from './icons.js';
+import {
+  t, setLang, applyDom, joinList, speciesName, speciesFlavor, gearName, gearDesc,
+  terrainName, terrainRule, terrainDesc, terrainFish, achievementName, achievementDesc,
+  fightName, rigName, rigShort, rigDesc, rarityLabel, bedLabel, weatherName,
+  terrainGroupLabel, gearKindLabel, structLabel, timeShort, weatherShort, layerShort,
+  fishCount,
+} from './i18n.js';
 
 const $ = (id) => document.getElementById(id);
-
-/* ゲーム内の時間帯区分（dawn/day/dusk/night）に対応する短い表記 */
-const TIME_SHORT = { dawn: '朝', day: '昼', dusk: '夕', night: '夜' };
-const WEATHER_SHORT = { clear: '晴', cloudy: '曇', rain: '雨' };
-const LAYER_SHORT = [['top', '表'], ['mid', '中'], ['bottom', '底']];
 
 /* 図鑑詳細の段階解禁（釣った数）。デバッグ全表示時は即解禁
    サイズ・売値を先に開き、釣り判断に直結する生息水深を最後にする */
@@ -30,22 +33,23 @@ const DETAIL_UNLOCK = {
 };
 
 /** 好みのキーだけ短いラベルでつなぐ（差が小さければ always） */
-function preferShort(map, names, always = 'いつでも') {
-  const keys = Object.keys(names);
+function preferShort(map, label, always = t('ui.journal.always')) {
+  const keys = Object.keys(map);
   const vals = keys.map((k) => map[k] ?? 1);
   const hi = Math.max(...vals), lo = Math.min(...vals);
   if (hi - lo < 0.15) return always;
-  return keys.filter((k) => (map[k] ?? 1) >= hi - 0.05).map((k) => names[k]).join('・');
+  return joinList(keys.filter((k) => (map[k] ?? 1) >= hi - 0.05).map(label));
 }
 
 /** 遊泳層を短いラベルで表示（居る層だけ） */
 function swimLayerMarks(sp) {
   const L = swimLayer(sp);
-  let on = LAYER_SHORT.filter(([id]) => L[id] >= 0.8);
+  const layers = ['top', 'mid', 'bottom'];
+  let on = layers.filter((id) => L[id] >= 0.8);
   if (!on.length) {
-    on = [LAYER_SHORT.reduce((a, x) => (L[x[0]] > L[a[0]] ? x : a))];
+    on = [layers.reduce((a, id) => (L[id] > L[a] ? id : a))];
   }
-  return on.map(([, label]) => label).join('・');
+  return joinList(on.map(layerShort));
 }
 
 /**
@@ -519,7 +523,7 @@ export class UI {
       const d = document.createElement('div');
       d.className = `rig-band ${L.id}`;
       d.dataset.layer = L.id;
-      d.innerHTML = `<span class="nm">${L.name}</span><span class="mt"></span>`;
+      d.innerHTML = `<span class="nm">${rigName(L)}</span><span class="mt"></span>`;
       d.addEventListener('click', () => {
         g.setRigLayer(L.id);
         this.renderRig();
@@ -528,7 +532,7 @@ export class UI {
       col.appendChild(d);
     }
     $('btn-reset').addEventListener('click', () => {
-      if (confirm('セーブデータを削除して最初からやり直しますか？')) g.resetSave();
+      if (confirm(t('ui.confirm.reset'))) g.resetSave();
     });
 
     document.querySelectorAll('[data-close]').forEach((b) =>
@@ -560,6 +564,18 @@ export class UI {
 
     // 設定
     const s = g.state.settings;
+    const langSelects = [...document.querySelectorAll('.opt-lang')];
+    langSelects.forEach((select) => {
+      select.value = s.lang || 'ja';
+      select.addEventListener('change', (e) => {
+        const lang = e.target.value;
+        s.lang = lang;
+        setLang(lang);
+        langSelects.forEach((other) => { other.value = lang; });
+        g.saveState();
+        this.applyLanguage();
+      });
+    });
     $('opt-volume').value = Math.round(s.volume * 100);
     $('opt-bgm').value = Math.round((s.bgm ?? 0.7) * 100);
     $('opt-sens').value = Math.round(s.sens * 100);
@@ -583,7 +599,7 @@ export class UI {
       s.quality = e.target.value;
       g.applyQuality();
       g.saveState();
-      this.toast('描画品質を変更しました', 'good');
+      this.toast(t('ui.toast.qualityChanged'), 'good');
     });
     $('opt-shadow').addEventListener('change', (e) => {
       s.shadow = e.target.checked;
@@ -605,21 +621,42 @@ export class UI {
     $('opt-randomlake').addEventListener('change', (e) => {
       s.randomLake = e.target.checked;
       g.saveState();
-      this.toast(s.randomLake ? '次の読み込みから湖が毎回変わります' : '湖を固定しました', 'good');
+      this.toast(t(s.randomLake ? 'ui.toast.lakeRandomOn' : 'ui.toast.lakeRandomOff'), 'good');
     });
     $('btn-seed-random').addEventListener('click', () => {
-      if (confirm('新しい湖を生成します。（お金・レベル・図鑑は引き継がれます）')) g.newRandomLake();
+      if (confirm(t('ui.confirm.newLake'))) g.newRandomLake();
     });
     $('btn-seed-apply').addEventListener('click', () => {
       const v = $('opt-seed').value.trim();
       if (!v) return;
-      if (String(g.state.seed) === v) { this.toast('すでにこの湖です'); return; }
-      if (confirm(`シード ${v} の湖に切り替えます。`)) g.setLakeSeed(v);
+      if (String(g.state.seed) === v) { this.toast(t('ui.toast.alreadyLake')); return; }
+      if (confirm(t('ui.confirm.seedLake', { seed: v }))) g.setLakeSeed(v);
     });
     $('opt-seed').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') $('btn-seed-apply').click();
       e.stopPropagation();
     });
+  }
+
+  applyLanguage() {
+    applyDom();
+    this._last = {};
+    document.querySelectorAll('.opt-lang').forEach((select) => {
+      select.value = this.game.state.settings.lang || 'ja';
+    });
+    for (const el of document.querySelectorAll('#rig-col .rig-band')) {
+      const layer = RIG_LAYERS.find((x) => x.id === el.dataset.layer);
+      if (layer) el.querySelector('.nm').textContent = rigName(layer);
+    }
+    this.updateHUD(this.game);
+    if (this.openModal === 'shop') this.renderShop();
+    else if (this.openModal === 'journal') this.openJournal();
+    else if (this.openModal === 'fishDetail' && this._detailInfo) {
+      this.openFishDetail(this._detailInfo.sp, this._detailInfo.rec);
+    } else if (this.openModal === 'map') this.openMap();
+    else if (this.openModal === 'rig') this.renderRig();
+    else if (this.openModal === 'pause') this.renderLakeInfo();
+    else if (this.openModal === 'catch' && this.catchInfo) this.showCatch(this.catchInfo);
   }
 
   /** ポーズ画面の湖情報を更新 */
@@ -629,10 +666,20 @@ export class UI {
     const i = g.lakeInfo();
     $('opt-seed').value = String(i.seed);
     $('lake-info').innerHTML = `
-      <div><span class="k">桟橋の先</span><b>水深 ${fmt1(i.dockDepth)} m</b></div>
-      <div><span class="k">深い淵</span><b>${fmt1(i.holeDepth)} m</b>　<span style="opacity:.7">先端から ${i.holeWhere}${i.holeCount > 1 ? `／ほかに ${i.holeCount - 1} か所` : ''}</span></div>
-      <div><span class="k">浅い平場</span><b>${fmt1(i.flatDepth)} m</b>　<span style="opacity:.7">先端から ${i.flatWhere}${i.flatCount > 1 ? `／ほかに ${i.flatCount - 1} か所` : ''}</span></div>
-      <div><span class="k">狙える水深</span><b>${fmt1(i.minDepth)} 〜 ${fmt1(i.maxDepth)} m</b></div>`;
+      <div>${t('ui.lakeInfo.dockTipHtml', { depth: fmt1(i.dockDepth) })}</div>
+      <div>${t('ui.lakeInfo.holeHtml', {
+        depth: fmt1(i.holeDepth),
+        where: i.holeWhere,
+        more: i.holeCount > 1 ? t('ui.lakeInfo.otherSpots', { n: i.holeCount - 1 }) : '',
+      })}</div>
+      <div>${t('ui.lakeInfo.flatHtml', {
+        depth: fmt1(i.flatDepth),
+        where: i.flatWhere,
+        more: i.flatCount > 1 ? t('ui.lakeInfo.otherSpots', { n: i.flatCount - 1 }) : '',
+      })}</div>
+      <div>${t('ui.lakeInfo.reachHtml', {
+        min: fmt1(i.minDepth), max: fmt1(i.maxDepth),
+      })}</div>`;
   }
 
   /* ---------------- 汎用 ---------------- */
@@ -755,7 +802,7 @@ export class UI {
     const w = g.env.weather;
     if (this._last.weather !== w.key) {
       this.el.weatherIcon.innerHTML = iconHtml(w.icon, 'ico weather');
-      this.el.weatherName.textContent = w.name;
+      this.el.weatherName.textContent = weatherName(w);
       this._last.weather = w.key;
     }
     const dep = g.hudDepth;
@@ -765,7 +812,7 @@ export class UI {
       this._last.depth = depStr;
     }
     // タナ（層の名前だけ。実際の深さは水深から自動なので出さない）
-    const rigStr = g.rigLayer.name;
+    const rigStr = rigName(g.rigLayer);
     if (this._last.rig !== rigStr) {
       this.el.rig.textContent = rigStr;
       this._last.rig = rigStr;
@@ -777,21 +824,21 @@ export class UI {
       this._last.aim = aimStr;
     }
     if (this._last.caught !== s.totalCaught) {
-      this.el.caught.textContent = `${s.totalCaught} 匹`;
+      this.el.caught.textContent = fishCount(s.totalCaught);
       this._last.caught = s.totalCaught;
     }
     const rod = GEAR.rod.find((r) => r.id === s.gear.rod);
     const bait = GEAR.bait.find((b) => b.id === s.gear.bait);
-    const rodTxt = `${rod.icon}|${rod.name}`;
+    const rodTxt = `${rod.icon}|${gearName(rod)}`;
     if (this._last.rod !== rodTxt) {
-      this.el.gearRod.innerHTML = iconLabel(rod.icon, rod.name, 'ico gear');
+      this.el.gearRod.innerHTML = iconLabel(rod.icon, gearName(rod), 'ico gear');
       this._last.rod = rodTxt;
     }
     // エサは残り個数も出す（少なくなったら色を変える）
     const n = (s.baitStock && s.baitStock[bait.id]) || 0;
-    const baitTxt = `${bait.icon}|${bait.name}|${n}`;
+    const baitTxt = `${bait.icon}|${gearName(bait)}|${n}`;
     if (this._last.bait !== baitTxt) {
-      this.el.gearBait.innerHTML = iconLabel(bait.icon, bait.name, 'ico gear')
+      this.el.gearBait.innerHTML = iconLabel(bait.icon, gearName(bait), 'ico gear')
         + `<b class="bait-n${n <= 0 ? ' out' : n <= 3 ? ' low' : ''}">×${n}</b>`;
       this._last.bait = baitTxt;
     }
@@ -799,22 +846,23 @@ export class UI {
 
   /* ---------------- 釣果カード ---------------- */
   showCatch(info) {
-    const { sp, len, weight, value, xp, record, isNew, albino, isNewAlbino, title, titlePrefix } = info;
-    const r = RARITY[sp.rarity];
+    this.catchInfo = info;
+    const { sp, len, weight, value, xp, record, isNew, albino, isNewAlbino } = info;
     const rib = $('card-rarity');
-    rib.textContent = r.label;
+    rib.textContent = rarityLabel(sp);
     rib.className = 'card-ribbon r' + sp.rarity;
     // 釣果カードだけ接頭詞付き（図鑑は素の名前）。接頭詞は細字
-    const prefix = titlePrefix || '';
-    const base = sp.name;
+    const prefix = catchDisplayPrefix(sp, len, weight, albino);
+    const title = catchDisplayName(sp, len, weight, albino);
+    const base = speciesName(sp);
     $('card-name').innerHTML = prefix
       ? `<span class="catch-prefix">${prefix}</span>${base}`
-      : (title || (albino ? `${base}（アルビノ）` : base));
+      : (title || base);
     $('card-len').textContent = `${fmt1(len)} cm`;
     $('card-weight').textContent = fmtWeight(weight);
     $('card-value').textContent = `${fmtInt(value)} G`;
     $('card-xp').textContent = `+${fmtInt(xp)}`;
-    $('card-flavor').textContent = sp.flavor;
+    $('card-flavor').textContent = speciesFlavor(sp);
     $('card-record').classList.toggle('hidden', !record);
     $('card-new').classList.toggle('hidden', !isNew);
     const albinoNew = $('card-albino-new');
@@ -861,8 +909,8 @@ export class UI {
       div.innerHTML = `
         <div class="ic">${iconHtml(it.icon, 'ico shop')}</div>
         <div class="body">
-          <div class="nm">${it.name}${isBait ? ` <b class="stock${stock <= 0 ? ' out' : stock <= 3 ? ' low' : ''}">在庫 ${stock}</b>` : ''}${equipped ? ' <small style="opacity:.7">（装備中）</small>' : ''}</div>
-          <div class="ds">${it.desc}</div>
+          <div class="nm">${gearName(it)}${isBait ? ` <b class="stock${stock <= 0 ? ' out' : stock <= 3 ? ' low' : ''}">${t('ui.shop.stock', { n: stock })}</b>` : ''}${equipped ? ` <small style="opacity:.7">(${t('ui.shop.equipped')})</small>` : ''}</div>
+          <div class="ds">${gearDesc(it)}</div>
           <div class="stats">${stats.map((x) => `<i>${x}</i>`).join('')}</div>
         </div>
         <div class="act"></div>`;
@@ -871,30 +919,30 @@ export class UI {
         if (!locked && !equipped && stock > 0) {
           const e = document.createElement('button');
           e.className = 'btn ghost';
-          e.textContent = '装備';
+          e.textContent = t('ui.shop.equip');
           e.onclick = () => { g.equip(kind, it.id); this.renderShop(); };
           act.appendChild(e);
         }
         if (locked) {
-          act.innerHTML = `<span class="locked">Lv ${it.level} で解禁</span>`;
+          act.innerHTML = `<span class="locked">${t('ui.shop.unlockLv', { level: it.level })}</span>`;
         } else {
           const b = document.createElement('button');
           b.className = 'btn ghost';
-          b.innerHTML = `<small style="opacity:.7">${it.pack}個</small> <span class="price">${it.price ? fmtInt(it.price) + ' G' : '無料'}</span>`;
+          b.innerHTML = `<small style="opacity:.7">${t('ui.shop.pack', { n: it.pack })}</small> <span class="price">${it.price ? fmtInt(it.price) + ' G' : t('ui.shop.free')}</span>`;
           b.disabled = s.money < it.price;
           b.onclick = () => { if (g.buy(kind, it.id)) this.renderShop(); };
           act.appendChild(b);
         }
       } else if (equipped) {
-        act.innerHTML = '<span style="color:var(--gold);font-size:12px">装備中</span>';
+        act.innerHTML = `<span style="color:var(--gold);font-size:12px">${t('ui.shop.equipped')}</span>`;
       } else if (owned) {
         const b = document.createElement('button');
         b.className = 'btn ghost';
-        b.textContent = '装備';
+        b.textContent = t('ui.shop.equip');
         b.onclick = () => { g.equip(kind, it.id); this.renderShop(); };
         act.appendChild(b);
       } else if (locked) {
-        act.innerHTML = `<span class="locked">Lv ${it.level} で解禁</span>`;
+        act.innerHTML = `<span class="locked">${t('ui.shop.unlockLv', { level: it.level })}</span>`;
       } else {
         const b = document.createElement('button');
         b.className = 'btn ghost';
@@ -907,7 +955,7 @@ export class UI {
     }
     // タブのラベル更新
     document.querySelectorAll('.tab').forEach((t) => {
-      t.textContent = GEAR_LABEL[t.dataset.tab];
+      t.textContent = gearKindLabel(t.dataset.tab);
     });
   }
 
@@ -941,8 +989,8 @@ export class UI {
         const badge = document.createElement('button');
         badge.type = 'button';
         badge.className = 'albino-badge' + (showAlbino ? ' on' : '');
-        badge.textContent = 'アルビノ';
-        badge.title = 'クリックでアルビノ表示を切替';
+        badge.textContent = t('ui.card.albino');
+        badge.title = t('ui.card.albinoTitle');
         badge.addEventListener('click', (e) => {
           e.stopPropagation();
           this.journalShowAlbino[sp.id] = !this.journalShowAlbino[sp.id];
@@ -957,36 +1005,39 @@ export class UI {
       const info = document.createElement('div');
       if (rec && !rec.dbg) {
         info.innerHTML = `
-          <div class="jn"><span>${sp.name}</span><span class="jr" style="color:${RARITY[sp.rarity].color}">${RARITY[sp.rarity].label}</span></div>
-          <div class="jm"><span class="jsz">最大 ${fmt1(rec.maxLen)} cm</span><span class="jcnt">${rec.count} 匹</span></div>`;
+          <div class="jn"><span>${speciesName(sp)}</span><span class="jr" style="color:${RARITY[sp.rarity].color}">${rarityLabel(sp)}</span></div>
+          <div class="jm"><span class="jsz">${t('ui.journal.maxCm', { n: fmt1(rec.maxLen) })}</span><span class="jcnt">${fishCount(rec.count)}</span></div>`;
       } else if (rec) {
         info.innerHTML = `
-          <div class="jn"><span>${sp.name}</span><span class="jr" style="color:${RARITY[sp.rarity].color}">${RARITY[sp.rarity].label}</span></div>
+          <div class="jn"><span>${speciesName(sp)}</span><span class="jr" style="color:${RARITY[sp.rarity].color}">${rarityLabel(sp)}</span></div>
           <div class="jm"><span class="jsz">—</span><span class="jcnt">—</span></div>`;
       } else {
         info.innerHTML = `
-          <div class="jn"><span>???</span><span class="jr" style="color:${RARITY[sp.rarity].color}">${RARITY[sp.rarity].label}</span></div>
-          <div class="jm">未発見</div>`;
+          <div class="jn"><span>???</span><span class="jr" style="color:${RARITY[sp.rarity].color}">${rarityLabel(sp)}</span></div>
+          <div class="jm">${t('ui.journal.unknown')}</div>`;
       }
       d.appendChild(info);
       if (rec) {
         d.classList.add('clickable');
-        d.title = 'クリックで詳細';
+        d.title = t('ui.journal.detailHint');
         d.addEventListener('click', () => this.openFishDetail(sp, rec));
       }
       grid.appendChild(d);
       // デバッグ表示のときは姿も見せる（未発見のマークは文言で分かる）
       drawFishIcon(cv, sp, { unknown: !rec, albino: showAlbino });
     }
-    $('journal-progress').innerHTML =
-      `魚 ${knownFish}/${totalFish}・その他 ${known - knownFish}/${SPECIES.length - totalFish}`
-      + (reveal ? '<small style="color:var(--gold);margin-left:8px">デバッグ：全表示</small>' : '');
+    $('journal-progress').innerHTML = t('ui.journal.progressFish', {
+      n: knownFish,
+      m: totalFish,
+      left: known - knownFish,
+      0: SPECIES.length - totalFish,
+    }) + (reveal ? `<small style="color:var(--gold);margin-left:8px">${t('ui.journal.debugAll')}</small>` : '');
     const got = ACHIEVEMENTS.filter((a) => s.achievements.includes(a.id));
     $('journal-ach').innerHTML =
-      `<b>実績 ${got.length}/${ACHIEVEMENTS.length}</b> ` +
+      `<b>${t('ui.journal.achProgress', { n: got.length, m: ACHIEVEMENTS.length })}</b> ` +
       ACHIEVEMENTS.map((a) => {
         const ok = s.achievements.includes(a.id);
-        return `<span style="margin-left:10px;opacity:${ok ? 1 : 0.4};display:inline-flex;align-items:center;gap:4px">${iconHtml(ok ? 'ui-medal' : 'ui-empty', 'ico tiny')} ${a.name}<small style="opacity:.6">（${a.desc}）</small></span>`;
+        return `<span style="margin-left:10px;opacity:${ok ? 1 : 0.4};display:inline-flex;align-items:center;gap:4px">${iconHtml(ok ? 'ui-medal' : 'ui-empty', 'ico tiny')} ${achievementName(a)}<small style="opacity:.6"> (${achievementDesc(a)})</small></span>`;
       }).join('');
     this.el.journal.classList.add('open');
     this.openModal = 'journal';
@@ -994,15 +1045,16 @@ export class UI {
 
   /* ---------------- 図鑑・魚の詳細 ---------------- */
   openFishDetail(sp, rec) {
-    const r = RARITY[sp.rarity];
+    this._detailInfo = { sp, rec };
     const rib = $('fd-rarity');
-    rib.textContent = r.label;
+    rib.textContent = rarityLabel(sp);
     rib.className = 'card-ribbon r' + sp.rarity;
     const reveal = !!(rec && rec.dbg) || !!this.game.revealAll;
     const hasAlbino = !!(rec && sp.rarity > 0 && (rec.albinoCaught || this.game.revealAll));
     const albinoView = !!(hasAlbino && this.journalShowAlbino[sp.id]);
-    $('fd-name').textContent = albinoView ? `${sp.name}（アルビノ）` : sp.name;
-    $('fd-flavor').textContent = sp.flavor || '';
+    $('fd-name').textContent = speciesName(sp)
+      + (albinoView ? t('ui.journal.albinoSuffix') : '');
+    $('fd-flavor').textContent = speciesFlavor(sp);
 
     const [lo, hi] = sp.len;
     const vLo = valueOf(sp, lo), vHi = valueOf(sp, hi);
@@ -1010,28 +1062,28 @@ export class UI {
     const caught = (rec && !rec.dbg) ? (rec.count || 0) : 0;
     const unlock = (need) => reveal || caught >= need;
     const locked = (need) =>
-      `???<small style="opacity:.55;font-weight:500">（あと${need - caught}匹でアンロック）</small>`;
+      `???<small style="opacity:.55;font-weight:500"> (${t('ui.journal.unlockLeft', { n: need - caught })})</small>`;
 
     $('fd-badges').innerHTML = [
-      ['layer', '遊泳層', swimLayerMarks(sp)],
-      ['time', '時間帯', preferShort(sp.times, TIME_SHORT)],
-      ['weather', '天候', preferShort(sp.weather, WEATHER_SHORT)],
-      ['fight', 'ファイト', fp.name],
+      ['layer', t('ui.journal.badgeLayer'), swimLayerMarks(sp)],
+      ['time', t('ui.journal.badgeTime'), preferShort(sp.times, timeShort)],
+      ['weather', t('ui.journal.badgeWeather'), preferShort(sp.weather, weatherShort)],
+      ['fight', t('ui.journal.badgeFight'), fightName(fp)],
     ].map(([cls, k, v]) =>
       `<span class="fd-badge ${cls}"><small>${k}</small>${v}</span>`
     ).join('');
 
     const rows = [
-      ['釣った数', `${caught} 匹`],
-      ['最大記録', caught > 0 ? `${fmt1(rec.maxLen)} cm / ${fmtWeight(rec.maxWeight)}` : '—'],
-      ['最小サイズ', unlock(DETAIL_UNLOCK.minLen)
+      [t('ui.journal.statCaught'), fishCount(caught)],
+      [t('ui.journal.statMax'), caught > 0 ? `${fmt1(rec.maxLen)} cm / ${fmtWeight(rec.maxWeight)}` : '—'],
+      [t('ui.journal.statMinSize'), unlock(DETAIL_UNLOCK.minLen)
         ? `${fmt1(lo)} cm` : locked(DETAIL_UNLOCK.minLen)],
-      ['最大サイズ', unlock(DETAIL_UNLOCK.maxLen)
+      [t('ui.journal.statMaxSize'), unlock(DETAIL_UNLOCK.maxLen)
         ? `${fmt1(hi)} cm` : locked(DETAIL_UNLOCK.maxLen)],
-      ['売値の目安', unlock(DETAIL_UNLOCK.value)
-        ? `${fmtInt(vLo)} 〜 ${fmtInt(vHi)} G` : locked(DETAIL_UNLOCK.value)],
-      ['生息水深', unlock(DETAIL_UNLOCK.depth)
-        ? `${sp.depth[0]} 〜 ${sp.depth[1]} m` : locked(DETAIL_UNLOCK.depth)],
+      [t('ui.journal.statValue'), unlock(DETAIL_UNLOCK.value)
+        ? `${fmtInt(vLo)}–${fmtInt(vHi)} G` : locked(DETAIL_UNLOCK.value)],
+      [t('ui.journal.statDepth'), unlock(DETAIL_UNLOCK.depth)
+        ? `${sp.depth[0]}–${sp.depth[1]} m` : locked(DETAIL_UNLOCK.depth)],
     ];
 
     $('fd-stats').innerHTML = rows.map(([k, v]) =>
@@ -1172,13 +1224,8 @@ export class UI {
     $('map-progress').textContent = `${(g.mapProgress() * 100).toFixed(1)}%`;
     const at = g.fs === 'idle' || g.fs === 'charge' ? g.aimPoint : g.bobber;
     const d = at ? t.depthAt(at.x, at.z) : 0;
-    $('map-depth').textContent = d > 0 ? `${fmt1(d)} m` : '陸';
-    $('map-legend').innerHTML =
-      '<div><i style="background:#7ad6ce"></i>浅い　<i style="background:#122e60"></i>深い</div>'
-      + '<div><i style="background:#c8b78a"></i>汀線　<i style="background:#568442"></i>陸</div>'
-      + '<div><i style="background:#c86bff"></i>深い淵　<i style="background:#6de08a"></i>浅い平場</div>'
-      + '<div><i style="background:#ff9a5a"></i>沈み岩 ● / 立ち枯れ ◆</div>'
-      + '<div><i style="background:#ffd479"></i>桟橋　<i style="background:#ff5d5d"></i>いまの仕掛け</div>';
+    $('map-depth').textContent = d > 0 ? `${fmt1(d)} m` : t('ui.map.land');
+    $('map-legend').innerHTML = t('ui.map.legendHtml');
 
     this.el.map.classList.add('open');
     this.openModal = 'map';
@@ -1200,7 +1247,7 @@ export class UI {
         group = k.group;
         const h = document.createElement('div');
         h.className = 'jgroup';
-        h.textContent = TERRAIN_GROUPS[group];
+        h.textContent = terrainGroupLabel(group);
         grid.appendChild(h);
       }
       const show = seen || reveal;
@@ -1212,22 +1259,20 @@ export class UI {
       const info = document.createElement('div');
       const fish = seen ? rec.fish.map((id) => SPECIES_BY_ID[id]).filter(Boolean) : [];
       info.innerHTML = `
-        <div class="jn"><span>${show ? k.name : '???'}</span><span class="jt">${k.rule}</span></div>
-        <div class="jm">${show ? k.desc : '<span style="opacity:.7">まだ投げていない場所</span>'}
-          ${show ? `<br><span style="opacity:.62">${k.fish}</span>` : ''}
-          ${seen ? `<br><span style="opacity:.5">${rec.casts} 回投げた・初めて見た水深 ${fmt1(rec.depth)} m</span>` : ''}
-          ${!seen && reveal ? '<br><span style="color:var(--gold)">未発見（デバッグ表示）</span>' : ''}</div>
-        ${fish.length ? `<div class="jfish">${fish.map((sp) => `<i style="color:${RARITY[sp.rarity].color}">${sp.name}</i>`).join('')}</div>` : ''}`;
+        <div class="jn"><span>${show ? terrainName(k) : '???'}</span><span class="jt">${terrainRule(k)}</span></div>
+        <div class="jm">${show ? terrainDesc(k) : `<span style="opacity:.7">${t('ui.journal.terrainUnknown')}</span>`}
+          ${show ? `<br><span style="opacity:.62">${terrainFish(k)}</span>` : ''}
+          ${seen ? `<br><span style="opacity:.5">${t('ui.journal.terrainCasts', { n: rec.casts, depth: fmt1(rec.depth) })}</span>` : ''}
+          ${!seen && reveal ? `<br><span style="color:var(--gold)">${t('ui.journal.terrainDebug')}</span>` : ''}</div>
+        ${fish.length ? `<div class="jfish">${fish.map((sp) => `<i style="color:${RARITY[sp.rarity].color}">${speciesName(sp)}</i>`).join('')}</div>` : ''}`;
       d.appendChild(info);
       grid.appendChild(d);
       drawTerrainIcon(cv, k.id, { unknown: !show });
     }
-    $('journal-progress').innerHTML = `地形 ${known}/${TERRAIN_KINDS.length}`
-      + (reveal ? '<small style="color:var(--gold);margin-left:8px">デバッグ：全表示</small>' : '');
-    $('journal-ach').innerHTML =
-      '<b>地形図鑑</b> <small style="opacity:.7">初めてそこに投げた時に登録されます。'
-      + '1 回のキャストで「水深帯 ＋ 底質 ＋ 地形の特徴」がまとめて埋まることもあります。'
-      + '釣れた魚はその地形に記録されます。</small>';
+    $('journal-progress').innerHTML = t('ui.journal.terrainProgress', {
+      n: known, m: TERRAIN_KINDS.length,
+    }) + (reveal ? `<small style="color:var(--gold);margin-left:8px">${t('ui.journal.debugAll')}</small>` : '');
+    $('journal-ach').innerHTML = t('ui.journal.terrainFootHtml');
     this.el.journal.classList.add('open');
     this.openModal = 'journal';
   }
@@ -1256,17 +1301,21 @@ export class UI {
     for (const el of document.querySelectorAll('#rig-col .rig-band')) {
       const L = RIG_LAYERS.find((x) => x.id === el.dataset.layer);
       el.classList.toggle('on', L.id === cur.id);
-      el.querySelector('.mt').textContent = L.short;
+      el.querySelector('.nm').textContent = rigName(L);
+      el.querySelector('.mt').textContent = rigShort(L);
     }
     $('rig-depth').textContent = spot != null ? `${fmt1(spot)} m` : '—';
     const st = this._rigStruct;
     $('rig-bed').innerHTML = this._rigBed
-      ? `${BED_LABEL[this._rigBed]}${st ? `<span style="color:var(--gold)"> ＋${st.kind === 'rock' ? '沈み岩' : '立ち枯れ'}</span>` : ''}`
+      ? (st
+        ? t('ui.rig.withStruct', { bed: bedLabel(this._rigBed), struct: structLabel(st.kind) })
+        : bedLabel(this._rigBed))
       : '—';
     const bn = g.baitCount();
-    $('rig-bait').innerHTML = `${iconLabel(g.bait.icon, g.bait.name, 'ico gear')}`
+    $('rig-bait').innerHTML = `${iconLabel(g.bait.icon, gearName(g.bait), 'ico gear')}`
       + `<b class="bait-n${bn <= 0 ? ' out' : bn <= 3 ? ' low' : ''}">×${bn}</b>`;
-    $('rig-note').textContent = `${cur.desc}（いまは${timeBandLabel(g.state.clock)}）`;
+    $('rig-note').textContent = rigDesc(cur)
+      + t('ui.rig.noteSuffix', { time: timeBandLabel(g.state.clock) });
 
     /* ここ（その水深）× この層 で食いつく魚。生息水深と遊泳層の両方で絞る。
        図鑑と同じ扱いで、未発見はまとめて「???」の数だけ見せる */
@@ -1278,13 +1327,14 @@ export class UI {
     const known = here.filter((sp) => s.records[sp.id] || g.revealAll);
     const unknown = here.length - known.length;
     // ◎ ＝ その層にぴったり、○ ＝ まあまあ、△ ＝ 端の方（時間帯で変わる）
-    const mark = (sp) => (score(sp) >= 0.75 ? '◎' : score(sp) >= 0.45 ? '○' : '△');
+    const mark = (sp) => t(score(sp) >= 0.75 ? 'ui.prompt.ideal'
+      : score(sp) >= 0.45 ? 'ui.prompt.fair' : 'ui.prompt.fringe');
     $('rig-fish').innerHTML = spot == null
-      ? '<i class="unknown">狙う場所を決めると出ます</i>'
+      ? `<i class="unknown">${t('ui.rig.pickSpot')}</i>`
       : here.length
-        ? known.map((sp) => `<i style="color:${RARITY[sp.rarity].color}">${sp.name} ${mark(sp)}</i>`).join('')
-          + (unknown ? `<i class="unknown">??? ×${unknown}</i>` : '')
-        : '<i class="unknown">この層で食う魚は居ない</i>';
+        ? known.map((sp) => `<i style="color:${RARITY[sp.rarity].color}">${speciesName(sp)} ${mark(sp)}</i>`).join('')
+          + (unknown ? `<i class="unknown">${t('ui.prompt.noTargetFish', { n: unknown })}</i>` : '')
+        : `<i class="unknown">${t('ui.rig.noFish')}</i>`;
   }
 
   openPause() {

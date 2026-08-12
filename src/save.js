@@ -44,7 +44,7 @@ export function defaultState() {
        （none でも竿のしなり・ドラグ音・画面端の赤で限界は分かる） */
     settings: {
       volume: 0.7, bgm: 0.7, sens: 1.0, quality: 'mid', shadow: true,
-      randomLake: false, debug: false, fpv: false, fightUi: 'tension',
+      randomLake: false, debug: false, fpv: false, fightUi: 'tension', lang: 'ja',
     },
   };
 }

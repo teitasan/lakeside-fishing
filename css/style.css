@@ -299,6 +299,15 @@ body.playing #hint-bar { opacity: .5; }
 .title-desc { margin: 26px 0 20px; font-size: 14px; line-height: 2; opacity: .82; }
 .title-desc b { color: var(--gold); }
 .title-keys { font-size: 12px; line-height: 2.1; opacity: .62; margin-bottom: 20px; }
+.title-inner .lang-row {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  margin: 0 auto 12px; font-size: 12px; opacity: .78;
+}
+.title-inner .lang-row select {
+  background: rgba(255, 255, 255, .08); color: #fff;
+  border: 1px solid rgba(255, 255, 255, .18); border-radius: 8px;
+  padding: 5px 9px; font: inherit;
+}
 kbd {
   display: inline-block; padding: 1px 7px; margin: 0 2px; border-radius: 5px; font-size: 11px;
   background: rgba(255, 255, 255, .12); border: 1px solid rgba(255, 255, 255, .22);
