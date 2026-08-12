@@ -766,22 +766,19 @@ export class Angler {
       handT = lerpArr(T.pose.idle.hand, T.pose.charge.hand, p.charge);
       leanT = T.pose.charge.lean * p.charge;
     } else if (st === 'fight') {
-      /* ファイト中の竿の角度は決め打ちではなく、幾何で決める。
-         「構え＋しなり」の合計が魚を向くようにピッチを取るので、竿先で糸が
-         折れず 竿先→糸→ウキ→魚 が一続きに見える（_aimPitch を参照）。
-         しなり量は張力のままなので、竿の曲がりで限界を読む遊びは残る。
-         前傾だけは今までどおり張力と巻きで決める */
+      // 前傾は張力と巻きで決める。竿の角度は一人称の分岐のあとでまとめて決める
       const F = T.fight;
       const load = loadCurve(p.tension);
-      pitchT = this._aimPitch(T.pose.fight.pitch);
       leanT = T.pose.fight.lean + load * (F.leanByTension + reel * F.leanByReelLay);
     }
-    /* 一人称は視界に穂先を残したいので、待ちをさらに寝かせる
-       （構え・キャストは三人称と同じ＝飛距離の計算が視点で変わらないように）。
-       ファイトは幾何で決まるので視点による違いを持たない */
-    if (this.fpv && (st === 'wait' || st === 'flight' || st === 'nibble' || st === 'bite')) {
+    /* 一人称は視界に穂先を残したいので、待ちとファイトをさらに寝かせる
+       （構え・キャストは三人称と同じ＝飛距離の計算が視点で変わらないように） */
+    if (this.fpv && ['wait', 'flight', 'nibble', 'bite', 'fight'].includes(st)) {
       pitchT = T.fpv.waitPitch;
     }
+    /* ファイト中は「竿先が糸の先を向く角度」へ、張力が乗ったぶんだけ寄せる。
+       張力ゼロならアタリ待ちの構えのままなので、掛かった瞬間に竿は動かない */
+    if (st === 'fight') pitchT = this._aimPitch(pitchT, loadCurve(p.tension));
 
     // キャストのスイング（振りかぶり → 振り抜き）
     if (this.castAnim >= 0) {
@@ -823,22 +820,28 @@ export class Angler {
    * 実際のやり取りと同じ動きになる。
    *
    * ピッチは「垂直から前へ倒した角」なので、
-   *   ピッチ ＋ しなり角 ＝ 竿先から魚への角度（垂直から測る）
+   *   ピッチ ＋ しなり角 ＝ 竿先から糸の先への角度（垂直から測る）
    * を解くだけ。竿先の位置は前フレームのものを使うが、ピッチは damp を通るので
    * 誤差は次のフレームで詰まる。
-   * @param {number} fallback 糸の先が無いとき（モーションエディターなど）の角度
+   *
+   * 効かせる量は張力ぶん。糸を引かれていないなら竿先を糸へ向ける理由も無いし、
+   * 全部効かせると掛かった瞬間に竿が水面へ倒れる（実測で水平から +21 度 →
+   * -10 度。31 度も寝ていた）。張力ゼロで base ＝ アタリ待ちの構えのままなら、
+   * 掛けた瞬間に竿は動かず、引かれるほど糸の方を向いていく。
+   * @param {number} base 張力ゼロのときの角度（＝アタリ待ちの構え）
+   * @param {number} load 0..1。しなり量と同じ loadCurve を使う
    */
-  _aimPitch(fallback) {
-    if (!this._hasLineEnd) return fallback;
+  _aimPitch(base, load) {
+    if (!this._hasLineEnd || load <= 1e-3) return base;
     this.getRodTip(_v1);
     _v2.copy(this._lineEnd).sub(_v1);
     // 竿のピッチは root ローカルの前後傾きなので、体の向きを外して測る
     _v2.applyQuaternion(_q.copy(this.root.quaternion).invert());
     const fwd = Math.hypot(_v2.x, _v2.z);
-    if (!Number.isFinite(fwd) || (fwd < 1e-3 && Math.abs(_v2.y) < 1e-3)) return fallback;
+    if (!Number.isFinite(fwd) || (fwd < 1e-3 && Math.abs(_v2.y) < 1e-3)) return base;
     const aim = Math.atan2(fwd, _v2.y);            // 垂直から前へ倒した角
     const A = TUNING.fightAim;
-    return clamp(aim - this.bend * ROD_BEND_MAX, A.min, A.max);
+    return lerp(base, clamp(aim - this.bend * ROD_BEND_MAX, A.min, A.max), load);
   }
 
   /**
