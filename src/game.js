@@ -141,7 +141,7 @@ const CAM_MAX = 9;
    ボーンは今までどおり動いていて竿を手の位置に置いているので、
    狙い・飛距離・しなりの計算は何も変わらない。見た目が出ないだけ。
    自作のモデルに差し替えたら、この 1 行を false に戻せば三人称も体も戻る */
-const FPV_ONLY = true;
+const FPV_ONLY = false;
 
 /** 湖を作り直して再読み込みした直後は、タイトルを飛ばして再開する */
 export const AUTOSTART_KEY = 'lakeside-fishing-autostart';
