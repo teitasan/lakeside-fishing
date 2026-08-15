@@ -24,13 +24,14 @@ const _axis = new THREE.Vector3();   // しなりの回転軸（_applyBend 専�
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _up = new THREE.Vector3(0, 1, 0);
+const _down = new THREE.Vector3(0, -1, 0);   // 新キャラの各パーツは子が局所 -Y にある（_aimBone 用）
 
 /* ===========================================================
    外部アセット（すべて CC0 / Quaternius）
    釣り人 : Ultimate Modular Men Pack の "Casual"（62 ボーン・24 アニメーション）
    ロッド : Fishing Rod Lvl1〜5 をゲームの竿 5 種に対応させている
    =========================================================== */
-const ANGLER_URL = './assets/models/angler.glb';
+const ANGLER_URL = './assets/models/player-lowpoly.glb';
 const ROD_URLS = {
   bamboo: './assets/models/rod-bamboo.glb',
   glass:  './assets/models/rod-glass.glb',
@@ -331,27 +332,26 @@ export class Angler {
   }
 
   /* ---------------- 釣り人 ---------------- */
+  /* 新キャラは各可動部が別オブジェクト（ボーンではなく実メッシュ）で、
+     関節の一つ上のパーツの原点＝関節位置になるように作ってある。
+     子は局所 -Y に伸びる（Blender の -Z 下向きが glTF 変換で -Y になる）ので、
+     以前のボーンリグ（子が局所 +Y）と符号が逆になる点に注意 */
   _setupBody(gltf) {
     const model = gltf.scene;
     this._fpvHide = [];
+    // 頭・胴はカメラのすぐ前にあり一人称だと視界を覆う（腕は残す）
+    const FPV_HIDE = new Set([
+      'Head', 'Hair', 'Chest', 'Belly', 'Waist',
+      'Joint_Neck', 'Joint_UpperSpine', 'Joint_LowerSpine', 'Joint_Waist',
+    ]);
     model.traverse((o) => {
-      /* GLTFLoader はノード名から "." を落とす（UpperArm.L → UpperArmL）。
-         どちらの綴りでも引けるように両方入れておく */
-      if (o.isBone) { this.bones[o.name] = o; this.bones[o.name.replace(/\./g, '')] = o; }
-      if (!o.isMesh && !o.isSkinnedMesh) return;
+      this.bones[o.name] = o;
+      if (!o.isMesh) return;
       o.castShadow = true;
       o.receiveShadow = false;
-      /* スキンで動くメッシュは元の AABB が当てにならず、
-         寄りの画面でカリングされて消えることがある */
-      o.frustumCulled = false;
       // 一人称でパーツ単位に消すので、マテリアルは共有しない
       o.material = o.material.clone();
-      /* glTF の既定は metalness=1。そのままだと屋外の光で
-         金属のように暗く沈むので、この世界の他のパーツに合わせる */
-      o.material.metalness = 0;
-      o.material.roughness = Math.max(0.7, o.material.roughness);
-      // 頭とシャツは一人称だと視界を覆う（腕は肌のメッシュなので残る）
-      if (/_Head_|_Body_1/.test(o.name)) this._fpvHide.push(o);
+      if (FPV_HIDE.has(o.name)) this._fpvHide.push(o);
     });
     /* 前傾は mixer が触らない包みのグループで作る。
        AnimationMixer は「値が前フレームと変わらなければ書き戻さない」ので、
@@ -368,8 +368,8 @@ export class Angler {
     /* 歩きと待機はアセット付属のアニメーションを混ぜて使う。
        竿を構える姿勢は付いていないので、腕だけこのあと計算で上書きする */
     this.mixer = new THREE.AnimationMixer(model);
-    const clip = (n) => gltf.animations.find((a) => a.name.endsWith('|' + n));
-    this.actIdle = this.mixer.clipAction(clip('Idle_Neutral') || clip('Idle'));
+    const clip = (n) => gltf.animations.find((a) => a.name === n);
+    this.actIdle = this.mixer.clipAction(clip('Idle'));
     this.actWalk = this.mixer.clipAction(clip('Walk'));
     this.actIdle.play();
     this.actWalk.play();
@@ -383,24 +383,14 @@ export class Angler {
     }
 
     /* 腕のリンク長を実測しておく（逆運動学で使う）。
-       アーマチュアに 100 倍のスケールが掛かっているので、
-       ボーンのローカル座標ではなくワールド距離で測る */
+       各パーツの原点＝関節位置なので、ワールド距離がそのままリンク長になる */
     model.updateMatrixWorld(true);
     const wp = (n) => this.bones[n].getWorldPosition(new THREE.Vector3());
     this.armLen = {};
     for (const s of ['L', 'R']) {
-      const u = wp(`UpperArm${s}`), l = wp(`LowerArm${s}`), w = wp(`Wrist${s}`);
+      const u = wp(`UpperArm${s}`), l = wp(`LowerArm${s}`), w = wp(`Hand${s}`);
       this.armLen[s] = { upper: u.distanceTo(l), fore: l.distanceTo(w) };
     }
-    // 指を握らせるので、開いた手の初期姿勢は覚えておかなくてよい
-    this._fingers = [];
-    for (const s of ['L', 'R']) {
-      for (const f of ['Index', 'Middle', 'Ring', 'Pinky']) {
-        for (let i = 1; i <= 3; i++) this._fingers.push([this.bones[`${f}${i}${s}`], 'curl', i - 1]);
-      }
-      for (let i = 1; i <= 2; i++) this._fingers.push([this.bones[`Thumb${i}${s}`], 'thumb', i - 1]);
-    }
-    this._fingers = this._fingers.filter(([b]) => b);
   }
 
   /* ---------------- ロッド ---------------- */
@@ -885,7 +875,7 @@ export class Angler {
     this.root.updateMatrixWorld(true);
 
     // 右手の目標＝右肩 + 姿勢で決めたオフセット（root の向きに合わせて回す）
-    B.ShoulderR.getWorldPosition(_v1);
+    B.Joint_ShoulderR.getWorldPosition(_v1);
     _v2.set(this._handOff[0], this._handOff[1], this._handOff[2]).applyQuaternion(this.root.quaternion);
     const hand = _v3.copy(_v1).add(_v2);
 
@@ -905,22 +895,20 @@ export class Angler {
     _v6.set(...T.arm.poleL).applyQuaternion(this.root.quaternion);
     this._solveArm('L', _v3, _v6);
 
-    // 両手首を竿の向きへ向けて、指を握らせる
+    // 両手を竿の向きへ向ける（新キャラは指ボーンが無いので握らせる処理はしない）
     _v2.set(0, 1, 0).applyQuaternion(this.rodMount.getWorldQuaternion(_q));   // 竿の伸びる向き
-    for (const s of ['L', 'R']) this._aimBone(B[`Wrist${s}`], _v2);
-    // 指の曲げはエディターで変えられるので、毎フレーム表から引く
-    for (const [bone, kind, i] of this._fingers) bone.rotation.x = T.fingers[kind][i];
+    for (const s of ['L', 'R']) this._aimBone(B[`Hand${s}`], _v2);
   }
 
   /**
-   * ボーンをワールドの向き dir へ向ける。
-   * このリグはどのボーンも子がローカル +Y にあるので、+Y を dir に合わせればよい
+   * パーツをワールドの向き dir へ向ける。
+   * このリグはどのパーツも子が局所 -Y にあるので、-Y を dir に合わせればよい
    */
   _aimBone(bone, dir) {
     bone.parent.updateWorldMatrix(true, false);
     bone.parent.getWorldQuaternion(_q).invert();
     _v7.copy(dir).applyQuaternion(_q).normalize();
-    bone.quaternion.setFromUnitVectors(_up, _v7);
+    bone.quaternion.setFromUnitVectors(_down, _v7);
   }
 
   /**
