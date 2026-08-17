@@ -125,8 +125,10 @@ export const TUNING = {
   damp: { pitch: 9, hand: 9, lean: 8 },
   /* リール。巻いている間だけハンドルを handleSpeed（rad/s）で回し、
      ローターはギア比を掛けた速さで連動する。spinUp は回りだし／止まりの鈍さ
-     （大きいほどキビキビ）。handleSpeed を負にすると逆回転になる */
-  reel: { handleSpeed: 6.0, gearRatio: 5.2, spinUp: 9 },
+     （大きいほどキビキビ）。handleSpeed を負にすると逆回転になる。
+     handMoveSpeed は左手が竿の握り位置とノブのあいだを行き来する速さ
+     （spinUp より大きくして、機構の回り出しより先に手が追いつくようにしてある） */
+  reel: { handleSpeed: 6.0, gearRatio: 5.2, spinUp: 9, handMoveSpeed: 18 },
 };
 
 /** 待ちと同じ姿勢を使う状態（アタリ前後は構えを変えない） */
@@ -293,6 +295,7 @@ export class Angler {
     this.reelRotor = null;
     this.reelKnob = null;
     this._reelSpin = 0;    // リールの回転の乗り（0=止まっている 1=最高速）
+    this._reelHandBlend = 0;   // 左手を竿の握り→ノブへ寄せる度合い（0..1、_reelSpin より速く追従させる）
     this._handOff = TUNING.pose.idle.hand.slice();
     this._rodId = null;
 
@@ -897,9 +900,9 @@ export class Angler {
        ノブは公転するだけの向きを持たないグループだが、位置はワールドで
        追える（このすぐ上で rodMount.updateMatrixWorld 済み）ので、
        角度から円を作って近似するのではなく実位置にそのまま追従させる */
-    if (this.reelKnob && this._reelSpin > 1e-3) {
+    if (this.reelKnob && this._reelHandBlend > 1e-3) {
       this.reelKnob.getWorldPosition(_v13);
-      _v3.lerp(_v13, this._reelSpin);
+      _v3.lerp(_v13, this._reelHandBlend);
     }
     _v6.set(...T.arm.poleL).applyQuaternion(this.root.quaternion);
     this._solveArm('L', _v3, _v6);
@@ -1047,6 +1050,8 @@ export class Angler {
     if (!this.reelHandle) return;
     const R = TUNING.reel;
     this._reelSpin = damp(this._reelSpin, reel, R.spinUp, dt);
+    // 左手の追従は機構の回り出しより速く（巻き始めた／やめた瞬間に手だけ遅れて見えないように）
+    this._reelHandBlend = damp(this._reelHandBlend, reel, R.handMoveSpeed, dt);
     if (this._reelSpin < 1e-4) return;
     // 回す軸は REEL_PARTS だけに書く（ここで決め打ちすると表と食い違う）
     const dA = dt * R.handleSpeed * this._reelSpin;
