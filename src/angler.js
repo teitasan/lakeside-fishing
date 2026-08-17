@@ -20,6 +20,7 @@ const _v9 = new THREE.Vector3();
 const _v10 = new THREE.Vector3();
 const _v11 = new THREE.Vector3();
 const _v12 = new THREE.Vector3();
+const _v13 = new THREE.Vector3();   // リールを巻く手のクランク円運動（_poseUpper 専用）
 const _axis = new THREE.Vector3();   // しなりの回転軸（_applyBend 専用）
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
@@ -125,7 +126,7 @@ export const TUNING = {
   /* リール。巻いている間だけハンドルを handleSpeed（rad/s）で回し、
      ローターはギア比を掛けた速さで連動する。spinUp は回りだし／止まりの鈍さ
      （大きいほどキビキビ）。handleSpeed を負にすると逆回転になる */
-  reel: { handleSpeed: 6.0, gearRatio: 5.2, spinUp: 9 },
+  reel: { handleSpeed: 6.0, gearRatio: 5.2, spinUp: 9, crankR: 0.035 },
 };
 
 /** 待ちと同じ姿勢を使う状態（アタリ前後は構えを変えない） */
@@ -885,6 +886,18 @@ export class Angler {
     _v5.set(0, Math.cos(this.rodPitch), Math.sin(this.rodPitch));   // root ローカルでの竿の向き
     this.rodMount.position.copy(_v4).addScaledVector(_v5, -T.arm.gripY);
     this.rodMount.updateMatrixWorld(true);
+
+    /* 巻いている間は、右手をハンドルのノブに合わせて円を描かせる。
+       ノブの実際の位置ではなく角度から作った円で近似する
+       （実位置を使うと「竿の置き場所は手の位置から決める」という順序と
+       堂々巡りになるため）。竿はほぼ縦に構えるので、root ローカルの
+       上下・前後（Y-Z）面の円がクランクの弧にだいたい合う */
+    if (this.reelHandle && this._reelSpin > 1e-3) {
+      const ang = this.reelHandle.rotation[REEL_PARTS.handle.spin];
+      const r = T.reel.crankR * this._reelSpin;
+      _v13.set(0, Math.sin(ang) * r, Math.cos(ang) * r).applyQuaternion(this.root.quaternion);
+      hand.add(_v13);
+    }
 
     // 右腕：肘は外側後ろへ張り出す
     _v6.set(...T.arm.poleR).applyQuaternion(this.root.quaternion);
