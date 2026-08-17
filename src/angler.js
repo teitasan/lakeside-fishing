@@ -126,7 +126,7 @@ export const TUNING = {
   /* リール。巻いている間だけハンドルを handleSpeed（rad/s）で回し、
      ローターはギア比を掛けた速さで連動する。spinUp は回りだし／止まりの鈍さ
      （大きいほどキビキビ）。handleSpeed を負にすると逆回転になる */
-  reel: { handleSpeed: 6.0, gearRatio: 5.2, spinUp: 9, crankR: 0.035 },
+  reel: { handleSpeed: 6.0, gearRatio: 5.2, spinUp: 9 },
 };
 
 /** 待ちと同じ姿勢を使う状態（アタリ前後は構えを変えない） */
@@ -887,24 +887,20 @@ export class Angler {
     this.rodMount.position.copy(_v4).addScaledVector(_v5, -T.arm.gripY);
     this.rodMount.updateMatrixWorld(true);
 
-    /* 巻いている間は、右手をハンドルのノブに合わせて円を描かせる。
-       ノブの実際の位置ではなく角度から作った円で近似する
-       （実位置を使うと「竿の置き場所は手の位置から決める」という順序と
-       堂々巡りになるため）。竿はほぼ縦に構えるので、root ローカルの
-       上下・前後（Y-Z）面の円がクランクの弧にだいたい合う */
-    if (this.reelHandle && this._reelSpin > 1e-3) {
-      const ang = this.reelHandle.rotation[REEL_PARTS.handle.spin];
-      const r = T.reel.crankR * this._reelSpin;
-      _v13.set(0, Math.sin(ang) * r, Math.cos(ang) * r).applyQuaternion(this.root.quaternion);
-      hand.add(_v13);
-    }
-
-    // 右腕：肘は外側後ろへ張り出す
+    // 右腕：肘は外側後ろへ張り出す（竿を握る側の手なので、巻いていても動かさない）
     _v6.set(...T.arm.poleR).applyQuaternion(this.root.quaternion);
     this._solveArm('R', hand, _v6);
     /* 左手は右手のすぐ下に添える。腕が肩から手首まで 0.42m しかなく、
        体をまたいでリールまでは届かないので、両手で握る形にしている */
     this.rodMount.localToWorld(_v3.set(0.02, T.arm.leftY, 0.015));
+    /* 巻いている間は、この左手をハンドルのノブの実際の位置へ寄せる。
+       ノブは公転するだけの向きを持たないグループだが、位置はワールドで
+       追える（このすぐ上で rodMount.updateMatrixWorld 済み）ので、
+       角度から円を作って近似するのではなく実位置にそのまま追従させる */
+    if (this.reelKnob && this._reelSpin > 1e-3) {
+      this.reelKnob.getWorldPosition(_v13);
+      _v3.lerp(_v13, this._reelSpin);
+    }
     _v6.set(...T.arm.poleL).applyQuaternion(this.root.quaternion);
     this._solveArm('L', _v3, _v6);
 
