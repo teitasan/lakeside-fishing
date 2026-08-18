@@ -252,10 +252,15 @@ export class Water {
           float mnd = max(dot(N, MH), 0.0);
           surf += vec3(0.72, 0.82, 1.0) * (pow(mnd, 300.0) * 1.5 + pow(mnd, 34.0) * 0.10) * uNight;
 
-          // --- 泡 ---
-          float lap = smoothstep(0.42, 0.0, vDepth + vWaveH * 1.3);
+          /* --- 泡（渚からの水深で表情を変える） ---
+             渚のすぐそばは面でべったり、沖へ離れるほどノイズのしきい値を
+             上げてまばらな筋になってから消えるようにする。以前は
+             「0.42m より浅いか」で泡の強さがほぼ決め打ち（一律）だったので、
+             範囲を広げて連続的に変化させた */
+          float lap = smoothstep(0.9, 0.0, vDepth + vWaveH * 1.3);
           float lapN = fbm2(vWorld.xz * 1.6 + vec2(uTime * 0.25, uTime * 0.18));
-          float shoreFoam = clamp(lap * (0.55 + lapN * 0.9), 0.0, 1.0);
+          float lapThresh = mix(0.85, -0.15, lap);
+          float shoreFoam = clamp(smoothstep(lapThresh, lapThresh + 0.4, lapN) * lap, 0.0, 1.0);
           float crest = smoothstep(0.62, 0.95, vWaveH / ${MAX_WAVE_AMP.toFixed(3)} / max(uWind, 0.35));
           float crestFoam = crest * smoothstep(0.35, 0.75, vnoise(vWorld.xz * 2.2 + uTime * 0.3)) * 0.5;
           float foam = clamp(shoreFoam + crestFoam, 0.0, 1.0);
