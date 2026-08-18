@@ -156,6 +156,42 @@ export class Water {
         varying float vFogDepth;
         varying float vWaveH;
 
+        /* 細かいさざ波の法線用の傾き。1 周波数だけを流すと一体で動いて
+           不自然なので、周波数ごとに向き・速さの違う層を重ねて分散関係
+           （波長が違うと伝わる速さも向きも少しずつ変わる）を簡易に真似る
+           （tompng/gpuocean の「ノイズをスクロールさせた複製を合成する」
+           手法のアイデア。あちらは WebGPU + 事前焼き込みテクスチャだが、
+           このゲームは全部その場計算の GLSL ノイズなので、素の関数を
+           周波数・向き違いで複数回呼ぶだけで同じ考え方を再現できる） */
+        vec2 rippleSlope(vec2 xz, float t) {
+          const float EPS = 0.08;
+          vec2 d = vec2(0.0);
+          float n;
+          vec2 p;
+
+          p = xz * 0.9 + vec2(0.97, 0.24) * t * 0.55;
+          n = fbm2(p);
+          d += vec2(n - fbm2(p + vec2(EPS, 0.0)), n - fbm2(p + vec2(0.0, EPS))) * 1.3;
+
+          p = xz * 1.6 + vec2(0.60, -0.80) * t * 0.85;
+          n = fbm2(p);
+          d += vec2(n - fbm2(p + vec2(EPS, 0.0)), n - fbm2(p + vec2(0.0, EPS))) * 1.0;
+
+          p = xz * 2.6 - vec2(-0.29, 0.96) * t * 0.6;
+          n = vnoise(p);
+          d += vec2(n - vnoise(p + vec2(EPS, 0.0)), n - vnoise(p + vec2(0.0, EPS))) * 0.7;
+
+          p = xz * 4.2 + vec2(-0.79, -0.61) * t * 1.3;
+          n = vnoise(p);
+          d += vec2(n - vnoise(p + vec2(EPS, 0.0)), n - vnoise(p + vec2(0.0, EPS))) * 0.45;
+
+          p = xz * 6.5 - vec2(0.89, 0.45) * t * 1.7;
+          n = vnoise(p);
+          d += vec2(n - vnoise(p + vec2(EPS, 0.0)), n - vnoise(p + vec2(0.0, EPS))) * 0.28;
+
+          return d;
+        }
+
         /** 深度テクスチャの値 → ビュー空間の z 距離（m） */
         float eyeZ(float depth) {
           float z = depth * 2.0 - 1.0;                                   // NDC
@@ -175,14 +211,7 @@ export class Water {
           if (vDepth <= 0.02) discard;
 
           // --- 法線（大波 + 細かいリップル） ---
-          vec2 rip = vec2(0.0);
-          float rt = uTime * 0.9;
-          vec2 p1 = vWorld.xz * 1.35 + vec2(rt * 0.5, -rt * 0.35);
-          vec2 p2 = vWorld.xz * 2.9 - vec2(rt * 0.4, rt * 0.6);
-          float n1 = fbm2(p1);
-          float n2 = vnoise(p2);
-          rip += vec2(n1 - fbm2(p1 + vec2(0.09, 0.0)), n1 - fbm2(p1 + vec2(0.0, 0.09))) * 2.4;
-          rip += vec2(n2 - vnoise(p2 + vec2(0.11, 0.0)), n2 - vnoise(p2 + vec2(0.0, 0.11))) * 1.2;
+          vec2 rip = rippleSlope(vWorld.xz, uTime);
           float ripAmt = (0.55 + uRain * 1.5) * smoothstep(0.0, 1.2, vDepth);
           vec3 N = normalize(vec3(-vWaveD.x - rip.x * ripAmt, 1.0, -vWaveD.y - rip.y * ripAmt));
 
