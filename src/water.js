@@ -256,11 +256,11 @@ export class Water {
              渚のすぐそばは面でべったり、沖へ離れるほどノイズのしきい値を
              上げてまばらな筋になってから消えるようにする。以前は
              「0.42m より浅いか」で泡の強さがほぼ決め打ち（一律）だったので、
-             連続的に変化するようにした。広げすぎ・ノイズが細かすぎると
-             岸全体が白くうるさく見えるので、届く範囲は控えめに、
-             ノイズは周波数を落として大きめの塊で途切れるようにしてある */
+             連続的に変化するようにした。広げすぎると岸全体が白く
+             うるさく見えるので、届く範囲は控えめにしてある。
+             泡の塊の大きさはノイズの周波数（xz の係数）で調整する */
           float lap = smoothstep(0.55, 0.0, vDepth + vWaveH * 1.3);
-          float lapN = fbm2(vWorld.xz * 1.0 + vec2(uTime * 0.25, uTime * 0.18));
+          float lapN = fbm2(vWorld.xz * 2.0 + vec2(uTime * 0.25, uTime * 0.18));
           float lapThresh = mix(0.85, -0.15, lap);
           float shoreFoam = clamp(smoothstep(lapThresh, lapThresh + 0.55, lapN) * lap, 0.0, 1.0);
           float crest = smoothstep(0.62, 0.95, vWaveH / ${MAX_WAVE_AMP.toFixed(3)} / max(uWind, 0.35));
