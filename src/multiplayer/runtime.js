@@ -26,7 +26,17 @@ export function installMultiplayerRuntime(Game) {
   const chooseBiter = Game.prototype._chooseBiter; Game.prototype._chooseBiter = function (...args) { if (!this.multiplayer) return chooseBiter.apply(this, args); this.biteTimer = 1.5; };
   const landWater = Game.prototype._onLandWater; Game.prototype._onLandWater = function (...args) { const r = landWater.apply(this, args); if (this.multiplayer && this.fs === 'wait') this.mp?.setBait({ x: this.bobber.x, y: this.baitY, z: this.bobber.z, baitType: this.bait.id, rigLayer: this.rigLayer.id }); return r; };
   const setHook = Game.prototype._setHook; Game.prototype._setHook = function (...args) { const id = this.hookFish?.networkId; const r = setHook.apply(this, args); if (this.multiplayer && id && this.fs === 'fight') this.mp?.hookFish(id); return r; };
-  const missBite = Game.prototype._missBite; Game.prototype._missBite = function (...args) { const id = this.hookFish?.networkId; const r = missBite.apply(this, args); if (this.multiplayer && id) this.mp?.endFight(id, 'escaped'); return r; };
+  const missBite = Game.prototype._missBite; Game.prototype._missBite = function (...args) {
+    const id = this.hookFish?.networkId;
+    const r = missBite.apply(this, args);
+    if (this.multiplayer && id) {
+      this.mp?.endFight(id, 'escaped');
+      // _missBite後もwaitなら餌は残った20%側。サーバーにも現在の餌位置を再登録する。
+      // 餌を盗られた側は_retrieve()がclearBait()するため再登録しない。
+      if (this.fs === 'wait') this.mp?.setBait({ x: this.bobber.x, y: this.baitY, z: this.bobber.z, baitType: this.bait.id, rigLayer: this.rigLayer.id });
+    }
+    return r;
+  };
   const retrieve = Game.prototype._retrieve; Game.prototype._retrieve = function (...args) { if (this.multiplayer) this.mp?.clearBait(); return retrieve.apply(this, args); };
   const releaseFish = Game.prototype._releaseFish; Game.prototype._releaseFish = function (flee, ...args) { const id = this.hookFish?.networkId; const r = releaseFish.call(this, flee, ...args); if (this.multiplayer && id) this.mp?.endFight(id, 'escaped'); return r; };
   const dismissCatch = Game.prototype.dismissCatch; Game.prototype.dismissCatch = function (...args) { const id = this.hookFish?.networkId, wasCard = this.fs === 'card'; const r = dismissCatch.apply(this, args); if (this.multiplayer && wasCard && id) this.mp?.endFight(id, 'caught'); return r; };
