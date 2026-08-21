@@ -32,6 +32,8 @@ jobs:
         run: node scripts/fishing-controller-test.mjs
       - name: Test fishing runtime installation
         run: node scripts/fishing-install-order-test.mjs
+      - name: Test bite timing
+        run: node scripts/bite-timing-test.mjs
       - name: Test multiplayer fishing sync
         run: node scripts/mp-fishing-sync-test.mjs
       - name: Test shared world
