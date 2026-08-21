@@ -1,4 +1,4 @@
-import { SharedWorld } from '../simulation/world.js';
+import { SharedWorld } from '../simulation/sharedWorld.js';
 const PROTO=3,MAX_PLAYERS=8,CLOCK_START=6,HOURS_PER_SEC=1/60,WORLD_LIMIT=500,MIN_STATE_MS=70;const W={clear:'晴れ',cloudy:'くもり',rain:'雨'};
 export class MultiplayerRoom{constructor(ctx,env){this.ctx=ctx;this.env=env;this.players=new Map;this.world=new SharedWorld;this.loop=null;this.lastSnapshot=0;this.lastWeather=this.world.weather}
 async fetch(r){const u=new URL(r.url);if(u.pathname==='/api/voice/join')return this._voiceJoin(r);if(r.headers.get('Upgrade')!=='websocket')return new Response('WebSocket expected',{status:426});const p=new WebSocketPair;this.ctx.acceptWebSocket(p[1]);return new Response(null,{status:101,webSocket:p[0]})}
