@@ -121,7 +121,6 @@ export class SharedWorld {
 
   tick(players) {
     const now = Date.now();
-    // 天候は全員共通。実時間3分ごとに候補を変える（ゲーム内約3時間）。
     if (now - this.weatherChangedAt > 180000) {
       const options = ['clear', 'cloudy', 'rain'].filter((w) => w !== this.weather);
       this.weather = options[Math.floor(Math.random() * options.length)];
@@ -133,10 +132,20 @@ export class SharedWorld {
       if (!this.spawnNear(players)) break;
     }
 
+    // 1つの仕掛けに同時に寄れる魚は1匹だけ。approaching/reserved/hookedの全状態で占有扱いにする。
+    // これが無いと複数匹が同じ餌でreservedになり、7秒停止する魚が量産される。
+    const occupiedBaits = new Set();
+    for (const f of this.fishes.values()) {
+      if (f.targetBaitId && (f.state === 'approaching' || f.state === 'reserved' || f.state === 'hooked')) {
+        occupiedBaits.add(f.targetBaitId);
+      }
+    }
+
     for (const [id, f] of this.fishes) {
       if (f.state === 'hooked') continue;
       if (f.state === 'reserved') {
         if (now - f.stateAt > 7000) {
+          occupiedBaits.delete(f.targetBaitId);
           f.state = 'swimming'; f.ownerPlayerId = null; f.targetBaitId = null;
         }
         continue;
@@ -145,6 +154,7 @@ export class SharedWorld {
       if (f.state === 'approaching') {
         const bait = [...this.baits.values()].find((b) => b.id === f.targetBaitId);
         if (!bait) {
+          occupiedBaits.delete(f.targetBaitId);
           f.state = 'swimming'; f.targetBaitId = null;
         } else {
           const dx = bait.x - f.x, dz = bait.z - f.z;
@@ -156,6 +166,7 @@ export class SharedWorld {
           if (d <= BITE_R) {
             f.state = 'reserved'; f.ownerPlayerId = bait.playerId; f.stateAt = now;
           } else if (now - f.stateAt > 18000) {
+            occupiedBaits.delete(f.targetBaitId);
             f.state = 'swimming'; f.targetBaitId = null;
           }
           continue;
@@ -173,18 +184,18 @@ export class SharedWorld {
       const maxY = -0.25, minY = -Math.max(0.35, depth - 0.3);
       f.y = clamp(f.y, minY, maxY);
 
-      // 共有餌のうち近いものへ興味を持つ。approaching中はownerを取らない。
       let best = null, bestD = APPROACH_R;
       for (const bait of this.baits.values()) {
+        if (occupiedBaits.has(bait.id)) continue;
         const d = Math.hypot(f.x - bait.x, f.z - bait.z);
         if (d < bestD) { best = bait; bestD = d; }
       }
       if (best && Math.random() < TICK * 0.10) {
         f.state = 'approaching'; f.targetBaitId = best.id; f.ownerPlayerId = null; f.stateAt = now;
+        occupiedBaits.add(best.id);
       }
     }
 
-    // 全プレイヤーから遠い自由魚だけ整理。人数が増えたら密度も増える。
     for (const [id, f] of this.fishes) {
       if (this.fishes.size <= wanted || f.state !== 'swimming') continue;
       const near = players.some((p) => !p.fresh && Math.hypot(f.x - p.x, f.z - p.z) <= DESPAWN_R);
