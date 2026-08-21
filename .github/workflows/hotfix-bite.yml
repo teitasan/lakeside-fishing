@@ -1,0 +1,37 @@
+name: Hotfix bite translation shadow
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Patch game.js
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/game.js')
+          s = p.read_text()
+          old = """        const t = clamp01(this.stateTime / 0.22);\n        this.bobber.y = surf + 0.012 - t * 0.42 - Math.sin(this.stateTime * 24) * 0.03;"""
+          new = """        const biteProgress = clamp01(this.stateTime / 0.22);\n        this.bobber.y = surf + 0.012 - biteProgress * 0.42 - Math.sin(this.stateTime * 24) * 0.03;"""
+          if old in s:
+              p.write_text(s.replace(old, new, 1))
+          PY
+      - name: Commit hotfix if needed
+        run: |
+          if git diff --quiet -- src/game.js; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -- src/game.js
+          git commit -m "アタリ時の翻訳関数名衝突を修正"
+          git push origin HEAD:main
