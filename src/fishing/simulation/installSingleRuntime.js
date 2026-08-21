@@ -1,5 +1,5 @@
 import { Fish, FishSchool } from '../../fish.js';
-import { Environment } from '../../sky.js';
+import { Environment, WEATHERS } from '../../sky.js';
 import {
   FISH_APPROACH_SPEED_MUL, FISH_NIBBLE_SPEED_MUL, FISH_FLEE_SPEED_MUL,
   fishBaseSpeed, approachRadius, wanderSpeedMul, nibbleTarget,
@@ -7,7 +7,6 @@ import {
   clampFishDepth,
 } from './motion.js';
 import { nextWeatherKey, nextWeatherHours } from './weather.js';
-import { WEATHERS } from '../../sky.js';
 import { rand } from '../../util.js';
 
 let installed = false;
@@ -22,12 +21,8 @@ export function installSingleSimulationRuntime() {
 
   Fish.prototype.pickWanderTarget = function (ctx) {
     const r = pickWanderTarget({
-      fish: {
-        x: this.pos.x, y: this.pos.y, z: this.pos.z,
-        species: this.species, depthBias: this._depthBias ?? 0.5,
-      },
-      terrain: ctx.terrain,
-      band: ctx.band,
+      fish: { x: this.pos.x, y: this.pos.y, z: this.pos.z, species: this.species, depthBias: this._depthBias ?? 0.5 },
+      terrain: ctx.terrain, band: ctx.band,
     });
     this._depthBias = r.depthBias;
     this.target.set(r.x, r.y, r.z);
@@ -37,6 +32,10 @@ export function installSingleSimulationRuntime() {
   const legacyUpdate = Fish.prototype.update;
   Fish.prototype.update = function (dt, ctx) {
     if (!this.active) return;
+    // 描画・演出依存の状態は既存実装へ完全委譲し、timer/startleもそこで1回だけ進める。
+    if (this.state === 'jump' || this.state === 'hooked' || this.state === 'landed') {
+      return legacyUpdate.call(this, dt, ctx);
+    }
     const { water, terrain } = ctx;
     const sp = this.species;
     this.timer -= dt;
@@ -63,7 +62,7 @@ export function installSingleSimulationRuntime() {
         }
         break;
       }
-      case 'approach': {
+      case 'approach':
         this.target.copy(ctx.bait);
         speedMul = FISH_APPROACH_SPEED_MUL;
         if (this.pos.distanceTo(this.target) < approachRadius(this.length)) {
@@ -71,31 +70,23 @@ export function installSingleSimulationRuntime() {
           this.timer = rand(0.6, 1.4);
         }
         break;
-      }
       case 'nibble': {
         const target = nibbleTarget(ctx.bait, this.phase, ctx.time);
         this.target.set(target.x, target.y, target.z);
         speedMul = FISH_NIBBLE_SPEED_MUL;
         break;
       }
-      case 'flee': {
+      case 'flee':
         speedMul = FISH_FLEE_SPEED_MUL;
         if (this.timer <= 0) { this.state = 'wander'; this.timer = 1; }
         break;
-      }
-      // jump/hooked/landedは描画・演出依存が強いため既存処理をそのまま使用する。
-      case 'jump':
-      case 'hooked':
-      case 'landed':
-        return legacyUpdate.call(this, dt, ctx);
       default:
         return;
     }
 
     const v = steerVelocity({
       x: this.pos.x, y: this.pos.y, z: this.pos.z,
-      vx: this.vel.x, vy: this.vel.y, vz: this.vel.z,
-      length: this.length,
+      vx: this.vel.x, vy: this.vel.y, vz: this.vel.z, length: this.length,
     }, { x: this.target.x, y: this.target.y, z: this.target.z }, speedMul, dt);
     this.vel.set(v.vx, v.vy, v.vz);
     this.pos.addScaledVector(this.vel, dt);
@@ -116,9 +107,9 @@ export function installSingleSimulationRuntime() {
   };
 
   Fish.prototype.spawn = wrap(Fish.prototype.spawn, function (next, sp, length, pos, opts = {}) {
-    const r = next(sp, length, pos, opts);
+    const result = next(sp, length, pos, opts);
     this.speed = fishBaseSpeed(length);
-    return r;
+    return result;
   });
 
   FishSchool.prototype.startle = function (x, z, radius = 3.5, sec = 1.8) {
@@ -137,8 +128,7 @@ export function installSingleSimulationRuntime() {
   Environment.prototype.tickWeather = function (dtHours) {
     this.weatherTimer -= dtHours;
     if (this.weatherTimer > 0) return null;
-    const key = nextWeatherKey(this.weather.key);
-    this.weather = WEATHERS[key];
+    this.weather = WEATHERS[nextWeatherKey(this.weather.key)];
     this.weatherTimer = nextWeatherHours();
     return this.weather;
   };
