@@ -22,7 +22,12 @@ const game = {
 };
 const fish = { species, length: species.len[0], pos: { x: 8, y: -4, z: 0 } };
 const fight = createFightState(game, fish);
-assert.equal(fight.dist, 8);
+// createFightState はプレイヤー中心ではなく、yaw方向へ1.6m進めた竿先基準で
+// 初期ライン長を計算する。ここを固定値にすると竿先オフセット変更だけでテストが壊れる。
+const rodTipX = game.pos.x + Math.sin(game.yaw) * 1.6;
+const rodTipZ = game.pos.z + Math.cos(game.yaw) * 1.6;
+const expectedDist = Math.max(2.5, Math.hypot(game.bobber.x - rodTipX, game.bobber.z - rodTipZ));
+assert.ok(Math.abs(fight.dist - expectedDist) < 1e-9);
 assert.equal(fight.hookDepth, 4);
 assert.equal(fight.fishDepth, 4);
 assert.ok(fight.span > fight.dist && fight.span <= game.maxLine);
