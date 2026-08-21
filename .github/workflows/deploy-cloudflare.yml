@@ -32,6 +32,9 @@ jobs:
       - name: Test fishing session
         run: node scripts/fishing-session-test.mjs
 
+      - name: Test fishing controller
+        run: node scripts/fishing-controller-test.mjs
+
       - name: Test multiplayer fishing sync
         run: node scripts/mp-fishing-sync-test.mjs
 
