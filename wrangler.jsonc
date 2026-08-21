@@ -1,23 +1,18 @@
-/* Cloudflare Workers: static assets + 1 room Durable Object */
+/* Cloudflare Workers: static assets + multiplayer Durable Object + RealtimeKit */
 {
   "name": "lakeside-fishing",
   "main": "worker/index.js",
   "compatibility_date": "2026-08-21",
+  "vars": {
+    "CLOUDFLARE_ACCOUNT_ID": "e9e6f38d80cf6871855475ac06f54693",
+    "REALTIMEKIT_APP_ID": "d8b6f547-fdd1-4b30-bf3e-71287007628e"
+  },
   "assets": {
     "directory": ".",
     "binding": "ASSETS",
-    "run_worker_first": ["/ws"]
+    "run_worker_first": ["/ws", "/api/*"]
   },
-  "durable_objects": {
-    "bindings": [
-      { "name": "ROOM", "class_name": "MultiplayerRoom" }
-    ]
-  },
-  "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["MultiplayerRoom"] }
-  ],
-  "observability": {
-    "enabled": true,
-    "head_sampling_rate": 1
-  }
+  "durable_objects": { "bindings": [{ "name": "ROOM", "class_name": "MultiplayerRoom" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MultiplayerRoom"] }],
+  "observability": { "enabled": true, "head_sampling_rate": 1 }
 }
