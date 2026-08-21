@@ -1,5 +1,5 @@
 import { SharedWorld } from '../simulation/world.js';
-const PROTO = 2, MAX_PLAYERS = 8, CLOCK_START = 6, HOURS_PER_SEC = 1 / 60, WORLD_LIMIT = 500, MIN_STATE_MS = 70;
+const PROTO = 3, MAX_PLAYERS = 8, CLOCK_START = 6, HOURS_PER_SEC = 1 / 60, WORLD_LIMIT = 500, MIN_STATE_MS = 70;
 
 export class MultiplayerRoom {
   constructor(ctx) {
@@ -20,7 +20,7 @@ export class MultiplayerRoom {
     let p = this.players.get(ws); if (p) return p;
     let att = null; try { att = ws.deserializeAttachment(); } catch (e) {}
     if (!att?.joined) return null;
-    p = { id: att.id, name: att.name, x: 0, y: 0, z: 0, yaw: 0, a: 'idle', fresh: true, lastState: 0, lastFight: 0 };
+    p = { id: att.id, name: att.name, x: 0, y: 0, z: 0, yaw: 0, a: 'idle', fresh: true, lastState: 0, lastFight: 0, lastVisual: 0, visual: null };
     this.players.set(ws, p); return p;
   }
   _joined() {
@@ -54,10 +54,12 @@ export class MultiplayerRoom {
       if (msg.v !== PROTO) { try { ws.send(JSON.stringify({ t: 'error', code: 'version' })); ws.close(4000, 'version'); } catch (e) {} return; }
       if (this._joined().length >= MAX_PLAYERS) { try { ws.send(JSON.stringify({ t: 'error', code: 'full' })); ws.close(4001, 'full'); } catch (e) {} return; }
       const id = crypto.randomUUID().slice(0, 8), name = String(msg.name || '').slice(0, 12) || 'angler';
-      const p = { id, name, x: 0, y: 0, z: 0, yaw: 0, a: 'idle', fresh: true, lastState: 0, lastFight: 0 };
-      const others = this._joined().map(({ p: q }) => ({ id: q.id, name: q.name, x: q.x, y: q.y, z: q.z, yaw: q.yaw, a: q.a }));
+      const p = { id, name, x: 0, y: 0, z: 0, yaw: 0, a: 'idle', fresh: true, lastState: 0, lastFight: 0, lastVisual: 0, visual: null };
+      const joined = this._joined();
+      const others = joined.map(({ p: q }) => ({ id: q.id, name: q.name, x: q.x, y: q.y, z: q.z, yaw: q.yaw, a: q.a }));
+      const visuals = joined.filter(({ p: q }) => q.visual).map(({ p: q }) => ({ id: q.id, ...q.visual }));
       this.players.set(ws, p); ws.serializeAttachment({ joined: true, id, name });
-      ws.send(JSON.stringify({ t: 'welcome', id, clock: await this._clock(), weather: this.world.weather, players: others, fish: this.world.snapshot() }));
+      ws.send(JSON.stringify({ t: 'welcome', id, clock: await this._clock(), weather: this.world.weather, players: others, visuals, fish: this.world.snapshot() }));
       this._broadcast({ t: 'join', id, name, x: 0, y: 0, z: 0, yaw: 0, a: 'idle' }, ws);
       this._startLoop(); return;
     }
@@ -70,6 +72,19 @@ export class MultiplayerRoom {
       if (Math.abs(x) > WORLD_LIMIT || Math.abs(z) > WORLD_LIMIT || Math.abs(y) > 100) return;
       Object.assign(p, { x, y, z, yaw, a: typeof msg.a === 'string' ? msg.a.slice(0, 12) : 'idle', fresh: false });
       this._broadcast({ t: 's', id: p.id, x, y, z, yaw, a: p.a }, ws); return;
+    }
+    if (msg.t === 'v') {
+      if (now - p.lastVisual < MIN_STATE_MS) return; p.lastVisual = now;
+      const bx = +msg.bx, by = +msg.by, bz = +msg.bz;
+      if (![bx, by, bz].every(Number.isFinite) || Math.abs(bx) > WORLD_LIMIT || Math.abs(bz) > WORLD_LIMIT || Math.abs(by) > 100) return;
+      const visual = {
+        fs: typeof msg.fs === 'string' ? msg.fs.slice(0, 12) : 'idle',
+        charge: clamp01(+msg.charge), tension: clamp01(+msg.tension), reeling: clamp01(+msg.reeling),
+        rod: typeof msg.rod === 'string' ? msg.rod.slice(0, 16) : 'bamboo',
+        bait: typeof msg.bait === 'string' ? msg.bait.slice(0, 16) : 'worm',
+        rarity: Math.max(0, Math.min(5, +msg.rarity || 0)), bx, by, bz, line: !!msg.line,
+      };
+      p.visual = visual; this._broadcast({ t: 'v', id: p.id, ...visual }, ws); return;
     }
     if (msg.t === 'bait') { this.world.setBait(p.id, msg); return; }
     if (msg.t === 'bait_clear') { this.world.setBait(p.id, null); return; }
@@ -94,3 +109,4 @@ export class MultiplayerRoom {
     if (p) { this.world.dropPlayer(p.id); this._broadcast({ t: 'leave', id: p.id, name: p.name }, ws); }
   }
 }
+const clamp01 = (v) => Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0;
