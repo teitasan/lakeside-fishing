@@ -9,7 +9,6 @@ const MAX_FISH = 50;
 const ACTIVE_R = 72;
 const DESPAWN_R = 92;
 const APPROACH_R = 30;
-const BITE_R = 0.9;
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -25,6 +24,26 @@ function weightedSpecies(depth) {
     if (r <= 0) return sp;
   }
   return list[list.length - 1];
+}
+
+function steerFish(f, tx, ty, tz, speedMul) {
+  const dx = tx - f.x, dy = ty - f.y, dz = tz - f.z;
+  const dist = Math.hypot(dx, dy, dz);
+  if (dist < 0.001) return dist;
+  // src/fish.js と同じ基礎速度・上下移動補正・速度補間。
+  const baseSpeed = 0.78 + (f.length / 100) * 1.7;
+  const speed = baseSpeed * speedMul;
+  const desiredX = dx / dist * speed;
+  const desiredY = dy / dist * speed * 0.55;
+  const desiredZ = dz / dist * speed;
+  const alpha = 1 - Math.exp(-2.6 * TICK);
+  f.vx += (desiredX - f.vx) * alpha;
+  f.vy += (desiredY - f.vy) * alpha;
+  f.vz += (desiredZ - f.vz) * alpha;
+  f.x += f.vx * TICK;
+  f.y += f.vy * TICK;
+  f.z += f.vz * TICK;
+  return dist;
 }
 
 export class SharedWorld {
@@ -57,9 +76,9 @@ export class SharedWorld {
       const id = `f${this.seq++}`;
       const fish = {
         id, speciesId: sp.id, length, albino: Math.random() < 0.002,
-        x, y: -fishDepth, z, vx: rand(-0.4, 0.4), vz: rand(-0.4, 0.4),
+        x, y: -fishDepth, z, vx: rand(-0.4, 0.4), vy: 0, vz: rand(-0.4, 0.4),
         tx: x, tz: z, state: 'swimming', targetBaitId: null, ownerPlayerId: null,
-        turnAt: 0, stateAt: Date.now(),
+        turnAt: 0, stateAt: Date.now(), phase: rand(0, 10),
       };
       this.fishes.set(id, fish);
       return fish;
@@ -105,9 +124,7 @@ export class SharedWorld {
     }
     f.state = 'swimming'; f.ownerPlayerId = null; f.targetBaitId = null;
     f.stateAt = Date.now(); f.turnAt = 0;
-    f.vx = rand(-1.8, 1.8); f.vz = rand(-1.8, 1.8);
-    // escaped/missedでは餌を勝手に消さない。
-    // クライアントで餌を盗られた場合だけ clearBait() が飛び、20%で残った場合はそのまま次の魚を待てる。
+    f.vx = rand(-1.8, 1.8); f.vy = 0; f.vz = rand(-1.8, 1.8);
     return { removed: false, fish: f };
   }
 
@@ -135,18 +152,27 @@ export class SharedWorld {
 
     const occupiedBaits = new Set();
     for (const f of this.fishes.values()) {
-      if (f.targetBaitId && (f.state === 'approaching' || f.state === 'reserved' || f.state === 'hooked')) {
-        occupiedBaits.add(f.targetBaitId);
-      }
+      if (f.targetBaitId && (f.state === 'approaching' || f.state === 'reserved' || f.state === 'hooked')) occupiedBaits.add(f.targetBaitId);
     }
 
-    for (const [id, f] of this.fishes) {
+    for (const [, f] of this.fishes) {
       if (f.state === 'hooked') continue;
+
       if (f.state === 'reserved') {
-        if (now - f.stateAt > 7000) {
+        const bait = [...this.baits.values()].find((b) => b.id === f.targetBaitId);
+        if (!bait || now - f.stateAt > 7000) {
           occupiedBaits.delete(f.targetBaitId);
           f.state = 'swimming'; f.ownerPlayerId = null; f.targetBaitId = null;
+          continue;
         }
+        // シングルの nibble と同じく、アタリ待ち中は餌の周囲を低速でうろつく。
+        const t = now / 1000;
+        const a = t * 1.6 + f.phase;
+        steerFish(f,
+          bait.x + Math.cos(a) * 0.45,
+          bait.y + Math.sin(a * 0.7) * 0.18,
+          bait.z + Math.sin(a) * 0.45,
+          0.35);
         continue;
       }
 
@@ -156,18 +182,10 @@ export class SharedWorld {
           occupiedBaits.delete(f.targetBaitId);
           f.state = 'swimming'; f.targetBaitId = null;
         } else {
-          const dx = bait.x - f.x, dy = bait.y - f.y, dz = bait.z - f.z;
-          const horizontalD = Math.hypot(dx, dz);
-          const distance3D = Math.hypot(dx, dy, dz);
-          const speed = 1.4 + Math.min(1.5, f.length / 100);
-          if (horizontalD > 0.001) { f.vx = dx / horizontalD * speed; f.vz = dz / horizontalD * speed; }
-          else { f.vx = 0; f.vz = 0; }
-          // XZが先に到着してもYが餌位置へ追いつくまで動き続ける。
-          f.x += f.vx * TICK; f.z += f.vz * TICK;
-          f.y += dy * 0.12;
-          if (distance3D <= BITE_R) {
-            f.x = bait.x; f.y = bait.y; f.z = bait.z;
-            f.vx = 0; f.vz = 0;
+          const distance3D = steerFish(f, bait.x, bait.y, bait.z, 1.45);
+          const biteR = 0.5 + f.length * 0.004;
+          if (distance3D <= biteR) {
+            // 座標を餌へスナップしない。現在位置・慣性を保ったまま nibble 相当へ移る。
             f.state = 'reserved'; f.ownerPlayerId = bait.playerId; f.stateAt = now;
           } else if (now - f.stateAt > 18000) {
             occupiedBaits.delete(f.targetBaitId);
@@ -179,10 +197,10 @@ export class SharedWorld {
 
       if (now >= f.turnAt) {
         const a = rand(0, Math.PI * 2), speed = rand(0.25, 0.75);
-        f.vx = Math.cos(a) * speed; f.vz = Math.sin(a) * speed;
+        f.vx = Math.cos(a) * speed; f.vy = 0; f.vz = Math.sin(a) * speed;
         f.turnAt = now + rand(1800, 5200);
       }
-      f.x += f.vx * TICK; f.z += f.vz * TICK;
+      f.x += f.vx * TICK; f.y += f.vy * TICK; f.z += f.vz * TICK;
       const depth = this.lake.depthAt(f.x, f.z);
       if (depth < 0.55) { f.vx *= -1; f.vz *= -1; f.x += f.vx; f.z += f.vz; }
       const maxY = -0.25, minY = -Math.max(0.35, depth - 0.3);
