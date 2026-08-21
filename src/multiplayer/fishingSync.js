@@ -25,11 +25,13 @@ export class MultiplayerFishingSync {
     const bed = g.terrain?.bedAt?.(x, z)?.kind ?? null;
     const nearStruct = !!g.terrain?.structureNear?.(x, z, 4.5);
     const rodType = g.rod?.id ?? g.state?.gear?.rod ?? null;
+    const lineType = g.line?.id ?? g.state?.gear?.line ?? null;
     this.mp.setBait({
       x, y: g.baitY, z,
       baitType: g.bait?.id ?? null,
       rigLayer: g.rigLayer?.id ?? 'mid',
       rodType,
+      lineType,
       level: g.state?.level ?? 1,
       hour: g.state?.clock ?? 12,
       bed,
