@@ -7,10 +7,12 @@ import { iconHtml } from './icons.js';
 import { t, setLang } from './i18n.js';
 import { MP_SESSION_KEY } from './network/multiplayer.js';
 import { installFishingController } from './fishing/controller.js';
+import { installFightController } from './fishing/fightController.js';
 import { installMultiplayerRuntime } from './multiplayer/runtime.js';
 import { RoomChat } from './multiplayer/chat.js';
 import { ProximityVoice } from './multiplayer/voice.js';
 installFishingController(Game);
+installFightController(Game);
 installMultiplayerRuntime(Game);
 const canvas=document.getElementById('scene'),loadingLabel=document.querySelector('#loading span');
 function fatal(msg){const l=document.getElementById('loading');l.classList.remove('done');l.innerHTML=`<div style="max-width:520px;text-align:center;line-height:2;letter-spacing:0"><p style="font-size:15px;color:#ffb0b0">${msg}</p><p style="font-size:12px;opacity:.6">${t('ui.fatal.helpHtml')}</p></div>`}
