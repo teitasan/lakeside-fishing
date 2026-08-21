@@ -1,4 +1,4 @@
-const PROTO = 2;
+const PROTO = 3;
 const SEND_HZ = 10;
 export const MULTIPLAYER_SEED = 123456789;
 export const MP_SESSION_KEY = 'lakeside-fishing-mp-join';
@@ -8,10 +8,13 @@ export class MultiplayerClient {
   constructor() {
     this.ws = null; this.id = null; this.connected = false; this.name = '';
     this.onWelcome = null; this.onJoin = null; this.onLeave = null; this.onState = null;
+    this.onVisual = null;
     this.onFishSnapshot = null; this.onFishReserved = null; this.onFishHooked = null;
     this.onFishEscaped = null; this.onFishCaught = null; this.onWeather = null;
     this.onClose = null; this.onError = null;
-    this._lastSendAt = 0; this._lastSent = ''; this._reconnectTimer = null; this._closedByUser = false;
+    this._lastSendAt = 0; this._lastSent = '';
+    this._lastVisualAt = 0; this._lastVisual = '';
+    this._reconnectTimer = null; this._closedByUser = false;
   }
 
   connect(name) {
@@ -30,6 +33,7 @@ export class MultiplayerClient {
         case 'join': this.onJoin?.(m); break;
         case 'leave': this.onLeave?.(m); break;
         case 's': this.onState?.(m); break;
+        case 'v': this.onVisual?.(m); break;
         case 'fish_snapshot': this.onFishSnapshot?.(m.fish || []); break;
         case 'fish_reserved': this.onFishReserved?.(m); break;
         case 'fish_hooked': this.onFishHooked?.(m); break;
@@ -68,6 +72,24 @@ export class MultiplayerClient {
     const key = `${s.x},${s.y},${s.z},${s.yaw},${s.a}`;
     if (key === this._lastSent && now - this._lastSendAt < 1000) return;
     this._lastSendAt = now; this._lastSent = key; this._send(s);
+  }
+
+  /** 他人から見える釣り姿勢・竿・ウキ・糸の状態。最大10Hz。 */
+  sendVisual(v) {
+    if (!this.connected || !v) return;
+    const now = performance.now();
+    if (now - this._lastVisualAt < 1000 / SEND_HZ) return;
+    const m = {
+      t: 'v', fs: String(v.fs || 'idle').slice(0, 12),
+      charge: round2(v.charge || 0), tension: round2(v.tension || 0), reeling: round2(v.reeling || 0),
+      rod: String(v.rod || 'bamboo').slice(0, 16), bait: String(v.bait || 'worm').slice(0, 16),
+      rarity: Math.max(0, Math.min(5, v.rarity | 0)),
+      bx: round2(v.bx || 0), by: round2(v.by || 0), bz: round2(v.bz || 0),
+      line: !!v.line,
+    };
+    const key = JSON.stringify(m);
+    if (key === this._lastVisual && now - this._lastVisualAt < 1000) return;
+    this._lastVisualAt = now; this._lastVisual = key; this._send(m);
   }
 
   setBait(bait) { this._send({ t: 'bait', ...bait }); }
