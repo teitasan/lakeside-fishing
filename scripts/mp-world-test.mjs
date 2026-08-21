@@ -8,7 +8,8 @@ const first = world.snapshot();
 assert.ok(first.length >= 10, `fish spawn不足: ${first.length}`);
 assert.ok(first.every((f) => f.id && f.speciesId && Number.isFinite(f.x) && Number.isFinite(f.y)), 'fish snapshot不正');
 
-world.setBait('p1', { x: 0, y: -2, z: 0, baitType: 'worm', rigLayer: 'mid' });
+const bait = { x: 0, y: -2, z: 0, baitType: 'worm', rigLayer: 'mid' };
+world.setBait('p1', bait);
 let target = null;
 for (let i = 0; i < 2500 && !target; i++) {
   world.tick(players);
@@ -25,6 +26,14 @@ for (let i = 0; i < 800 && target.ownerPlayerId !== 'p1'; i++) {
   target = world.snapshot().find((f) => f.id === target.id) || target;
 }
 assert.equal(target.ownerPlayerId, 'p1', 'bite予約が成立しない');
+const reservedDistance = Math.hypot(target.x - bait.x, target.y - bait.y, target.z - bait.z);
+assert.ok(reservedDistance > 0.01, 'reserved移行時に魚が餌座標へスナップしている');
+const beforeNibble = { x: target.x, y: target.y, z: target.z };
+for (let i = 0; i < 5; i++) world.tick(players);
+target = world.snapshot().find((f) => f.id === target.id) || target;
+const nibbleMove = Math.hypot(target.x - beforeNibble.x, target.y - beforeNibble.y, target.z - beforeNibble.z);
+assert.ok(nibbleMove > 0.001, 'reserved中の魚が完全停止している');
+
 assert.equal(world.hook('p1', target.id), true, 'ownerがhookできない');
 assert.equal(world.hook('other', target.id), false, '非ownerがhookできてしまう');
 world.fightUpdate('p1', target.id, { x: 1, y: -1, z: 1 });
@@ -36,4 +45,4 @@ assert.ok(escaped && !escaped.removed);
 assert.equal(world.snapshot().find((f) => f.id === target.id).state, 'swimming');
 assert.equal(world.hook('p1', target.id), false, 'escape後に予約なしhookできる');
 
-console.log(`OK shared world: ${world.snapshot().length} fish, single-bait exclusion/reservation/escape passed`);
+console.log(`OK shared world: ${world.snapshot().length} fish, smooth approach/nibble/reservation/escape passed`);
