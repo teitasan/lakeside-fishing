@@ -2,8 +2,61 @@ import { RemoteFishSchool } from './remoteFish.js';
 import { MultiplayerFishingSync } from './fishingSync.js';
 import { installFishingSession, isFishingLineState } from '../fishing/session.js';
 
+function installFishingEventBridge(Game) {
+  if (Game.prototype.__fishingEventBridgeInstalled) return;
+  Game.prototype.__fishingEventBridgeInstalled = true;
+
+  const landWater = Game.prototype._onLandWater;
+  Game.prototype._onLandWater = function (...args) {
+    const r = landWater.apply(this, args);
+    if (this.fs === 'wait') this.fishing.setBaitPresent(true, { source: 'land' });
+    return r;
+  };
+
+  const setHook = Game.prototype._setHook;
+  Game.prototype._setHook = function (...args) {
+    const fish = this.hookFish;
+    const r = setHook.apply(this, args);
+    if (fish && this.fs === 'fight') this.fishing.notifyHooked(fish);
+    return r;
+  };
+
+  const missBite = Game.prototype._missBite;
+  Game.prototype._missBite = function (...args) {
+    const fish = this.hookFish;
+    const r = missBite.apply(this, args);
+    this.fishing.notifyMissed(fish, { baitKept: this.fs === 'wait' });
+    this.fishing.setBaitPresent(this.fs === 'wait', { source: 'miss' });
+    return r;
+  };
+
+  const retrieve = Game.prototype._retrieve;
+  Game.prototype._retrieve = function (...args) {
+    this.fishing.setBaitPresent(false, { source: 'retrieve' });
+    return retrieve.apply(this, args);
+  };
+
+  const releaseFish = Game.prototype._releaseFish;
+  Game.prototype._releaseFish = function (flee, ...args) {
+    const fish = this.hookFish;
+    const r = releaseFish.call(this, flee, ...args);
+    this.fishing.notifyEscaped(fish, { flee });
+    return r;
+  };
+
+  const dismissCatch = Game.prototype.dismissCatch;
+  Game.prototype.dismissCatch = function (...args) {
+    const fish = this.hookFish;
+    const wasCard = this.fs === 'card';
+    const r = dismissCatch.apply(this, args);
+    if (wasCard) this.fishing.notifyCaught(fish);
+    return r;
+  };
+}
+
 export function installMultiplayerRuntime(Game) {
   installFishingSession(Game);
+  installFishingEventBridge(Game);
   if (Game.prototype.__sharedFishInstalled) return;
   Game.prototype.__sharedFishInstalled = true;
 
@@ -22,6 +75,7 @@ export function installMultiplayerRuntime(Game) {
   Game.prototype._connectMultiplayer = function (...args) {
     const r = connect.apply(this, args), mp = this.mp;
     if (!mp) return r;
+    this.multiplayerFishing?.dispose();
     const sync = this.multiplayerFishing = new MultiplayerFishingSync(this, mp);
     const oldWelcome = mp.onWelcome;
     mp.onWelcome = (m) => {
@@ -42,51 +96,6 @@ export function installMultiplayerRuntime(Game) {
   Game.prototype._chooseBiter = function (...args) {
     if (!this.multiplayer) return chooseBiter.apply(this, args);
     this.biteTimer = 1.5;
-  };
-
-  const landWater = Game.prototype._onLandWater;
-  Game.prototype._onLandWater = function (...args) {
-    const r = landWater.apply(this, args);
-    if (this.multiplayer && this.fs === 'wait') this.multiplayerFishing?.setBaitFromGame();
-    return r;
-  };
-
-  const setHook = Game.prototype._setHook;
-  Game.prototype._setHook = function (...args) {
-    const id = this.hookFish?.networkId;
-    const r = setHook.apply(this, args);
-    if (this.multiplayer && id && this.fs === 'fight') this.mp?.hookFish(id);
-    return r;
-  };
-
-  const missBite = Game.prototype._missBite;
-  Game.prototype._missBite = function (...args) {
-    const id = this.hookFish?.networkId;
-    const r = missBite.apply(this, args);
-    if (this.multiplayer) this.multiplayerFishing?.onMiss(id);
-    return r;
-  };
-
-  const retrieve = Game.prototype._retrieve;
-  Game.prototype._retrieve = function (...args) {
-    if (this.multiplayer) this.multiplayerFishing?.clearBait();
-    return retrieve.apply(this, args);
-  };
-
-  const releaseFish = Game.prototype._releaseFish;
-  Game.prototype._releaseFish = function (flee, ...args) {
-    const id = this.hookFish?.networkId;
-    const r = releaseFish.call(this, flee, ...args);
-    if (this.multiplayer && id) this.mp?.endFight(id, 'escaped');
-    return r;
-  };
-
-  const dismissCatch = Game.prototype.dismissCatch;
-  Game.prototype.dismissCatch = function (...args) {
-    const id = this.hookFish?.networkId, wasCard = this.fs === 'card';
-    const r = dismissCatch.apply(this, args);
-    if (this.multiplayer && wasCard && id) this.mp?.endFight(id, 'caught');
-    return r;
   };
 
   const update = Game.prototype.update;
