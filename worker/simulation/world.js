@@ -106,7 +106,8 @@ export class SharedWorld {
     f.state = 'swimming'; f.ownerPlayerId = null; f.targetBaitId = null;
     f.stateAt = Date.now(); f.turnAt = 0;
     f.vx = rand(-1.8, 1.8); f.vz = rand(-1.8, 1.8);
-    this.baits.delete(playerId);
+    // escaped/missedでは餌を勝手に消さない。
+    // クライアントで餌を盗られた場合だけ clearBait() が飛び、20%で残った場合はそのまま次の魚を待てる。
     return { removed: false, fish: f };
   }
 
@@ -132,8 +133,6 @@ export class SharedWorld {
       if (!this.spawnNear(players)) break;
     }
 
-    // 1つの仕掛けに同時に寄れる魚は1匹だけ。approaching/reserved/hookedの全状態で占有扱いにする。
-    // これが無いと複数匹が同じ餌でreservedになり、7秒停止する魚が量産される。
     const occupiedBaits = new Set();
     for (const f of this.fishes.values()) {
       if (f.targetBaitId && (f.state === 'approaching' || f.state === 'reserved' || f.state === 'hooked')) {
@@ -157,13 +156,18 @@ export class SharedWorld {
           occupiedBaits.delete(f.targetBaitId);
           f.state = 'swimming'; f.targetBaitId = null;
         } else {
-          const dx = bait.x - f.x, dz = bait.z - f.z;
-          const d = Math.hypot(dx, dz);
+          const dx = bait.x - f.x, dy = bait.y - f.y, dz = bait.z - f.z;
+          const horizontalD = Math.hypot(dx, dz);
+          const distance3D = Math.hypot(dx, dy, dz);
           const speed = 1.4 + Math.min(1.5, f.length / 100);
-          if (d > 0.001) { f.vx = dx / d * speed; f.vz = dz / d * speed; }
+          if (horizontalD > 0.001) { f.vx = dx / horizontalD * speed; f.vz = dz / horizontalD * speed; }
+          else { f.vx = 0; f.vz = 0; }
+          // XZが先に到着してもYが餌位置へ追いつくまで動き続ける。
           f.x += f.vx * TICK; f.z += f.vz * TICK;
-          f.y += (bait.y - f.y) * 0.08;
-          if (d <= BITE_R) {
+          f.y += dy * 0.12;
+          if (distance3D <= BITE_R) {
+            f.x = bait.x; f.y = bait.y; f.z = bait.z;
+            f.vx = 0; f.vz = 0;
             f.state = 'reserved'; f.ownerPlayerId = bait.playerId; f.stateAt = now;
           } else if (now - f.stateAt > 18000) {
             occupiedBaits.delete(f.targetBaitId);
