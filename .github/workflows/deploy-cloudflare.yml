@@ -32,6 +32,12 @@ jobs:
       - name: Test shared world
         run: node scripts/mp-world-test.mjs
 
+      - name: Sync RealtimeKit Worker secret
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: printf '%s' "$CLOUDFLARE_API_TOKEN" | npx wrangler secret put REALTIMEKIT_API_TOKEN
+
       - name: Deploy to Cloudflare Workers
         uses: cloudflare/wrangler-action@v3
         with:
