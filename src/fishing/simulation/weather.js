@@ -1,8 +1,12 @@
 export const WEATHER_RULES = {
-  clear: { key: 'clear', weight: 44 },
-  cloudy: { key: 'cloudy', weight: 34 },
-  rain: { key: 'rain', weight: 22 },
+  clear: { key: 'clear', weight: 44, bite: 1.0 },
+  cloudy: { key: 'cloudy', weight: 34, bite: 1.12 },
+  rain: { key: 'rain', weight: 22, bite: 1.3 },
 };
+
+export function weatherBite(key) {
+  return WEATHER_RULES[key]?.bite ?? 1;
+}
 
 export function nextWeatherKey(currentKey, rng = Math.random) {
   const list = Object.values(WEATHER_RULES);
