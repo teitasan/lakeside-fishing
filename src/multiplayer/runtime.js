@@ -1,6 +1,28 @@
 import { RemoteFishSchool } from './remoteFish.js';
 import { MultiplayerFishingSync } from './fishingSync.js';
 import { installFishingSession, isFishingLineState } from '../fishing/session.js';
+import { pickSpecies } from '../fishing/simulation/rules.js';
+import { timeBand } from '../util.js';
+
+function installSharedFishingRules(Game) {
+  if (Game.prototype.__sharedFishingRulesInstalled) return;
+  Game.prototype.__sharedFishingRulesInstalled = true;
+  Game.prototype.rollSpecies = function (depth, opts = {}) {
+    return pickSpecies({
+      depth,
+      band: timeBand(this.state.clock),
+      weather: this.env.weather.key,
+      useBait: !!opts.bait,
+      bait: this.bait,
+      layer: opts.layer ?? this.rigLayer.id,
+      bed: opts.bed ?? null,
+      nearStruct: !!opts.struct,
+      nearSpecies: opts.near || null,
+      rodAttract: this.rod.attract,
+      level: this.state.level,
+    });
+  };
+}
 
 function installFishingEventBridge(Game) {
   if (Game.prototype.__fishingEventBridgeInstalled) return;
@@ -30,7 +52,7 @@ function installFishingEventBridge(Game) {
 }
 
 export function installMultiplayerRuntime(Game) {
-  installFishingSession(Game); installFishingEventBridge(Game);
+  installSharedFishingRules(Game); installFishingSession(Game); installFishingEventBridge(Game);
   if (Game.prototype.__sharedFishInstalled) return;
   Game.prototype.__sharedFishInstalled = true;
   const build = Game.prototype.build;
