@@ -4,10 +4,10 @@
 **朝焼けの湖で、静かに糸を垂れる。**  
 深場には *湖の主* が眠っているという。
 
-### ▶ [ブラウザで遊ぶ](https://teitasan.github.io/lakeside-fishing/)
+### ▶ [ブラウザで遊ぶ](https://lakeside-fishing.teitasan.workers.dev/)
 
 インストール不要・ブラウザだけで完結。音が出ます。PC + マウス推奨。  
-**日本語 / English** 両対応。
+**日本語 / English** 両対応。タイトルから **みんなで遊ぶ** で同じ湖に入れます。
 
 ![Lakeside Fishing](docs/screenshot.png)
 
@@ -97,4 +97,5 @@
 - 釣り人・竿モデル: [Quaternius](https://quaternius.com/)（CC0）
 - エンジン: Three.js（リポジトリ内に同梱・外部通信なし）
 
-GitHub Pages で配信中 → [teitasan.github.io/lakeside-fishing](https://teitasan.github.io/lakeside-fishing/)
+Cloudflare Workers で配信中 → [lakeside-fishing.teitasan.workers.dev](https://lakeside-fishing.teitasan.workers.dev/)  
+（旧 GitHub Pages: [teitasan.github.io/lakeside-fishing](https://teitasan.github.io/lakeside-fishing/)）

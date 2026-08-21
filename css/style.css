@@ -276,6 +276,20 @@ body.playing #hint-bar { opacity: .5; }
 .btn.danger { border-color: rgba(255, 93, 93, .45); color: #ffb0b0; }
 .btn[disabled] { opacity: .35; cursor: not-allowed; transform: none !important; box-shadow: none !important; }
 
+/* ---------- タイトル: みんなで遊ぶ ---------- */
+.multi-join { display: flex; gap: 8px; justify-content: center; align-items: center; margin-top: 10px; }
+.multi-join input {
+  width: 180px; min-width: 0; background: rgba(0, 0, 0, .45); color: #eaf4ff;
+  border: 1px solid rgba(255, 255, 255, .2); border-radius: 10px; padding: 9px 12px;
+  font-family: inherit; font-size: 13.5px; text-align: center; letter-spacing: .04em;
+}
+.multi-join input::placeholder { color: rgba(219, 230, 245, .4); }
+.multi-join .btn { font-size: 13px; padding: 9px 16px; white-space: nowrap; }
+/* マルチプレイ中は湖の作り直しと「ひと休み」を出さない（世界は共有・時刻はサーバー基準） */
+body.multiplayer .lake-seed,
+body.multiplayer .lake-box .row.small,
+body.multiplayer #btn-rest { display: none; }
+
 /* ---------- タイトル ---------- */
 #title-screen {
   background: radial-gradient(130% 110% at 50% 0%, rgba(12, 30, 48, .55) 0%, rgba(4, 8, 14, .88) 72%);

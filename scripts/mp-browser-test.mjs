@@ -1,0 +1,185 @@
+/* マルチプレイのブラウザ実機テスト（依存なし・CDP 直叩き）
+   ヘッドレス Chrome で 2 タブを開き、両方をマルチプレイで湖へ入れて
+   「片方が歩くと、もう片方から見える位置が動く」ことを確かめる。
+   使い方: 先に Chrome を --remote-debugging-port=9222 で起動しておき、
+           node scripts/mp-browser-test.mjs [URL]
+*/
+
+const GAME_URL = process.argv[2] || 'http://localhost:8787/';
+const CDP = 'http://127.0.0.1:9222';
+
+const fail = (msg) => { console.error(`NG: ${msg}`); process.exit(1); };
+const ok = (msg) => console.log(`OK: ${msg}`);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** 1 タブぶんの CDP セッション */
+async function openTab(url) {
+  const res = await fetch(`${CDP}/json/new?${encodeURIComponent(url)}`, { method: 'PUT' });
+  const info = await res.json();
+  const ws = new WebSocket(info.webSocketDebuggerUrl);
+  await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
+  let seq = 0;
+  const waiting = new Map();
+  const errors = [];
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.id && waiting.has(m.id)) {
+      const { res: resolve, rej } = waiting.get(m.id);
+      waiting.delete(m.id);
+      if (m.error) rej(new Error(m.error.message));
+      else resolve(m.result);
+    } else if (m.method === 'Runtime.exceptionThrown') {
+      errors.push(m.params.exceptionDetails?.exception?.description || 'exception');
+    }
+  };
+  const send = (method, params = {}) => new Promise((resolve, rej) => {
+    const id = ++seq;
+    waiting.set(id, { res: resolve, rej });
+    ws.send(JSON.stringify({ id, method, params }));
+  });
+  await send('Runtime.enable');
+  await send('Page.enable');
+  const evalJs = async (expr) => {
+    const r = await send('Runtime.evaluate', {
+      expression: expr, returnByValue: true, awaitPromise: true,
+    });
+    if (r.exceptionDetails) {
+      throw new Error(r.exceptionDetails.exception?.description || 'eval error');
+    }
+    return r.result.value;
+  };
+  return { send, evalJs, errors, close: () => ws.close() };
+}
+
+/** ゲームがマルチプレイで湖に立つまで待つ */
+async function waitReady(tab, label, timeoutMs = 180000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    const st = await tab.evalJs(`(() => {
+      const g = window.__game;
+      if (!g) return 'boot';
+      if (!g.playing) return 'loading';
+      if (!g.multiplayer) return 'not-mp';
+      if (!g.mp || !g.mp.connected) return 'connecting';
+      return 'ready';
+    })()`).catch((e) => `eval:${e.message}`);
+    if (st === 'ready') { ok(`${label}: マルチプレイで湖に入った (${((Date.now() - t0) / 1000).toFixed(1)}s)`); return; }
+    if (st === 'not-mp') fail(`${label}: マルチプレイモードで起動していない`);
+    await sleep(1000);
+  }
+  fail(`${label}: 起動がタイムアウト（コンソールエラー: ${tab.errors.join(' / ') || 'なし'}）`);
+}
+
+async function screenshot(tab, path) {
+  const { data } = await tab.send('Page.captureScreenshot', { format: 'png' });
+  const { writeFileSync } = await import('node:fs');
+  writeFileSync(path, Buffer.from(data, 'base64'));
+  ok(`スクリーンショット: ${path}`);
+}
+
+/** ゲームの origin を開いてから join フラグを入れてリロード（タイトルのボタンと同じ流れ） */
+async function joinAs(tab, name) {
+  await tab.send('Page.navigate', { url: GAME_URL });
+  await sleep(2000);
+  await tab.evalJs(
+    `sessionStorage.setItem('lakeside-fishing-mp-join', ${JSON.stringify(name)}); location.reload(); 'ok'`
+  );
+}
+
+/* ---- タブ A（あさひ） ---- */
+const a = await openTab('about:blank');
+await joinAs(a, 'あさひ');
+await waitReady(a, 'A(あさひ)');
+
+/* ---- タブ B（ゆうひ） ---- */
+const b = await openTab('about:blank');
+await joinAs(b, 'ゆうひ');
+await waitReady(b, 'B(ゆうひ)');
+
+await sleep(1500);   // 参加通知と初回状態の往復を待つ
+
+/* ---- 相互に見えているか ---- */
+const seenByA = await a.evalJs(`window.__game.remotePlayers.count`);
+const seenByB = await b.evalJs(`window.__game.remotePlayers.count`);
+if (seenByA !== 1) fail(`A から見えている他プレイヤーが ${seenByA} 人（1 人のはず）`);
+if (seenByB !== 1) fail(`B から見えている他プレイヤーが ${seenByB} 人（1 人のはず）`);
+ok('A と B が互いを 1 人ずつ認識している');
+
+const nameSeenByA = await a.evalJs(
+  `[...window.__game.remotePlayers.map.values()][0].name`
+);
+if (nameSeenByA !== 'ゆうひ') fail(`A から見えた名前が「${nameSeenByA}」（「ゆうひ」のはず）`);
+ok('名前も正しく届いている（日本語 OK）');
+
+/* ---- B が動く → A から見た B の位置が動くか ----
+   桟橋先端は湖側へ歩けないので、キー入力ではなく座標を動かして
+   「送信 → サーバー中継 → 相手の補間」を確かめる */
+const posBefore = await a.evalJs(
+  `(() => { const p = [...window.__game.remotePlayers.map.values()][0].group.position; return [p.x, p.z]; })()`
+);
+const bMovedTo = await b.evalJs(`(() => {
+  const g = window.__game;
+  const dir = g.terrain.dockDir;
+  g.pos.x -= dir.x * 8;
+  g.pos.z -= dir.z * 8;
+  return [g.pos.x, g.pos.z];
+})()`);
+await sleep(800);
+/* 裏タブは描画（補間）が止まるので、A を前面にしてから見た目を測る */
+await a.send('Page.bringToFront');
+await sleep(1200);
+const netAfter = await a.evalJs(
+  `(() => { const p = [...window.__game.remotePlayers.map.values()][0]; return [p.target.x, p.target.z]; })()`
+);
+const posAfter = await a.evalJs(
+  `(() => { const p = [...window.__game.remotePlayers.map.values()][0].group.position; return [p.x, p.z]; })()`
+);
+const netMoved = Math.hypot(netAfter[0] - posBefore[0], netAfter[1] - posBefore[1]);
+const moved = Math.hypot(posAfter[0] - posBefore[0], posAfter[1] - posBefore[1]);
+if (netMoved < 3) {
+  fail(`B の移動が A に届いていない (net ${netMoved.toFixed(2)}m, Bは ${bMovedTo})`);
+}
+if (moved < 2) {
+  fail(`B の移動は届いたが、A の見た目が追従していない (${moved.toFixed(2)}m, net ${netMoved.toFixed(2)}m)`);
+}
+ok(`B の移動が A の画面へ反映された（見た目 ${moved.toFixed(1)}m / 受信 ${netMoved.toFixed(1)}m）`);
+
+/* ---- 時刻が両者で揃っているか ---- */
+await a.evalJs(`window.__game.update(0.016)`);
+await b.evalJs(`window.__game.update(0.016)`);
+const clockA = await a.evalJs(`window.__game.state.clock`);
+const clockB = await b.evalJs(`window.__game.state.clock`);
+const clockDiffMin = Math.abs(clockA - clockB) * 60;
+if (clockDiffMin > 2) fail(`時刻が ${clockDiffMin.toFixed(1)} 分ずれている`);
+ok(`ゲーム内時刻が揃っている（差 ${clockDiffMin.toFixed(2)} 分）`);
+
+/* ---- A のカメラを B へ向けてスクリーンショット ---- */
+await a.evalJs(`(() => {
+  const g = window.__game;
+  const r = [...g.remotePlayers.map.values()][0].group.position;
+  g.yaw = Math.atan2(r.x - g.pos.x, r.z - g.pos.z);
+  g.pitch = -0.05;
+  return 'ok';
+})()`);
+await sleep(800);
+await screenshot(a, '/tmp/lakeside-mp-viewA.png');
+await screenshot(b, '/tmp/lakeside-mp-viewB.png');
+
+/* ---- B を切断 → A に反映されるか ---- */
+await b.evalJs(`window.__game.mp.close(); 'ok'`);
+await sleep(1200);
+const afterLeave = await a.evalJs(`window.__game.remotePlayers.count`);
+if (afterLeave !== 0) fail(`B が切断したのに A からまだ ${afterLeave} 人見えている`);
+ok('切断が A へ届き、B の姿が消えた');
+
+const errA = a.errors.filter((e) => !/AudioContext|autoplay/i.test(e));
+const errB = b.errors.filter((e) => !/AudioContext|autoplay/i.test(e));
+if (errA.length || errB.length) {
+  console.warn(`コンソールエラー A: ${errA.join(' / ') || 'なし'}`);
+  console.warn(`コンソールエラー B: ${errB.join(' / ') || 'なし'}`);
+}
+
+a.close();
+b.close();
+console.log('\nブラウザ実機テストにすべて合格');
+process.exit(0);

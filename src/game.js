@@ -28,6 +28,8 @@ import {
   t, joinList, gearName, terrainName, weatherName, achievementName,
   fightHint, rigName, dirLabel,
 } from './i18n.js';
+import { MultiplayerClient, MULTIPLAYER_SEED } from './network/multiplayer.js';
+import { RemotePlayers } from './multiplayer/remotePlayer.js';
 
 const GRAVITY = 9.8;
 const EXPOSURE = 0.78;
@@ -195,11 +197,32 @@ const _v6 = new THREE.Vector3();
 const _v7 = new THREE.Vector3();
 const _lineEnd = new THREE.Vector3();
 
+/** トースト等の innerHTML に他人の名前を入れる前のエスケープ */
+const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+));
+
 export class Game {
-  constructor(canvas) {
+  constructor(canvas, opts = {}) {
     this.canvas = canvas;
     this.bootedWithSave = Save.hasSave();
     this.state = Save.load();
+
+    /* --- マルチプレイ --- */
+    this.multiplayer = !!opts.multiplayer;
+    this.playerName = opts.playerName || '';
+    this.mp = null;              // MultiplayerClient（接続後に入る）
+    this.remotePlayers = null;   // RemotePlayers（マルチ時のみ）
+    /* マルチ中はシングル用のセーブ項目（湖シード・時刻・測量マップ）を
+       上書きしない。ここで退避して、保存時に必ず書き戻す */
+    this._soloKeep = this.multiplayer ? {
+      seed: this.state.seed,
+      clock: this.state.clock,
+      map: {
+        seed: this.state.map ? this.state.map.seed : null,
+        cells: this.state.map ? this.state.map.cells : '',
+      },
+    } : null;
     this.audio = new AudioEngine();
     this.playing = false;
     this.time = 0;
@@ -276,14 +299,19 @@ export class Game {
     this.env.setQuality(q);
 
     await onProgress(t('ui.loadingLake'));
-    // シードを決めて、遊べる湖になるまで検証してから採用する
-    const wantSeed = (this.state.settings.randomLake || !this.state.seed)
-      ? Save.randomLakeSeed() : this.state.seed;
+    // シードを決めて、遊べる湖になるまで検証してから採用する。
+    // みんなで遊ぶときは全員が同じ固定シード＝同じ湖（地形の同期は不要）
+    const wantSeed = this.multiplayer ? MULTIPLAYER_SEED
+      : (this.state.settings.randomLake || !this.state.seed)
+        ? Save.randomLakeSeed() : this.state.seed;
     const resolved = resolveLake(wantSeed);
     this.lake = resolved.lake;
     this.lakeStats = resolved.stats;
     this.lakeTries = resolved.tries;
-    if (this.state.seed !== resolved.seed) {
+    if (this.multiplayer) {
+      // 表示・測量マップの照合用。保存には _soloKeep の値が使われる
+      this.state.seed = resolved.seed;
+    } else if (this.state.seed !== resolved.seed) {
       this.state.seed = resolved.seed;
       Save.saveNow(this.state);
     }
@@ -316,6 +344,11 @@ export class Game {
     // 釣り人と竿は外部の glTF なので読み終わるまで待つ
     await this.angler.load(onProgress);
     this.angler.setRod(this.state.gear.rod);   // セーブから復元した竿の見た目にする
+
+    if (this.multiplayer) {
+      this.remotePlayers = new RemotePlayers(this.scene);
+      await this.remotePlayers.load(onProgress);
+    }
 
     /* 水面のマーカー（狙い点・着水予測）は水面に置いた輪 */
     const mkMarker = (r0, r1, color, opacity) => {
@@ -532,14 +565,99 @@ export class Game {
     }, 200);
   }
 
-  saveState() {
+  /* =========================================================
+     マルチプレイ
+     ========================================================= */
+  /** マルチプレイで開始（build 済み・固定シードの湖で呼ばれる） */
+  startMultiplayer() {
+    document.body.classList.add('multiplayer');
+    this.start(true);   // セーブ（お金・装備）は普段のものを使う
+    // 全員が桟橋の同じ先端に重ならないよう、横と岸側へ少しずらす
+    const dir = this.terrain.dockDir;
+    const rightX = -dir.z, rightZ = dir.x;
+    const side = (Math.random() * 2 - 1) * 1.5;
+    const back = -1.2 - Math.random() * 1.8;
+    const nx = this.pos.x + rightX * side + dir.x * back;
+    const nz = this.pos.z + rightZ * side + dir.z * back;
+    if (this.terrain.onDock(nx, nz) !== null) {
+      this.pos.x = nx;
+      this.pos.z = nz;
+      const y = this.terrain.onDock(nx, nz);
+      this.pos.y = y;
+      this.visY = y;
+      this.angler.setPosition(nx, y, nz);
+    }
+    this._connectMultiplayer();
+  }
+
+  _connectMultiplayer() {
+    const mp = new MultiplayerClient();
+    this.mp = mp;
+    mp.onWelcome = (m) => {
+      // 時刻はサーバー基準。以降は実時間から復元するので、裏タブでもずれない
+      this._mpClockBase = m.clock;
+      this._mpClockWall = Date.now();
+      this.state.clock = m.clock;
+      for (const p of m.players) this.remotePlayers.upsert(p);
+      this.ui.toast(t('ui.toast.mpConnected', {
+        icon: iconHtml('ui-sparkle'), n: m.players.length + 1,
+      }), 'gold');
+    };
+    mp.onJoin = (p) => {
+      this.remotePlayers.upsert(p);
+      this.ui.toast(t('ui.toast.mpJoined', { name: escHtml(p.name) }), 'good');
+    };
+    mp.onLeave = (p) => {
+      const name = this.remotePlayers.nameOf(p.id) || p.name || '';
+      this.remotePlayers.remove(p.id);
+      if (name) this.ui.toast(t('ui.toast.mpLeft', { name: escHtml(name) }));
+    };
+    mp.onState = (p) => this.remotePlayers.upsert(p);
+    mp.onError = (code) => {
+      this.ui.toast(t(code === 'full' ? 'ui.toast.mpFull'
+        : code === 'version' ? 'ui.toast.mpVersion' : 'ui.toast.mpError'), 'bad');
+    };
+    mp.onClose = () => this.ui.toast(t('ui.toast.mpClosed'), 'bad');
+    mp.connect(this.playerName);
+    /* 描画ループは裏タブで止まるので、位置送信だけはタイマーで回す。
+       裏にいる間はブラウザが 1Hz 程度まで間引くが、完全に凍りはしない */
+    if (this._mpTimer) clearInterval(this._mpTimer);
+    this._mpTimer = setInterval(() => {
+      if (this.playing && this.mp) {
+        this.mp.sendState(this.pos.x, this.visY, this.pos.z, this.yaw, this._mpAction());
+      }
+    }, 100);
+  }
+
+  /** 他プレイヤーに見せる自分のアクション */
+  _mpAction() {
+    switch (this.fs) {
+      case 'charge': return 'charge';
+      case 'flight': return this.retrieving ? 'reel' : 'cast';
+      case 'wait': case 'nibble': case 'bite': return 'wait';
+      case 'fight': return 'fight';
+      case 'landing': case 'card': return 'landed';
+      default:
+        return this.moveAmt > 0.65 ? 'run' : this.moveAmt > 0.05 ? 'walk' : 'idle';
+    }
+  }
+
+  saveState() { this._persist(false); }
+
+  /**
+   * セーブの実体。マルチ中は湖シード・時刻・測量マップをシングルの値へ
+   * 戻してから保存する（お金・XP・装備・図鑑は両モード共通で持ち帰る）
+   */
+  _persist(immediate) {
     // 測量した格子はビット列 → base64 にして持たせる
     if (this._mapDirty && this.mapBits) {
       this.state.map.cells = btoa(String.fromCharCode(...this.mapBits));
       this.state.map.seed = this.state.seed;
       this._mapDirty = false;
     }
-    Save.save(this.state);
+    const data = this.multiplayer ? { ...this.state, ...this._soloKeep } : this.state;
+    if (immediate) Save.saveNow(data);
+    else Save.save(data);
   }
 
   resetSave() {
@@ -560,6 +678,7 @@ export class Game {
 
   /** シードを指定して湖を作り直す（再読み込み） */
   setLakeSeed(seed) {
+    if (this.multiplayer) return false;   // みんなで遊ぶ湖は固定シード
     const n = Math.floor(Number(seed));
     if (!Number.isFinite(n) || n < 1 || n > 0xffffffff) {
       this.ui.toast(t('ui.toast.badSeed'), 'bad');
@@ -604,6 +723,12 @@ export class Game {
   }
 
   rest() {
+    if (this.multiplayer) {
+      // 時刻はサーバー基準なので一人だけ進められない
+      this.ui.toast(t('ui.toast.mpNoRest'), 'bad');
+      this.audio.deny();
+      return;
+    }
     if (this.fs !== 'idle') {
       this.ui.toast(t('ui.toast.restBusy'), 'bad');
       this.audio.deny();
@@ -1262,12 +1387,19 @@ export class Game {
     // メニュー（ポーズ・ショップ・図鑑）を開いている間は世界を止める。
     // 止めないと、ため中にメニューを開いてもキャストが進み、
     // ボタンを離した瞬間にメニュー越しに発射されてしまう。
-    const paused = this.playing && this.ui.isBlocking() && this.ui.openModal !== 'catch';
+    // みんなで遊んでいる間は世界を止められない（時刻と他プレイヤーが進み続ける）
+    const paused = !this.multiplayer
+      && this.playing && this.ui.isBlocking() && this.ui.openModal !== 'catch';
     const sdt = paused ? 0 : dt;
     this.time += sdt;
 
     if (this.playing && !paused) {
-      this.state.clock = (this.state.clock + dt * HOURS_PER_SEC) % 24;
+      if (this.multiplayer && this._mpClockWall != null) {
+        this.state.clock = (this._mpClockBase
+          + ((Date.now() - this._mpClockWall) / 1000) * HOURS_PER_SEC) % 24;
+      } else {
+        this.state.clock = (this.state.clock + dt * HOURS_PER_SEC) % 24;
+      }
       const changed = this.env.tickWeather(dt * HOURS_PER_SEC);
       if (changed) {
         this.ui.toast(t('ui.toast.weatherChanged', {
@@ -1303,6 +1435,14 @@ export class Game {
         if (f.pos.distanceTo(this.camera.position) < 60) this.audio.splash(0.6);
       },
     });
+
+    // 他プレイヤー（補間）と自分の状態送信（10Hz に間引かれる）
+    if (this.multiplayer && this.remotePlayers) {
+      this.remotePlayers.update(dt);
+      if (this.playing && this.mp) {
+        this.mp.sendState(this.pos.x, this.visY, this.pos.z, this.yaw, this._mpAction());
+      }
+    }
 
     /* 釣り人。しなりの向きと竿先の狙いは、道糸が実際につながっている先＝ウキ。
        ファイト中に魚の口を渡すと、ウキは水面・魚は水中なので竿先が魚を向いても
@@ -2532,7 +2672,7 @@ export class Game {
     this._exitLock(); // カーソルを戻し、カードをマウスで操作できるようにする
     this.ui.showCatch({ sp, len, weight, value, xp, record, isNew, albino, isNewAlbino, title, titlePrefix });
     this._checkAchievements();
-    Save.saveNow(s);
+    this._persist(true);
   }
 
   dismissCatch() {

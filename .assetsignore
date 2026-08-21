@@ -1,0 +1,15 @@
+# Workers Static Assets にアップロードしないもの
+.git
+.gitignore
+.wrangler
+.claude
+.DS_Store
+.assetsignore
+wrangler.jsonc
+worker
+scripts
+docs
+node_modules
+serve.sh
+README.md
+*.jsonl

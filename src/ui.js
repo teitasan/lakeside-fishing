@@ -20,6 +20,7 @@ import {
   terrainGroupLabel, gearKindLabel, structLabel, timeShort, weatherShort, layerShort,
   fishCount,
 } from './i18n.js';
+import { MP_SESSION_KEY, MP_NAME_KEY } from './network/multiplayer.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -502,6 +503,34 @@ export class UI {
 
     $('btn-start').addEventListener('click', () => g.start(false));
     $('btn-continue').addEventListener('click', () => g.start(true));
+
+    /* --- みんなで遊ぶ（オンライン） --- */
+    const joinRow = $('multi-join');
+    const nameInput = $('multi-name');
+    try {
+      nameInput.value = localStorage.getItem(MP_NAME_KEY) || '';
+    } catch (e) { /* noop */ }
+    $('btn-multi').addEventListener('click', () => {
+      joinRow.classList.toggle('hidden');
+      if (!joinRow.classList.contains('hidden')) nameInput.focus();
+      g.audio.click();
+    });
+    const joinMultiplayer = () => {
+      const name = (nameInput.value || '').trim().slice(0, 12) || t('ui.title.defaultName');
+      try { localStorage.setItem(MP_NAME_KEY, name); } catch (e) { /* noop */ }
+      try {
+        sessionStorage.setItem(MP_SESSION_KEY, name);
+      } catch (e) {
+        this.toast(t('ui.toast.mpError'), 'bad');
+        return;
+      }
+      location.reload();   // 固定シードの湖で作り直してから接続する
+    };
+    $('btn-multi-go').addEventListener('click', joinMultiplayer);
+    nameInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') joinMultiplayer();
+      e.stopPropagation();   // Space/Enter がタイトルの「はじめる」に取られないように
+    });
     $('btn-card-ok').addEventListener('click', () => g.dismissCatch());
     // カード全体・背景クリックでも次へ（Space と同じ）
     this.el.catchCard.addEventListener('click', (e) => {

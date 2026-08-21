@@ -5,6 +5,7 @@ import { Game, AUTOSTART_KEY } from './game.js';
 import { hasSave } from './save.js';
 import { iconHtml } from './icons.js';
 import { t, setLang } from './i18n.js';
+import { MP_SESSION_KEY } from './network/multiplayer.js';
 
 const canvas = document.getElementById('scene');
 const loadingLabel = document.querySelector('#loading span');
@@ -18,9 +19,16 @@ function fatal(msg) {
 }
 
 async function boot() {
+  // タイトルの「みんなで遊ぶ」→ 再読み込み経由で来た場合は名前が入っている
+  let mpName = null;
+  try {
+    mpName = sessionStorage.getItem(MP_SESSION_KEY);
+    if (mpName) sessionStorage.removeItem(MP_SESSION_KEY);
+  } catch (e) { /* noop */ }
+
   let game;
   try {
-    game = new Game(canvas);
+    game = new Game(canvas, { multiplayer: !!mpName, playerName: mpName || '' });
     setLang(game.state.settings.lang || 'ja');
     window.__game = game; // デバッグ用
   } catch (e) {
@@ -50,7 +58,9 @@ async function boot() {
     autostart = sessionStorage.getItem(AUTOSTART_KEY) === '1';
     if (autostart) sessionStorage.removeItem(AUTOSTART_KEY);
   } catch (e) { /* noop */ }
-  if (autostart) {
+  if (mpName) {
+    game.startMultiplayer();
+  } else if (autostart) {
     game.start(true);
     game.ui.toast(t('ui.toast.newLakeToast', {
       icon: iconHtml('ui-map'),

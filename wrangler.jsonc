@@ -1,0 +1,29 @@
+/* ===========================================================
+   Cloudflare Workers の設定
+   ------------------------------------------------------------
+   - 静的アセット: リポジトリ直下をそのまま配信（除外は .assetsignore）
+   - /ws         : Durable Object (MultiplayerRoom) が WebSocket を受ける
+   ローカル開発: npx wrangler dev
+   デプロイ    : npx wrangler deploy
+   =========================================================== */
+{
+  "name": "lakeside-fishing",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-05-01",
+  "assets": {
+    "directory": ".",
+    "binding": "ASSETS",
+    "run_worker_first": ["/ws"]
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "ROOM", "class_name": "MultiplayerRoom" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["MultiplayerRoom"] }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

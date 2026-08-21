@@ -271,6 +271,12 @@ export function applyDom(root) {
     const val = t(key);
     if (val !== key) el.setAttribute('title', val);
   });
+  scope.querySelectorAll('[data-i18n-ph]').forEach((el) => {
+    const key = el.getAttribute('data-i18n-ph');
+    if (!key) return;
+    const val = t(key);
+    if (val !== key) el.setAttribute('placeholder', val);
+  });
   scope.querySelectorAll('[data-i18n-aria]').forEach((el) => {
     const key = el.getAttribute('data-i18n-aria');
     if (!key) return;
