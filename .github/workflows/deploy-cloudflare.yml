@@ -29,6 +29,9 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Test fishing session
+        run: node scripts/fishing-session-test.mjs
+
       - name: Test shared world
         run: node scripts/mp-world-test.mjs
 
