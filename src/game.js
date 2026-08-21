@@ -2034,8 +2034,8 @@ export class Game {
       /* ---------------- アタリ本番 ---------------- */
       case 'bite': {
         const surf = this.water.surfaceY(this.bobber.x, this.bobber.z);
-        const t = clamp01(this.stateTime / 0.22);
-        this.bobber.y = surf + 0.012 - t * 0.42 - Math.sin(this.stateTime * 24) * 0.03;
+        const biteProgress = clamp01(this.stateTime / 0.22);
+        this.bobber.y = surf + 0.012 - biteProgress * 0.42 - Math.sin(this.stateTime * 24) * 0.03;
         bob.position.copy(this.bobber);
         if (Math.random() < dt * 6) this.water.addRipple(this.bobber.x, this.bobber.z, 0.5, 0.9);
         this.angler.updateLine(_v1, this.bobber, 0.25, this.camera, this._uwFx ? null : surf);
