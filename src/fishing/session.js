@@ -3,6 +3,17 @@ export const FishingState = Object.freeze({
   NIBBLE: 'nibble', BITE: 'bite', FIGHT: 'fight', LANDING: 'landing', CARD: 'card',
 });
 
+export const FishingEvent = Object.freeze({
+  BAIT_PLACED: 'bait-placed',
+  BAIT_CLEARED: 'bait-cleared',
+  TARGET_ACQUIRED: 'target-acquired',
+  TARGET_CLEARED: 'target-cleared',
+  HOOKED: 'hooked',
+  MISSED: 'missed',
+  FISH_ESCAPED: 'fish-escaped',
+  FISH_CAUGHT: 'fish-caught',
+});
+
 const SESSION_FIELDS = [
   'fs', 'charge', 'chargeDir', 'castPower', 'castPerfect', 'castAcc',
   'biteTimer', 'hookFish', 'fight', 'retrieving', 'stateTime', 'approachT',
@@ -17,11 +28,60 @@ export class FishingSession {
     this.hookFish = null; this.fight = null; this.retrieving = false;
     this.stateTime = 0; this.approachT = 0;
     this.baitPresent = false; this.baitRevision = 0;
+    this.listeners = new Map();
   }
-  enter(state, { resetTime = true } = {}) { this.fs = state; if (resetTime) this.stateTime = 0; }
-  setBaitPresent(present) { const next = !!present; if (next !== this.baitPresent) this.baitRevision++; this.baitPresent = next; }
-  beginApproach(fish) { this.hookFish = fish || null; this.approachT = 0; }
-  clearTarget() { this.hookFish = null; this.approachT = 0; }
+
+  on(type, listener) {
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+    this.listeners.get(type).add(listener);
+    return () => this.listeners.get(type)?.delete(listener);
+  }
+
+  emit(type, detail = {}) {
+    for (const listener of this.listeners.get(type) || []) listener(detail);
+  }
+
+  enter(state, { resetTime = true } = {}) {
+    this.fs = state;
+    if (resetTime) this.stateTime = 0;
+  }
+
+  setBaitPresent(present, detail = {}) {
+    const next = !!present;
+    if (next === this.baitPresent) return;
+    this.baitPresent = next;
+    this.baitRevision++;
+    this.emit(next ? FishingEvent.BAIT_PLACED : FishingEvent.BAIT_CLEARED, detail);
+  }
+
+  beginApproach(fish, detail = {}) {
+    this.hookFish = fish || null;
+    this.approachT = 0;
+    if (fish) this.emit(FishingEvent.TARGET_ACQUIRED, { fish, ...detail });
+  }
+
+  clearTarget(detail = {}) {
+    const fish = this.hookFish;
+    this.hookFish = null;
+    this.approachT = 0;
+    if (fish) this.emit(FishingEvent.TARGET_CLEARED, { fish, ...detail });
+  }
+
+  notifyHooked(fish = this.hookFish) {
+    if (fish) this.emit(FishingEvent.HOOKED, { fish });
+  }
+
+  notifyMissed(fish, { baitKept = false } = {}) {
+    this.emit(FishingEvent.MISSED, { fish, baitKept });
+  }
+
+  notifyEscaped(fish, detail = {}) {
+    if (fish) this.emit(FishingEvent.FISH_ESCAPED, { fish, ...detail });
+  }
+
+  notifyCaught(fish, detail = {}) {
+    if (fish) this.emit(FishingEvent.FISH_CAUGHT, { fish, ...detail });
+  }
 }
 
 function sessionOf(game) {
