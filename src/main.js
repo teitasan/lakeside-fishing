@@ -6,6 +6,9 @@ import { hasSave } from './save.js';
 import { iconHtml } from './icons.js';
 import { t, setLang } from './i18n.js';
 import { MP_SESSION_KEY } from './network/multiplayer.js';
+import { installMultiplayerRuntime } from './multiplayer/runtime.js';
+
+installMultiplayerRuntime(Game);
 
 const canvas = document.getElementById('scene');
 const loadingLabel = document.querySelector('#loading span');
@@ -19,7 +22,6 @@ function fatal(msg) {
 }
 
 async function boot() {
-  // タイトルの「みんなで遊ぶ」→ 再読み込み経由で来た場合は名前が入っている
   let mpName = null;
   try {
     mpName = sessionStorage.getItem(MP_SESSION_KEY);
@@ -30,53 +32,38 @@ async function boot() {
   try {
     game = new Game(canvas, { multiplayer: !!mpName, playerName: mpName || '' });
     setLang(game.state.settings.lang || 'ja');
-    window.__game = game; // デバッグ用
+    window.__game = game;
   } catch (e) {
-    console.error(e);
-    fatal(t('ui.fatal.init', { message: e.message }));
-    return;
+    console.error(e); fatal(t('ui.fatal.init', { message: e.message })); return;
   }
 
   try {
     await game.build(async (msg) => {
       loadingLabel.textContent = msg + '…';
-      // 描画スレッドに1フレーム譲ってローディング表示を更新する
       await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
     });
   } catch (e) {
-    console.error(e);
-    fatal(t('ui.fatal.build', { message: e.message }));
-    return;
+    console.error(e); fatal(t('ui.fatal.build', { message: e.message })); return;
   }
 
   game.ui.hideLoading();
   if (hasSave()) document.getElementById('btn-continue').classList.remove('hidden');
 
-  // 湖を作り直して再読み込みした場合は、タイトルを飛ばしてそのまま再開
   let autostart = false;
   try {
     autostart = sessionStorage.getItem(AUTOSTART_KEY) === '1';
     if (autostart) sessionStorage.removeItem(AUTOSTART_KEY);
   } catch (e) { /* noop */ }
-  if (mpName) {
-    game.startMultiplayer();
-  } else if (autostart) {
+  if (mpName) game.startMultiplayer();
+  else if (autostart) {
     game.start(true);
-    game.ui.toast(t('ui.toast.newLakeToast', {
-      icon: iconHtml('ui-map'),
-      seed: game.state.seed,
-    }), 'gold');
+    game.ui.toast(t('ui.toast.newLakeToast', { icon: iconHtml('ui-map'), seed: game.state.seed }), 'gold');
   }
 
   let last = performance.now();
   function frame(now) {
-    const dt = Math.min(0.1, (now - last) / 1000);
-    last = now;
-    try {
-      game.update(dt);
-    } catch (e) {
-      console.error(e);
-    }
+    const dt = Math.min(0.1, (now - last) / 1000); last = now;
+    try { game.update(dt); } catch (e) { console.error(e); }
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
