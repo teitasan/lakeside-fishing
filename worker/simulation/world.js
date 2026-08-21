@@ -1,235 +1,25 @@
 import { makeLake } from '../../src/lakefield.js';
-import { REAL_FISH } from '../../src/data.js';
+import { REAL_FISH, GEAR, rollLength, rollAlbino } from '../../src/data.js';
+import { pickSpecies, speciesWeight } from '../../src/fishing/simulation/rules.js';
+import { timeBand } from '../../src/util.js';
 
-const SEED = 123456789;
-const TICK = 0.1;
-const BASE_FISH = 18;
-const PER_EXTRA_PLAYER = 8;
-const MAX_FISH = 50;
-const ACTIVE_R = 72;
-const DESPAWN_R = 92;
-const APPROACH_R = 30;
-
-const rand = (a, b) => a + Math.random() * (b - a);
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-
-function weightedSpecies(depth) {
-  const list = REAL_FISH.filter((sp) => sp.rarity > 0 && depth >= sp.depth[0] * 0.65 && depth <= sp.depth[1] + 5);
-  let total = 0;
-  for (const sp of list) total += Math.max(0, sp.spawn || 0);
-  if (!total) return REAL_FISH.find((sp) => sp.id === 'bluegill') || REAL_FISH[0];
-  let r = Math.random() * total;
-  for (const sp of list) {
-    r -= Math.max(0, sp.spawn || 0);
-    if (r <= 0) return sp;
-  }
-  return list[list.length - 1];
-}
-
-function steerFish(f, tx, ty, tz, speedMul) {
-  const dx = tx - f.x, dy = ty - f.y, dz = tz - f.z;
-  const dist = Math.hypot(dx, dy, dz);
-  if (dist < 0.001) return dist;
-  // src/fish.js と同じ基礎速度・上下移動補正・速度補間。
-  const baseSpeed = 0.78 + (f.length / 100) * 1.7;
-  const speed = baseSpeed * speedMul;
-  const desiredX = dx / dist * speed;
-  const desiredY = dy / dist * speed * 0.55;
-  const desiredZ = dz / dist * speed;
-  const alpha = 1 - Math.exp(-2.6 * TICK);
-  f.vx += (desiredX - f.vx) * alpha;
-  f.vy += (desiredY - f.vy) * alpha;
-  f.vz += (desiredZ - f.vz) * alpha;
-  f.x += f.vx * TICK;
-  f.y += f.vy * TICK;
-  f.z += f.vz * TICK;
-  return dist;
-}
-
-export class SharedWorld {
-  constructor() {
-    this.lake = makeLake(SEED);
-    this.fishes = new Map();
-    this.baits = new Map();
-    this.seq = 1;
-    this.weather = 'clear';
-    this.weatherChangedAt = Date.now();
-  }
-
-  targetCount(players) {
-    return Math.min(MAX_FISH, BASE_FISH + Math.max(0, players.length - 1) * PER_EXTRA_PLAYER);
-  }
-
-  spawnNear(players) {
-    if (!players.length) return null;
-    for (let tries = 0; tries < 30; tries++) {
-      const p = players[Math.floor(Math.random() * players.length)];
-      if (!Number.isFinite(p.x) || !Number.isFinite(p.z) || p.fresh) continue;
-      const a = rand(0, Math.PI * 2), r = rand(10, ACTIVE_R);
-      const x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r;
-      const depth = this.lake.depthAt(x, z);
-      if (depth < 0.8) continue;
-      const sp = weightedSpecies(depth);
-      if (!sp) continue;
-      const length = Math.round(rand(sp.len[0], sp.len[1]) * 10) / 10;
-      const fishDepth = clamp(rand(sp.depth[0], Math.min(sp.depth[1], depth - 0.35)), 0.35, Math.max(0.4, depth - 0.35));
-      const id = `f${this.seq++}`;
-      const fish = {
-        id, speciesId: sp.id, length, albino: Math.random() < 0.002,
-        x, y: -fishDepth, z, vx: rand(-0.4, 0.4), vy: 0, vz: rand(-0.4, 0.4),
-        tx: x, tz: z, state: 'swimming', targetBaitId: null, ownerPlayerId: null,
-        turnAt: 0, stateAt: Date.now(), phase: rand(0, 10),
-      };
-      this.fishes.set(id, fish);
-      return fish;
-    }
-    return null;
-  }
-
-  setBait(playerId, bait) {
-    if (!bait) { this.baits.delete(playerId); return; }
-    const x = +bait.x, y = +bait.y, z = +bait.z;
-    if (![x, y, z].every(Number.isFinite)) return;
-    if (Math.abs(x) > 500 || Math.abs(z) > 500 || y > 2 || y < -60) return;
-    this.baits.set(playerId, {
-      id: `b:${playerId}`, playerId, x, y, z,
-      baitType: String(bait.baitType || '').slice(0, 24),
-      rigLayer: String(bait.rigLayer || '').slice(0, 12),
-      at: Date.now(),
-    });
-  }
-
-  hook(playerId, fishId) {
-    const f = this.fishes.get(fishId);
-    if (!f || f.ownerPlayerId !== playerId || f.state !== 'reserved') return false;
-    f.state = 'hooked'; f.stateAt = Date.now();
-    return true;
-  }
-
-  fightUpdate(playerId, fishId, pos) {
-    const f = this.fishes.get(fishId);
-    if (!f || f.ownerPlayerId !== playerId || f.state !== 'hooked') return;
-    const x = +pos.x, y = +pos.y, z = +pos.z;
-    if (![x, y, z].every(Number.isFinite)) return;
-    f.x = x; f.y = y; f.z = z;
-  }
-
-  endFight(playerId, fishId, result) {
-    const f = this.fishes.get(fishId);
-    if (!f || f.ownerPlayerId !== playerId) return null;
-    if (result === 'caught') {
-      this.fishes.delete(fishId);
-      this.baits.delete(playerId);
-      return { removed: true, fish: f };
-    }
-    f.state = 'swimming'; f.ownerPlayerId = null; f.targetBaitId = null;
-    f.stateAt = Date.now(); f.turnAt = 0;
-    f.vx = rand(-1.8, 1.8); f.vy = 0; f.vz = rand(-1.8, 1.8);
-    return { removed: false, fish: f };
-  }
-
-  dropPlayer(playerId) {
-    this.baits.delete(playerId);
-    for (const f of this.fishes.values()) {
-      if (f.ownerPlayerId === playerId) {
-        f.ownerPlayerId = null; f.targetBaitId = null; f.state = 'swimming'; f.stateAt = Date.now();
-      }
-    }
-  }
-
-  tick(players) {
-    const now = Date.now();
-    if (now - this.weatherChangedAt > 180000) {
-      const options = ['clear', 'cloudy', 'rain'].filter((w) => w !== this.weather);
-      this.weather = options[Math.floor(Math.random() * options.length)];
-      this.weatherChangedAt = now;
-    }
-
-    const wanted = this.targetCount(players);
-    while (this.fishes.size < wanted) {
-      if (!this.spawnNear(players)) break;
-    }
-
-    const occupiedBaits = new Set();
-    for (const f of this.fishes.values()) {
-      if (f.targetBaitId && (f.state === 'approaching' || f.state === 'reserved' || f.state === 'hooked')) occupiedBaits.add(f.targetBaitId);
-    }
-
-    for (const [, f] of this.fishes) {
-      if (f.state === 'hooked') continue;
-
-      if (f.state === 'reserved') {
-        const bait = [...this.baits.values()].find((b) => b.id === f.targetBaitId);
-        if (!bait || now - f.stateAt > 7000) {
-          occupiedBaits.delete(f.targetBaitId);
-          f.state = 'swimming'; f.ownerPlayerId = null; f.targetBaitId = null;
-          continue;
-        }
-        // シングルの nibble と同じく、アタリ待ち中は餌の周囲を低速でうろつく。
-        const t = now / 1000;
-        const a = t * 1.6 + f.phase;
-        steerFish(f,
-          bait.x + Math.cos(a) * 0.45,
-          bait.y + Math.sin(a * 0.7) * 0.18,
-          bait.z + Math.sin(a) * 0.45,
-          0.35);
-        continue;
-      }
-
-      if (f.state === 'approaching') {
-        const bait = [...this.baits.values()].find((b) => b.id === f.targetBaitId);
-        if (!bait) {
-          occupiedBaits.delete(f.targetBaitId);
-          f.state = 'swimming'; f.targetBaitId = null;
-        } else {
-          const distance3D = steerFish(f, bait.x, bait.y, bait.z, 1.45);
-          const biteR = 0.5 + f.length * 0.004;
-          if (distance3D <= biteR) {
-            // 座標を餌へスナップしない。現在位置・慣性を保ったまま nibble 相当へ移る。
-            f.state = 'reserved'; f.ownerPlayerId = bait.playerId; f.stateAt = now;
-          } else if (now - f.stateAt > 18000) {
-            occupiedBaits.delete(f.targetBaitId);
-            f.state = 'swimming'; f.targetBaitId = null;
-          }
-          continue;
-        }
-      }
-
-      if (now >= f.turnAt) {
-        const a = rand(0, Math.PI * 2), speed = rand(0.25, 0.75);
-        f.vx = Math.cos(a) * speed; f.vy = 0; f.vz = Math.sin(a) * speed;
-        f.turnAt = now + rand(1800, 5200);
-      }
-      f.x += f.vx * TICK; f.y += f.vy * TICK; f.z += f.vz * TICK;
-      const depth = this.lake.depthAt(f.x, f.z);
-      if (depth < 0.55) { f.vx *= -1; f.vz *= -1; f.x += f.vx; f.z += f.vz; }
-      const maxY = -0.25, minY = -Math.max(0.35, depth - 0.3);
-      f.y = clamp(f.y, minY, maxY);
-
-      let best = null, bestD = APPROACH_R;
-      for (const bait of this.baits.values()) {
-        if (occupiedBaits.has(bait.id)) continue;
-        const d = Math.hypot(f.x - bait.x, f.z - bait.z);
-        if (d < bestD) { best = bait; bestD = d; }
-      }
-      if (best && Math.random() < TICK * 0.10) {
-        f.state = 'approaching'; f.targetBaitId = best.id; f.ownerPlayerId = null; f.stateAt = now;
-        occupiedBaits.add(best.id);
-      }
-    }
-
-    for (const [id, f] of this.fishes) {
-      if (this.fishes.size <= wanted || f.state !== 'swimming') continue;
-      const near = players.some((p) => !p.fresh && Math.hypot(f.x - p.x, f.z - p.z) <= DESPAWN_R);
-      if (!near) this.fishes.delete(id);
-    }
-  }
-
-  snapshot() {
-    return [...this.fishes.values()].map((f) => ({
-      id: f.id, speciesId: f.speciesId, length: f.length, albino: f.albino,
-      x: +f.x.toFixed(2), y: +f.y.toFixed(2), z: +f.z.toFixed(2),
-      state: f.state, targetBaitId: f.targetBaitId, ownerPlayerId: f.ownerPlayerId,
-    }));
-  }
+const SEED=123456789,TICK=.1,BASE_FISH=18,PER_EXTRA_PLAYER=8,MAX_FISH=50,ACTIVE_R=72,DESPAWN_R=92,APPROACH_R=30;
+const rand=(a,b)=>a+Math.random()*(b-a),clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const speciesById=id=>REAL_FISH.find(sp=>sp.id===id);
+const baitById=id=>GEAR.bait.find(b=>b.id===id)||GEAR.bait[0];
+const rodById=id=>GEAR.rod.find(r=>r.id===id)||GEAR.rod[0];
+function steerFish(f,tx,ty,tz,speedMul){const dx=tx-f.x,dy=ty-f.y,dz=tz-f.z,dist=Math.hypot(dx,dy,dz);if(dist<.001)return dist;const base=.78+f.length/100*1.7,speed=base*speedMul,alpha=1-Math.exp(-2.6*TICK);f.vx+=(dx/dist*speed-f.vx)*alpha;f.vy+=(dy/dist*speed*.55-f.vy)*alpha;f.vz+=(dz/dist*speed-f.vz)*alpha;f.x+=f.vx*TICK;f.y+=f.vy*TICK;f.z+=f.vz*TICK;return dist}
+export class SharedWorld{
+constructor(){this.lake=makeLake(SEED);this.fishes=new Map;this.baits=new Map;this.seq=1;this.weather='clear';this.weatherChangedAt=Date.now()}
+targetCount(players){return Math.min(MAX_FISH,BASE_FISH+Math.max(0,players.length-1)*PER_EXTRA_PLAYER)}
+_worldHour(){for(const b of this.baits.values())if(Number.isFinite(b.hour))return b.hour;return 12}
+spawnNear(players){if(!players.length)return null;for(let tries=0;tries<30;tries++){const p=players[Math.floor(Math.random()*players.length)];if(!Number.isFinite(p.x)||!Number.isFinite(p.z)||p.fresh)continue;const a=rand(0,Math.PI*2),r=rand(10,ACTIVE_R),x=p.x+Math.cos(a)*r,z=p.z+Math.sin(a)*r,depth=this.lake.depthAt(x,z);if(depth<.8)continue;const sp=pickSpecies({depth,band:timeBand(this._worldHour()),weather:this.weather});if(!sp)continue;const length=rollLength(sp),fishDepth=clamp(rand(sp.depth[0],Math.min(sp.depth[1],depth-.35)),.35,Math.max(.4,depth-.35)),id=`f${this.seq++}`;this.fishes.set(id,{id,speciesId:sp.id,length,albino:rollAlbino(sp),x,y:-fishDepth,z,vx:rand(-.4,.4),vy:0,vz:rand(-.4,.4),state:'swimming',targetBaitId:null,ownerPlayerId:null,turnAt:0,stateAt:Date.now(),phase:rand(0,10),startleUntil:0});return this.fishes.get(id)}return null}
+setBait(playerId,bait){if(!bait){this.baits.delete(playerId);return}const x=+bait.x,y=+bait.y,z=+bait.z;if(![x,y,z].every(Number.isFinite)||Math.abs(x)>500||Math.abs(z)>500||y>2||y< -60)return;const acc=clamp(+bait.castAcc||0,0,1),power=clamp(+bait.castPower||0,0,1),now=Date.now(),radius=1+(3.2+power*2-1)*(1-acc),duration=(.8+(5-.8)*(1-acc))*1000;for(const f of this.fishes.values()){if(f.state!=='swimming'||Math.hypot(f.x-x,f.z-z)>radius)continue;f.startleUntil=now+duration;const dx=f.x-x,dz=f.z-z,d=Math.hypot(dx,dz)||1;f.vx=dx/d*2.2;f.vz=dz/d*2.2;f.turnAt=f.startleUntil}this.baits.set(playerId,{id:`b:${playerId}`,playerId,x,y,z,baitType:String(bait.baitType||'').slice(0,24),rigLayer:String(bait.rigLayer||'').slice(0,12),rodType:String(bait.rodType||'').slice(0,16),level:clamp(+bait.level||1,1,99),bed:['sand','rock','mud'].includes(bait.bed)?bait.bed:null,nearStruct:!!bait.nearStruct,hour:Number.isFinite(+bait.hour)?+bait.hour:null,at:now})}
+hook(playerId,fishId){const f=this.fishes.get(fishId);if(!f||f.ownerPlayerId!==playerId||f.state!=='reserved')return false;f.state='hooked';f.stateAt=Date.now();return true}
+fightUpdate(playerId,fishId,pos){const f=this.fishes.get(fishId);if(!f||f.ownerPlayerId!==playerId||f.state!=='hooked')return;const x=+pos.x,y=+pos.y,z=+pos.z;if([x,y,z].every(Number.isFinite)){f.x=x;f.y=y;f.z=z}}
+endFight(playerId,fishId,result){const f=this.fishes.get(fishId);if(!f||f.ownerPlayerId!==playerId)return null;if(result==='caught'){this.fishes.delete(fishId);this.baits.delete(playerId);return{removed:true,fish:f}}f.state='swimming';f.ownerPlayerId=null;f.targetBaitId=null;f.stateAt=Date.now();f.turnAt=0;f.vx=rand(-1.8,1.8);f.vy=0;f.vz=rand(-1.8,1.8);return{removed:false,fish:f}}
+dropPlayer(playerId){this.baits.delete(playerId);for(const f of this.fishes.values())if(f.ownerPlayerId===playerId){f.ownerPlayerId=null;f.targetBaitId=null;f.state='swimming';f.stateAt=Date.now()}}
+_baitWeight(f,bait){const sp=speciesById(f.speciesId);if(!sp)return 0;const nearSpecies=new Set;for(const other of this.fishes.values())if(other.state==='swimming'&&Math.hypot(other.x-bait.x,other.z-bait.z)<18)nearSpecies.add(other.speciesId);return speciesWeight(sp,{depth:this.lake.depthAt(bait.x,bait.z),band:timeBand(bait.hour??this._worldHour()),weather:this.weather,useBait:true,bait:baitById(bait.baitType),layer:bait.rigLayer,bed:bait.bed,nearStruct:bait.nearStruct,nearSpecies,rodAttract:rodById(bait.rodType).attract,level:bait.level})}
+tick(players){const now=Date.now();if(now-this.weatherChangedAt>180000){const options=['clear','cloudy','rain'].filter(w=>w!==this.weather);this.weather=options[Math.floor(Math.random()*options.length)];this.weatherChangedAt=now}const wanted=this.targetCount(players);while(this.fishes.size<wanted)if(!this.spawnNear(players))break;const occupied=new Set;for(const f of this.fishes.values())if(f.targetBaitId&&['approaching','reserved','hooked'].includes(f.state))occupied.add(f.targetBaitId);for(const f of this.fishes.values()){if(f.state==='hooked')continue;if(f.state==='reserved'){const bait=[...this.baits.values()].find(b=>b.id===f.targetBaitId);if(!bait||now-f.stateAt>7000){occupied.delete(f.targetBaitId);f.state='swimming';f.ownerPlayerId=null;f.targetBaitId=null;continue}const t=now/1000,a=t*1.6+f.phase;steerFish(f,bait.x+Math.cos(a)*.45,bait.y+Math.sin(a*.7)*.18,bait.z+Math.sin(a)*.45,.35);continue}if(f.state==='approaching'){const bait=[...this.baits.values()].find(b=>b.id===f.targetBaitId);if(!bait){occupied.delete(f.targetBaitId);f.state='swimming';f.targetBaitId=null}else{const d=steerFish(f,bait.x,bait.y,bait.z,1.45),biteR=.5+f.length*.004;if(d<=biteR){f.state='reserved';f.ownerPlayerId=bait.playerId;f.stateAt=now}else if(now-f.stateAt>18000){occupied.delete(f.targetBaitId);f.state='swimming';f.targetBaitId=null}}continue}if(now>=f.turnAt){const a=rand(0,Math.PI*2),speed=rand(.25,.75);f.vx=Math.cos(a)*speed;f.vy=0;f.vz=Math.sin(a)*speed;f.turnAt=now+rand(1800,5200)}f.x+=f.vx*TICK;f.y+=f.vy*TICK;f.z+=f.vz*TICK;const depth=this.lake.depthAt(f.x,f.z);if(depth<.55){f.vx*=-1;f.vz*=-1;f.x+=f.vx;f.z+=f.vz}f.y=clamp(f.y,-Math.max(.35,depth-.3),-.25);if(now<f.startleUntil)continue;let best=null,bestScore=0;for(const bait of this.baits.values()){if(occupied.has(bait.id))continue;const d=Math.hypot(f.x-bait.x,f.z-bait.z);if(d>=APPROACH_R)continue;const w=this._baitWeight(f,bait);if(w<=0)continue;const score=w/(4+d);if(score>bestScore){best=bait;bestScore=score}}if(best&&Math.random()<TICK*.10*Math.min(2,Math.max(.15,bestScore/8))){f.state='approaching';f.targetBaitId=best.id;f.ownerPlayerId=null;f.stateAt=now;occupied.add(best.id)}}for(const[id,f]of this.fishes){if(this.fishes.size<=wanted||f.state!=='swimming')continue;const near=players.some(p=>!p.fresh&&Math.hypot(f.x-p.x,f.z-p.z)<=DESPAWN_R);if(!near)this.fishes.delete(id)}}
+snapshot(){return[...this.fishes.values()].map(f=>({id:f.id,speciesId:f.speciesId,length:f.length,albino:f.albino,x:+f.x.toFixed(2),y:+f.y.toFixed(2),z:+f.z.toFixed(2),state:f.state,targetBaitId:f.targetBaitId,ownerPlayerId:f.ownerPlayerId}))}
 }
