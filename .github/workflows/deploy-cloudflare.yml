@@ -38,6 +38,8 @@ jobs:
         run: node scripts/mp-fishing-sync-test.mjs
       - name: Test shared world
         run: node scripts/mp-world-test.mjs
+      - name: Test single-player parity
+        run: node scripts/mp-single-parity-test.mjs
       - name: Sync RealtimeKit Worker secret
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

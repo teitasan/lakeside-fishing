@@ -34,6 +34,7 @@ export class MultiplayerFishingSync {
       lineType,
       level: g.state?.level ?? 1,
       hour: g.state?.clock ?? 12,
+      totalCaught: g.state?.totalCaught ?? 0,
       bed,
       nearStruct,
       castAcc: g.castAcc ?? 0,

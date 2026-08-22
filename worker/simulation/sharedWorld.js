@@ -1,10 +1,21 @@
 import { SharedWorld as BaseSharedWorld } from './world.js';
-import { GEAR } from '../../src/data.js';
+import { GEAR, JUNK } from '../../src/data.js';
 import { timeBand } from '../../src/util.js';
 import { chooseBiterSpecies, findExistingBiter, makeBiterSpawn } from '../../src/fishing/simulation/biter.js';
 
 const baitById = id => GEAR.bait.find(x => x.id === id) || GEAR.bait[0];
 const rodById = id => GEAR.rod.find(x => x.id === id) || GEAR.rod[0];
+
+/* シングルの junkP（game.js _chooseBiter）と同じ式。
+   totalCaught は餌メッセージ経由で渡る（初心者のうちはゴミが減る） */
+function rollJunk(bait, rng = Math.random) {
+  const b = baitById(bait.baitType);
+  const depth = bait._depth ?? 0;
+  const p = 0.085 * b.junk * (depth < 1.4 ? 1.8 : 1)
+    * (bait.rigLayer === 'bottom' ? 1.5 : 0.55)
+    * ((bait.totalCaught ?? 99) < 3 ? 0.3 : 1);
+  return rng() < p ? JUNK[Math.floor(rng() * JUNK.length)] : null;
+}
 
 export class SharedWorld extends BaseSharedWorld {
   tick(players) {
@@ -21,18 +32,33 @@ export class SharedWorld extends BaseSharedWorld {
     for (const baitId of due) {
       const bait = [...this.baits.values()].find(b => b.id === baitId);
       if (!bait) continue;
-      const occupied = [...this.fishes.values()].some(f =>
-        f.targetBaitId === bait.id && ['approaching', 'reserved', 'hooked'].includes(f.state));
-      if (occupied) continue; // Base側で既存魚を選べた
+      bait._depth = this.lake.depthAt(bait.x, bait.z);
 
+      // ゴミ抽選：シングル同様、魚より先に行う。ゴミは泳がないのでその場で予約状態にする
+      const junk = rollJunk(bait);
+      if (junk) {
+        const id = `f${this.seq++}`;
+        this.fishes.set(id, {
+          id, speciesId: junk.id, species: junk,
+          length: Math.round((junk.len[0] + Math.random() * (junk.len[1] - junk.len[0])) * 10) / 10,
+          albino: false,
+          x: bait.x + (Math.random() - 0.5) * 0.6, y: bait.y - 0.1, z: bait.z + (Math.random() - 0.5) * 0.6,
+          vx: 0, vy: 0, vz: 0, tx: bait.x, ty: bait.y, tz: bait.z, depthBias: 0.5,
+          state: 'reserved', targetBaitId: bait.id, ownerPlayerId: bait.playerId,
+          turnAt: 0, stateAt: now, phase: Math.random() * 10, startleUntil: 0, junk: true,
+        });
+        continue;
+      }
+
+      // 種を先に決める（シングル一致）。候補が無ければ短い再試行
       const nearSpecies = new Set();
       for (const f of this.fishes.values()) {
-        if (f.state === 'swimming' && Math.hypot(f.x - bait.x, f.z - bait.z) < 18) nearSpecies.add(f.speciesId);
+        if (f.state === 'swimming' && now >= (f.startleUntil || 0)
+          && Math.hypot(f.x - bait.x, f.z - bait.z) < 18) nearSpecies.add(f.speciesId);
       }
-      const depth = this.lake.depthAt(bait.x, bait.z);
       const species = chooseBiterSpecies({
-        depth,
-        band: timeBand(bait.hour ?? this._worldHour()),
+        depth: bait._depth,
+        band: timeBand(this._worldHour()),
         weather: this.weather,
         useBait: true,
         bait: baitById(bait.baitType),

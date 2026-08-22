@@ -36,7 +36,7 @@ assert.deepEqual(calls.map((c) => c[0]), [
 assert.deepEqual(calls[0][1], {
   x: 1, y: -1, z: 3,
   baitType: 'worm', rigLayer: 'bottom', rodType: 'starter_rod', lineType: 'nylon2',
-  level: 4, hour: 18, bed: 'sand', nearStruct: true,
+  level: 4, hour: 18, totalCaught: 0, bed: 'sand', nearStruct: true,
   castAcc: 0.8, castPower: 0.6, retry: false,
 });
 assert.equal(calls[3][1].retry, true, 'アタリを逃して餌が残った場合は再待機扱いになっていない');
