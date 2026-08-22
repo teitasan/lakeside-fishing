@@ -10,6 +10,7 @@ const tests = [
   'scripts/fishing-controller-test.mjs',
   'scripts/fishing-install-order-test.mjs',
   'scripts/bite-timing-test.mjs',
+  'scripts/species-display-test.mjs',
   'scripts/mp-fishing-sync-test.mjs',
   'scripts/mp-hook-reject-test.mjs',
   'scripts/mp-world-test.mjs',
