@@ -26,12 +26,17 @@ const game = {
 const sync = new MultiplayerFishingSync(game, mp);
 game.fishing.setBaitPresent(true);
 game.fishing.notifyHooked(fish);
+sync.onFishHooked({ playerId: 'p1', fishId: 'f1' });
 game.fishing.notifyMissed(fish, { baitKept: true });
+game.fishing.notifyHooked(fish);
+sync.onFishHooked({ playerId: 'p1', fishId: 'f1' });
 game.fishing.notifyEscaped(fish);
+game.fishing.notifyHooked(fish);
+sync.onFishHooked({ playerId: 'p1', fishId: 'f1' });
 game.fishing.notifyCaught(fish);
 game.fishing.setBaitPresent(false);
 assert.deepEqual(calls.map((c) => c[0]), [
-  'setBait', 'hookFish', 'endFight', 'setBait', 'endFight', 'endFight', 'clearBait',
+  'setBait', 'hookFish', 'endFight', 'setBait', 'hookFish', 'endFight', 'hookFish', 'endFight', 'clearBait',
 ]);
 assert.deepEqual(calls[0][1], {
   x: 1, y: -1, z: 3,
@@ -42,5 +47,5 @@ assert.deepEqual(calls[0][1], {
 assert.equal(calls[3][1].retry, true, 'アタリを逃して餌が残った場合は再待機扱いになっていない');
 sync.dispose();
 game.fishing.setBaitPresent(true);
-assert.equal(calls.length, 7, 'dispose後も同期イベントが送信されている');
+assert.equal(calls.length, 9, 'dispose後も同期イベントが送信されている');
 console.log('OK multiplayer fishing sync: semantic fishing events map to protocol calls');

@@ -1,6 +1,7 @@
 # Workers Static Assets にアップロードしないもの
 .git
 .gitignore
+.github
 .wrangler
 .claude
 .DS_Store
@@ -12,4 +13,6 @@ docs
 node_modules
 serve.sh
 README.md
+package.json
+package-lock.json
 *.jsonl

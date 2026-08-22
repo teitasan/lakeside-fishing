@@ -90,6 +90,27 @@
 
 `http://localhost:8000` を開く。`file://` では動きません。WebGL2 対応ブラウザ推奨。
 
+### マルチプレイ Worker（Node.js 22 推奨）
+
+```bash
+# 依存は wrangler のみ（初回のみ npm install）
+npm install
+
+# ローカル永続化の再ロードループを避ける起動（persist-to をリポジトリ外へ）
+npm run dev:mp
+# または: npx wrangler dev --local --persist-to /tmp/lakeside-fishing-wrangler-state
+```
+
+`http://localhost:8787` を開き、タイトルから **みんなで遊ぶ** を選ぶ。
+
+```bash
+# 単体テスト（Node 22）
+node scripts/run-tests.mjs
+
+# マルチプロトコル検証（wrangler dev を一時 persist-to で起動）
+node scripts/run-mp-protocol-test.mjs
+```
+
 ---
 
 ## クレジット

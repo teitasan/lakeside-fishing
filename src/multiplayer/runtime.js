@@ -66,8 +66,10 @@ export function installMultiplayerRuntime(Game) {
   Game.prototype._connectMultiplayer = function (...args) {
     const r = connect.apply(this, args), mp = this.mp; if (!mp) return r;
     this.multiplayerFishing?.dispose(); const sync = this.multiplayerFishing = new MultiplayerFishingSync(this, mp); const oldWelcome = mp.onWelcome;
-    mp.onWelcome = (m) => { oldWelcome?.(m); if (m.weather) { this.env.setWeather(m.weather); this.env.weatherTimer = 1e9; } this.sharedFish?.applySnapshot(m.fish || []); for (const v of m.visuals || []) this.remotePlayers?.setVisual(v); };
+    mp.onWelcome = (m) => { const reconnect = mp._reconnecting; mp._reconnecting = false; oldWelcome?.(m); if (m.weather) { this.env.setWeather(m.weather); this.env.weatherTimer = 1e9; } this.sharedFish?.applySnapshot(m.fish || []); for (const v of m.visuals || []) this.remotePlayers?.setVisual(v); sync.resyncAfterWelcome(m, { reconnect }); };
     mp.onVisual = (v) => this.remotePlayers?.setVisual(v); mp.onFishSnapshot = (items) => sync.onFishSnapshot(items);
+    mp.onFishHooked = (m) => sync.onFishHooked(m);
+    mp.onFishHookRejected = (m) => sync.onFishHookRejected(m);
     mp.onFishEscaped = (m) => { const f = this.sharedFish?.get(m.fishId); if (f && f !== this.hookFish) f.state = 'wander'; };
     mp.onFishCaught = (m) => { if (m.playerId !== mp.id) this.sharedFish?.get(m.fishId)?.despawn(); };
     mp.onWeather = (key) => { if (key) { this.env.setWeather(key); this.env.weatherTimer = 1e9; } }; return r;

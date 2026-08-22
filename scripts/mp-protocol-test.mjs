@@ -25,5 +25,6 @@ while (Date.now() < until && !candidate) { const snap = await a.nextType('fish_s
 if (!candidate) fail('共有餌へ寄る魚が現れない'); ok(`共有魚 ${candidate.id} がAliceの餌を認識`);
 while (Date.now() < until && candidate.ownerPlayerId !== wa.id) { const snap = await a.nextType('fish_snapshot', 3000); candidate = snap.fish.find((f) => f.id === candidate.id) || candidate; }
 if (candidate.ownerPlayerId !== wa.id) fail('bite予約が成立しない'); a.send({ t: 'hook', fishId: candidate.id }); const hooked = await b.nextType('fish_hooked'); if (hooked.fishId !== candidate.id || hooked.playerId !== wa.id) fail('hook排他不正'); ok('bite予約→hook排他');
+b.send({ t: 'hook', fishId: candidate.id }); const rejected = await b.nextType('fish_hook_rejected'); if (rejected.fishId !== candidate.id || rejected.playerId !== wb.id) fail('hook拒否応答不正'); ok('2人目のhookは拒否応答');
 a.send({ t: 'fight', fishId: candidate.id, x: 8, y: -1, z: -2 }); a.send({ t: 'fight_end', fishId: candidate.id, result: 'escaped' }); const escaped = await b.nextType('fish_escaped'); if (escaped.fishId !== candidate.id) fail('escape共有不正'); ok('ファイト終了→同一fishIdを湖へ返却');
 b.ws.close(); await a.nextType('leave'); ok('切断通知'); a.ws.close(); console.log('\nすべてのマルチプレイプロトコルテストに合格'); process.exit(0);

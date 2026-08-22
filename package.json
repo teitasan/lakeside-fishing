@@ -1,6 +1,16 @@
 {
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node scripts/run-tests.mjs",
+    "test:unit": "node scripts/run-tests.mjs",
+    "test:mp-protocol": "node scripts/run-mp-protocol-test.mjs",
+    "test:mp-browser-self": "node scripts/mp-browser-test.mjs --self-test",
+    "dev:mp": "wrangler dev --local --persist-to /tmp/lakeside-fishing-wrangler-state"
+  },
   "devDependencies": {
     "wrangler": "^4.125.0"
   }

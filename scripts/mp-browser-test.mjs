@@ -12,6 +12,20 @@ const fail = (msg) => { console.error(`NG: ${msg}`); process.exit(1); };
 const ok = (msg) => console.log(`OK: ${msg}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** 切断判定用: 実際の player id を CDP 評価式へ埋め込む（'bId' 文字列リテラル回帰防止） */
+export function remotePlayerPresenceScript(playerId) {
+  const id = JSON.stringify(playerId);
+  return `(() => { const id = ${id}; return [...window.__game.remotePlayers.map.values()].some(p => p.id === id) ? 'still' : 'gone'; })()`;
+}
+
+if (process.argv.includes('--self-test')) {
+  const s = remotePlayerPresenceScript('abc123');
+  if (!s.includes('"abc123"')) fail('player id が評価式に埋め込まれていない');
+  if (s.includes("'bId'") || s.includes('"bId"')) fail('bId 文字列リテラルが残っている');
+  ok('remotePlayerPresenceScript は動的 id を埋め込む');
+  process.exit(0);
+}
+
 /** 1 タブぶんの CDP セッション */
 async function openTab(url) {
   const res = await fetch(`${CDP}/json/new?${encodeURIComponent(url)}`, { method: 'PUT' });
@@ -178,9 +192,7 @@ await screenshot(b, '/tmp/lakeside-mp-viewB.png');
 const bId = await b.evalJs(`window.__game.mp.id`);
 await b.evalJs(`window.__game.mp.close(); 'ok'`);
 await sleep(1200);
-const afterLeave = await a.evalJs(
-  `(() => { const rp = window.__game.remotePlayers.map; let n = 0; for (const p of rp.values()) if (p.id === ${JSON.stringify('bId')}) n++; return [...rp.values()].some(p => p.id === ${JSON.stringify('bId')}) ? 'still' : 'gone'; })()`
-);
+const afterLeave = await a.evalJs(remotePlayerPresenceScript(bId));
 if (afterLeave !== 'gone') fail(`B が切断したのに A からまだ見えている (id=${bId})`);
 ok('切断が A へ届き、B の姿が消えた');
 
