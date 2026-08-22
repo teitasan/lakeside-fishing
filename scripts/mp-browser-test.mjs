@@ -2,7 +2,7 @@
    ヘッドレス Chrome で 2 タブを開き、両方をマルチプレイで湖へ入れて
    「片方が歩くと、もう片方から見える位置が動く」ことを確かめる。
    使い方: 先に Chrome を --remote-debugging-port=9222 で起動しておき、
-           node scripts/mp-browser-test.mjs [URL]
+           node --experimental-websocket scripts/mp-browser-test.mjs [URL]
 */
 
 const GAME_URL = process.argv[2] || 'http://localhost:8787/';
@@ -48,8 +48,12 @@ async function openTab(url) {
     }
     return r.result.value;
   };
-  return { send, evalJs, errors, close: () => ws.close() };
+  return { info, send, evalJs, errors, close: () => ws.close() };
 }
+
+/** 失敗時もゾンビタブを残さないよう、最後に必ず閉じる */
+const tabs = [];
+process.on('exit', () => { for (const t of tabs) try { t.close(); } catch (e) {} });
 
 /** ゲームがマルチプレイで湖に立つまで待つ */
 async function waitReady(tab, label, timeoutMs = 180000) {
@@ -88,25 +92,29 @@ async function joinAs(tab, name) {
 
 /* ---- タブ A（あさひ） ---- */
 const a = await openTab('about:blank');
+tabs.push(a);
 await joinAs(a, 'あさひ');
 await waitReady(a, 'A(あさひ)');
 
 /* ---- タブ B（ゆうひ） ---- */
 const b = await openTab('about:blank');
+tabs.push(b);
 await joinAs(b, 'ゆうひ');
 await waitReady(b, 'B(ゆうひ)');
 
 await sleep(1500);   // 参加通知と初回状態の往復を待つ
 
-/* ---- 相互に見えているか ---- */
-const seenByA = await a.evalJs(`window.__game.remotePlayers.count`);
-const seenByB = await b.evalJs(`window.__game.remotePlayers.count`);
-if (seenByA !== 1) fail(`A から見えている他プレイヤーが ${seenByA} 人（1 人のはず）`);
-if (seenByB !== 1) fail(`B から見えている他プレイヤーが ${seenByB} 人（1 人のはず）`);
-ok('A と B が互いを 1 人ずつ認識している');
+/* ---- 相互に見えているか ----
+   同じ Chrome 内の他タブ（以前の実行の残骸など）がいる可能性を除き、
+   自分の相手（ゆうひ / あさひ）が見えていることを名前で確認する */
+const namesByA = await a.evalJs(`[...window.__game.remotePlayers.map.values()].map(p => p.name)`);
+const namesByB = await b.evalJs(`[...window.__game.remotePlayers.map.values()].map(p => p.name)`);
+if (!namesByA.includes('ゆうひ')) fail(`A から「ゆうひ」が見えていない（見えているのは ${JSON.stringify(namesByA)}）`);
+if (!namesByB.includes('あさひ')) fail(`B から「あさひ」が見えていない（見えているのは ${JSON.stringify(namesByB)}）`);
+ok(`A と B が互いを認識している（A の視界: ${JSON.stringify(namesByA)}）`);
 
 const nameSeenByA = await a.evalJs(
-  `[...window.__game.remotePlayers.map.values()][0].name`
+  `[...window.__game.remotePlayers.map.values()].find(p => p.name === 'ゆうひ')?.name`
 );
 if (nameSeenByA !== 'ゆうひ') fail(`A から見えた名前が「${nameSeenByA}」（「ゆうひ」のはず）`);
 ok('名前も正しく届いている（日本語 OK）');
@@ -115,7 +123,7 @@ ok('名前も正しく届いている（日本語 OK）');
    桟橋先端は湖側へ歩けないので、キー入力ではなく座標を動かして
    「送信 → サーバー中継 → 相手の補間」を確かめる */
 const posBefore = await a.evalJs(
-  `(() => { const p = [...window.__game.remotePlayers.map.values()][0].group.position; return [p.x, p.z]; })()`
+  `(() => { const p = [...window.__game.remotePlayers.map.values()].find(p => p.name === 'ゆうひ').angler.root.position; return [p.x, p.z]; })()`
 );
 const bMovedTo = await b.evalJs(`(() => {
   const g = window.__game;
@@ -129,10 +137,10 @@ await sleep(800);
 await a.send('Page.bringToFront');
 await sleep(1200);
 const netAfter = await a.evalJs(
-  `(() => { const p = [...window.__game.remotePlayers.map.values()][0]; return [p.target.x, p.target.z]; })()`
+  `(() => { const p = [...window.__game.remotePlayers.map.values()].find(p => p.name === 'ゆうひ'); return [p.target.x, p.target.z]; })()`
 );
 const posAfter = await a.evalJs(
-  `(() => { const p = [...window.__game.remotePlayers.map.values()][0].group.position; return [p.x, p.z]; })()`
+  `(() => { const p = [...window.__game.remotePlayers.map.values()].find(p => p.name === 'ゆうひ').angler.root.position; return [p.x, p.z]; })()`
 );
 const netMoved = Math.hypot(netAfter[0] - posBefore[0], netAfter[1] - posBefore[1]);
 const moved = Math.hypot(posAfter[0] - posBefore[0], posAfter[1] - posBefore[1]);
@@ -156,7 +164,7 @@ ok(`ゲーム内時刻が揃っている（差 ${clockDiffMin.toFixed(2)} 分）
 /* ---- A のカメラを B へ向けてスクリーンショット ---- */
 await a.evalJs(`(() => {
   const g = window.__game;
-  const r = [...g.remotePlayers.map.values()][0].group.position;
+  const r = [...g.remotePlayers.map.values()].find(p => p.name === 'ゆうひ').angler.root.position;
   g.yaw = Math.atan2(r.x - g.pos.x, r.z - g.pos.z);
   g.pitch = -0.05;
   return 'ok';
@@ -165,11 +173,15 @@ await sleep(800);
 await screenshot(a, '/tmp/lakeside-mp-viewA.png');
 await screenshot(b, '/tmp/lakeside-mp-viewB.png');
 
-/* ---- B を切断 → A に反映されるか ---- */
+/* ---- B を切断 → A に反映されるか ----
+   同名の残骸タブがいる可能性があるので、B の接続 id を直接探して消えたか見る */
+const bId = await b.evalJs(`window.__game.mp.id`);
 await b.evalJs(`window.__game.mp.close(); 'ok'`);
 await sleep(1200);
-const afterLeave = await a.evalJs(`window.__game.remotePlayers.count`);
-if (afterLeave !== 0) fail(`B が切断したのに A からまだ ${afterLeave} 人見えている`);
+const afterLeave = await a.evalJs(
+  `(() => { const rp = window.__game.remotePlayers.map; let n = 0; for (const p of rp.values()) if (p.id === ${JSON.stringify('bId')}) n++; return [...rp.values()].some(p => p.id === ${JSON.stringify('bId')}) ? 'still' : 'gone'; })()`
+);
+if (afterLeave !== 'gone') fail(`B が切断したのに A からまだ見えている (id=${bId})`);
 ok('切断が A へ届き、B の姿が消えた');
 
 const errA = a.errors.filter((e) => !/AudioContext|autoplay/i.test(e));
