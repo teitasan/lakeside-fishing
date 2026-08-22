@@ -2605,6 +2605,10 @@ export class Game {
     this.bobberFar = null;
     this.ui.showFight(false);
     this.underwaterCam = false;
+    /* 逃げ・ラインブレイクでは餌は水中に残っていてもサーバー側は
+       endFight で餌を消す。クライアントも餌なしへ戻して次のキャストで
+       BAIT_PLACED が確実に発火するようにする */
+    this.fishing?.setBaitPresent(false, { source: 'escape' });
     this.retrieving = true;
     this.fs = 'flight';
     this.stateTime = 0;
@@ -2683,6 +2687,10 @@ export class Game {
     this.fight = null;
     this.bobberFar = null;
     this.fs = 'idle';
+    /* 水中の餌は取り込みで消滅済み。ここで餌なし状態へ戻さないと
+       次のキャストで BAIT_PLACED が発火せず、マルチではサーバーに
+       餌が登録されず魚が寄ってこなくなる */
+    this.fishing?.setBaitPresent(false, { source: 'catch' });
     this.angler.bobber.visible = false;
     this.angler.hideLine();
     this.audio.click();
