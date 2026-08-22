@@ -78,21 +78,20 @@ const players = [{ id: 'p1', x: 0, y: 0, z: 0, fresh: false }];
   world.setBait('p1', bait);
   const b = world.baits.get('p1');
   // ゴミが必ず引くまで再試行（浅場ボトム＋ミミズは最もゴミ率が高い）
-  let junkSeen = false, fishSeen = false;
-  for (let trial = 0; trial < 300 && !junkSeen; trial++) {
+  let junk = null, fishSeen = false;
+  for (let trial = 0; trial < 300 && !junk; trial++) {
     b.readyAt = Date.now() - 1;
     // 既存魚を遠ざけ、魚経由を封じてゴミだけを観測する
     for (const f of world.fishes.values()) if (!f.junk) { f.x += 150; f.z += 150; f.tx = f.x; f.tz = f.z; }
     world.tick(players);
-    for (const f of world.fishes.values()) {
-      if (f.targetBaitId === 'b:p1' && f.junk) junkSeen = true;
-      else if (f.targetBaitId === 'b:p1') fishSeen = true;
+    junk = [...world.fishes.values()].find(f => f.targetBaitId === 'b:p1' && f.junk) || null;
+    if (!junk) {
+      if ([...world.fishes.values()].some(f => f.targetBaitId === 'b:p1')) fishSeen = true;
+      for (const [id, f] of [...world.fishes]) if (f.targetBaitId === 'b:p1') world.fishes.delete(id);
     }
-    for (const [id, f] of [...world.fishes]) if (f.junk) world.fishes.delete(id);
-    if (fishSeen) break;
   }
-  if (junkSeen) {
-    const j = [...world.fishes.values()].find(f => f.junk);
+  if (junk) {
+    const j = junk;
     j.ownerPlayerId = 'p1';
     const ownerView = world.snapshot('p1');
     const otherView = world.snapshot('p2');
