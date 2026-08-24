@@ -136,8 +136,9 @@ export class MultiplayerFishingSync {
   onFishSnapshot(items) {
     const g = this.game;
     g.sharedFish?.applySnapshot(items);
+    const list = this._snapshotFishList(items);
     if (!g.hookFish && g.fs === 'wait') {
-      const mine = items.find((f) =>
+      const mine = list.find((f) =>
         f.targetBaitId === `b:${this.mp.id}`
         && (f.state === 'approaching' || f.ownerPlayerId === this.mp.id));
       if (mine) {
@@ -149,7 +150,8 @@ export class MultiplayerFishingSync {
       }
     }
     if (g.hookFish?.networkId) {
-      const server = items.find((f) => f.id === g.hookFish.networkId);
+      const server = list.find((f) => f.id === g.hookFish.networkId)
+        || this._serverFishState(g.hookFish.networkId);
       if (server?.ownerPlayerId === this.mp.id && server.state === 'hooked') {
         this._confirmedHookId = server.id;
         this._pendingHookId = null;
@@ -206,5 +208,16 @@ export class MultiplayerFishingSync {
     this.lastFightSentAt = now;
     const p = g.hookFish.pos;
     this.mp.fightUpdate(g.hookFish.networkId, p.x, p.y, p.z);
+  }
+
+  _snapshotFishList(items) {
+    if (items?._mode === 'delta') return [...(items._added || []), ...(items._fish || [])];
+    return items || [];
+  }
+
+  _serverFishState(fishId) {
+    const f = this.game.sharedFish?.get(fishId);
+    if (!f) return null;
+    return { id: fishId, ownerPlayerId: f.networkOwner, state: f.networkState };
   }
 }

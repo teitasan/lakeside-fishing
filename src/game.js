@@ -625,6 +625,7 @@ export class Game {
     this._mpTimer = setInterval(() => {
       if (this.playing && this.mp) {
         this.mp.sendState(this.pos.x, this.visY, this.pos.z, this.yaw, this._mpAction());
+        this.mp.flushUpdate();
       }
     }, 100);
   }
@@ -1439,9 +1440,6 @@ export class Game {
     // 他プレイヤー（補間）と自分の状態送信（10Hz に間引かれる）
     if (this.multiplayer && this.remotePlayers) {
       this.remotePlayers.update(dt);
-      if (this.playing && this.mp) {
-        this.mp.sendState(this.pos.x, this.visY, this.pos.z, this.yaw, this._mpAction());
-      }
     }
 
     /* 釣り人。しなりの向きと竿先の狙いは、道糸が実際につながっている先＝ウキ。

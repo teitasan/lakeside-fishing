@@ -11,11 +11,13 @@ const tests = [
   'scripts/fishing-install-order-test.mjs',
   'scripts/bite-timing-test.mjs',
   'scripts/species-display-test.mjs',
+  'scripts/mp-interpolation-test.mjs',
   'scripts/mp-fishing-sync-test.mjs',
   'scripts/mp-hook-reject-test.mjs',
   'scripts/mp-world-test.mjs',
   'scripts/mp-single-parity-test.mjs',
   'scripts/mp-bait-rearm-test.mjs',
+  'scripts/mp-chat-test.mjs',
 ];
 
 for (const rel of tests) {

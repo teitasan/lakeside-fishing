@@ -66,8 +66,11 @@ export function installMultiplayerRuntime(Game) {
   Game.prototype._connectMultiplayer = function (...args) {
     const r = connect.apply(this, args), mp = this.mp; if (!mp) return r;
     this.multiplayerFishing?.dispose(); const sync = this.multiplayerFishing = new MultiplayerFishingSync(this, mp); const oldWelcome = mp.onWelcome;
-    mp.onWelcome = (m) => { const reconnect = mp._reconnecting; mp._reconnecting = false; oldWelcome?.(m); if (m.weather) { this.env.setWeather(m.weather); this.env.weatherTimer = 1e9; } this.sharedFish?.applySnapshot(m.fish || []); for (const v of m.visuals || []) this.remotePlayers?.setVisual(v); sync.resyncAfterWelcome(m, { reconnect }); };
-    mp.onVisual = (v) => this.remotePlayers?.setVisual(v); mp.onFishSnapshot = (items) => sync.onFishSnapshot(items);
+    mp.onWelcome = (m) => { const reconnect = mp._reconnecting; mp._reconnecting = false; const recvAt = m._recvAt ?? performance.now(); for (const p of m.players || []) p._recvAt = recvAt; for (const v of m.visuals || []) v._recvAt = recvAt; const fish = m.fish || []; fish._recvAt = recvAt; oldWelcome?.(m); if (m.weather) { this.env.setWeather(m.weather); this.env.weatherTimer = 1e9; } this.sharedFish?.applySnapshot(fish); for (const v of m.visuals || []) this.remotePlayers?.setVisual(v); sync.resyncAfterWelcome(m, { reconnect }); };
+    mp.onVisual = (v) => this.remotePlayers?.setVisual(v);
+    mp.onPlayerSnapshot = (p) => { this.remotePlayers?.upsert(p); this.remotePlayers?.setVisual(p); };
+    mp.onPlayerOut = ({ id }) => this.remotePlayers?.remove(id);
+    mp.onFishSnapshot = (items) => sync.onFishSnapshot(items);
     mp.onFishHooked = (m) => sync.onFishHooked(m);
     mp.onFishHookRejected = (m) => sync.onFishHookRejected(m);
     mp.onFishEscaped = (m) => { const f = this.sharedFish?.get(m.fishId); if (f && f !== this.hookFish) f.state = 'wander'; };
@@ -80,7 +83,10 @@ export function installMultiplayerRuntime(Game) {
   Game.prototype.update = function (dt, ...args) {
     const r = update.call(this, dt, ...args); if (!this.multiplayer) return r; this.sharedFish?.update(dt);
     if (this.mp?.connected) { const fightT = this.fight ? Math.max(0, Math.min(1, this.fight.tension / this.line.cap)) : 0; const end = this.fs === 'fight' && this.hookFish ? this.hookFish.pos : this.bobber;
-      this.mp.sendVisual({ fs: this.fs === 'card' ? 'landed' : this.fs, charge: this.charge, tension: fightT, reeling: this.fs === 'fight' ? (this.fight?.spin || 0) : (this.retrieving ? 1 : 0), rod: this.state.gear.rod, bait: this.bait.id, rarity: this.hookFish?.species?.rarity || 0, bx: end?.x || 0, by: end?.y || 0, bz: end?.z || 0, line: isFishingLineState(this.fs) }); }
-    this.multiplayerFishing?.sendFightPosition(); if (this.env) this.env.weatherTimer = Math.max(this.env.weatherTimer || 0, 1e8); return r;
+      this.mp.sendVisual({ fs: this.fs === 'card' ? 'landed' : this.fs, charge: this.charge, tension: fightT, reeling: this.fs === 'fight' ? (this.fight?.spin || 0) : (this.retrieving ? 1 : 0), rod: this.state.gear.rod, bait: this.bait.id, rarity: this.hookFish?.species?.rarity || 0, bx: end?.x || 0, by: end?.y || 0, bz: end?.z || 0, line: isFishingLineState(this.fs) });
+    }
+    this.multiplayerFishing?.sendFightPosition();
+    if (this.env) this.env.weatherTimer = Math.max(this.env.weatherTimer || 0, 1e8);
+    return r;
   };
 }
