@@ -20,7 +20,8 @@ await new Promise((r) => setTimeout(r, 100));
 a.send({ t: 'v', fs: 'flight', charge: 1, tension: 0, reeling: 0, rod: 'bamboo', bait: 'worm', rarity: 0, bx: 20, by: 0, bz: -5, line: true });
 const visual = await b.nextType('v'); if (visual.id !== wa.id || visual.fs !== 'flight' || !visual.line || visual.bx !== 20) fail('釣り表示relay不正'); ok('キャスト・竿・ウキ表示state relay');
 a.send({ t: 'bait', x: 10, y: -2, z: -3, baitType: 'worm', rigLayer: 'mid' });
-let candidate = null; const until = Date.now() + 20000;
+let candidate = null; // マルチの最大待ち時間28秒＋接近処理＋CIの揺らぎを許容
+const until = Date.now() + 90000;
 while (Date.now() < until && !candidate) { const snap = await a.nextType('fish_snapshot', 3000); candidate = snap.fish.find((f) => f.targetBaitId === `b:${wa.id}` || f.ownerPlayerId === wa.id); }
 if (!candidate) fail('共有餌へ寄る魚が現れない'); ok(`共有魚 ${candidate.id} がAliceの餌を認識`);
 while (Date.now() < until && candidate.ownerPlayerId !== wa.id) { const snap = await a.nextType('fish_snapshot', 3000); candidate = snap.fish.find((f) => f.id === candidate.id) || candidate; }
