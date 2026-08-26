@@ -2,10 +2,10 @@
    ゲーム本体：状態機械・キャスト・ファイト・進行
    =========================================================== */
 import * as THREE from 'three';
-import { Environment } from './sky.js?v=20260826-envgfx';
-import { Terrain, WATER_REGION } from './terrain.js?v=20260826-envgfx';
+import { Environment } from './sky.js?v=20260826-uwgfx';
+import { Terrain, WATER_REGION } from './terrain.js?v=20260826-waterquality';
 import { resolveLake } from './lakefield.js';
-import { Water } from './water.js?v=20260826-envgfx';
+import { Water } from './water.js?v=20260826-waterquality';
 import { FishSchool } from './fish.js';
 import { preloadFishTextures } from './fishTextures.js';
 import { preloadTerrainIcons } from './terrainIcons.js';
@@ -30,7 +30,7 @@ import {
 } from './i18n.js';
 import { MultiplayerClient, MULTIPLAYER_SEED } from './network/multiplayer.js';
 import { RemotePlayers } from './multiplayer/remotePlayer.js';
-import { PostFX } from './postfx.js?v=20260826-envgfx';
+import { PostFX } from './postfx.js?v=20260826-uwgfx';
 
 const GRAVITY = 9.8;
 const EXPOSURE = 0.78;
@@ -323,11 +323,23 @@ export class Game {
     } catch (e) {
       console.warn('湖底テクスチャの読み込みに失敗、頂点色で描画します', e);
     }
-    this.terrain = new Terrain(this.scene, { quality: q, lake: resolved.lake, bedTextures });
+    const causticsUniforms = {
+      uCaustTime: { value: 0 },
+      uCaustSunDir: { value: new THREE.Vector3(0, 1, 0) },
+      uCaustNight: { value: 0 },
+      uCaustRain: { value: 0 },
+      uCaustCloud: { value: 0 },
+      uCaustStrength: { value: 0 },
+    };
+    this.terrain = new Terrain(this.scene, {
+      quality: q, lake: resolved.lake, bedTextures, causticsUniforms,
+    });
     this._initMap();
 
     await onProgress(t('ui.loadingWater'));
-    this.water = new Water(this.scene, this.terrain, { quality: q, exposure: EXPOSURE });
+    this.water = new Water(this.scene, this.terrain, {
+      quality: q, exposure: EXPOSURE, causticsUniforms,
+    });
 
     // 後処理（Bloom は high のみ）。water/sky はリニア出力へ切り替わる
     this.postfx = new PostFX(this.renderer, this.scene, this.camera, {
@@ -758,6 +770,7 @@ export class Game {
     this.renderer.shadowMap.enabled = this.state.settings.shadow;
     this.env.setQuality(q);
     this.postfx?.setQuality(q);
+    this.water?.setQuality(q);
     if (this.postfx) {
       const s = new THREE.Vector2();
       this.renderer.getSize(s);
@@ -1502,6 +1515,9 @@ export class Game {
     this.water.capture(this.renderer, this.scene, this.camera);
     // 水面の映り込み（30Hz に間引き）
     this.water.captureReflection(this.renderer, this.scene, this.camera);
+    const uwCtx = this.water.getUnderwaterContext(this.camera);
+    uwCtx.cloud = this.env.cloudiness;
+    this.postfx.updateUnderwater(uwCtx);
     this.postfx.render(sdt);
     this.debug.update(dt);
   }
@@ -1730,7 +1746,7 @@ export class Game {
     if (this._uwFx === on) return;
     this._uwFx = on;
     this.env.underwater = on;
-    document.getElementById('underwater-tint').classList.toggle('on', on);
+    this.water?.setUnderwaterView(on);
     this.audio.setUnderwater(on);
   }
 

@@ -3,9 +3,9 @@
    CPU と GPU で同一の波関数を使い、ウキが正しく浮くようにする
    =========================================================== */
 import * as THREE from 'three';
-import { COMMON_GLSL } from './shaders.js?v=20260826-envgfx';
+import { COMMON_GLSL } from './shaders.js?v=20260826-uwgfx';
 import { WATER_REGION } from './lakefield.js';
-import { smoothstep, rand, TAU } from './util.js';
+import { smoothstep, rand, TAU, clamp } from './util.js';
 
 /** 波の定義（dir は正規化して使用） */
 export const WAVES = [
@@ -91,12 +91,54 @@ function _calcOblique(proj, clip) {
   e[14] = clip.w * f;
 }
 
+/**
+ * 微細波用のタイル可能な法線テクスチャを一度だけ生成する。
+ * 大きな波と中波は従来どおり解析式／手続きノイズで保ち、画面を埋める
+ * 極小リップルだけをスクロールする法線テクスチャへ逃がすことで、
+ * fragment ごとの vnoise 評価を抑える。
+ */
+function createRippleNormalTexture() {
+  const size = 128;
+  const data = new Uint8Array(size * size * 4);
+  const height = (x, y) => {
+    const u = (x / size) * TAU;
+    const v = (y / size) * TAU;
+    return Math.sin(u * 3 + v * 2) * 0.52
+      + Math.cos(u * 5 - v * 4) * 0.28
+      + Math.sin(u * 9 + v * 7) * 0.14
+      + Math.cos(u * 13 - v * 11) * 0.06;
+  };
+
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = (height(x + 1, y) - height(x - 1, y)) * 0.72;
+      const dy = (height(x, y + 1) - height(x, y - 1)) * 0.72;
+      const inv = 1 / Math.hypot(dx, dy, 1);
+      const i = (y * size + x) * 4;
+      data[i] = Math.round((-dx * inv * 0.5 + 0.5) * 255);
+      data[i + 1] = Math.round((-dy * inv * 0.5 + 0.5) * 255);
+      data[i + 2] = Math.round((inv * 0.5 + 0.5) * 255);
+      data[i + 3] = 255;
+    }
+  }
+
+  const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat, THREE.UnsignedByteType);
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = true;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 export class Water {
   constructor(scene, terrain, opts = {}) {
     this.scene = scene;
     this.terrain = terrain;
     this.time = 0;
     this.wind = 1;
+    this.rippleNormalTex = createRippleNormalTexture();
 
     const segs = opts.quality === 'low' ? 150 : opts.quality === 'high' ? 300 : 230;
     const geo = new THREE.PlaneGeometry(WATER_REGION, WATER_REGION, segs, segs);
@@ -129,6 +171,7 @@ export class Water {
       uCamFar: { value: 3000 },
       // 1m あたりの吸収（赤から先に消える）
       uAbsorb: { value: new THREE.Vector3(0.46, 0.20, 0.13) },
+      uRippleNormal: { value: this.rippleNormalTex },
       uDebug: { value: 0 },   // 1=シーンテクスチャ 2=水の厚み（開発用）
       uLinearOut: { value: 0 },
       /* --- 平面反射（planar reflection） ---
@@ -176,7 +219,7 @@ export class Water {
         ${COMMON_GLSL}
         uniform vec3 uSunDir, uSunColor, uZenith, uHorizon, uFogColor, uShallow, uDeep, uCamPos, uAbsorb;
         uniform float uTime, uNight, uRain, uFogNear, uFogFar, uExposure, uWind, uCamNear, uCamFar;
-        uniform sampler2D uSceneColor, uSceneDepth, uReflColor;
+        uniform sampler2D uSceneColor, uSceneDepth, uReflColor, uRippleNormal;
         uniform mat4 uTexMat;
         uniform float uHasRefl;
         uniform vec2 uResolution;
@@ -188,13 +231,13 @@ export class Water {
         varying float vFogDepth;
         varying float vWaveH;
 
-        /* 細かいさざ波の法線用の傾き。1 周波数だけを流すと一体で動いて
-           不自然なので、周波数ごとに向き・速さの違う層を重ねて分散関係
-           （波長が違うと伝わる速さも向きも少しずつ変わる）を簡易に真似る
-           （tompng/gpuocean の「ノイズをスクロールさせた複製を合成する」
-           手法のアイデア。あちらは WebGPU + 事前焼き込みテクスチャだが、
-           このゲームは全部その場計算の GLSL ノイズなので、素の関数を
-           周波数・向き違いで複数回呼ぶだけで同じ考え方を再現できる） */
+        /* 中波は手続きノイズ、極小リップルはスクロールする法線テクスチャ。
+           すべてを fbm で生成するよりも、表情を保ったまま fragment 負荷を
+           下げられるハイブリッド構成にする。 */
+        vec2 rippleTexSlope(vec2 uv) {
+          return texture2D(uRippleNormal, fract(uv)).xy * 2.0 - 1.0;
+        }
+
         vec2 rippleSlope(vec2 xz, float t) {
           const float EPS = 0.08;
           vec2 d = vec2(0.0);
@@ -209,17 +252,9 @@ export class Water {
           n = fbm2(p);
           d += vec2(n - fbm2(p + vec2(EPS, 0.0)), n - fbm2(p + vec2(0.0, EPS))) * 1.0;
 
-          p = xz * 2.6 - vec2(-0.29, 0.96) * t * 0.6;
-          n = vnoise(p);
-          d += vec2(n - vnoise(p + vec2(EPS, 0.0)), n - vnoise(p + vec2(0.0, EPS))) * 0.7;
-
-          p = xz * 4.2 + vec2(-0.79, -0.61) * t * 1.3;
-          n = vnoise(p);
-          d += vec2(n - vnoise(p + vec2(EPS, 0.0)), n - vnoise(p + vec2(0.0, EPS))) * 0.45;
-
-          p = xz * 6.5 - vec2(0.89, 0.45) * t * 1.7;
-          n = vnoise(p);
-          d += vec2(n - vnoise(p + vec2(EPS, 0.0)), n - vnoise(p + vec2(0.0, EPS))) * 0.28;
+          d += rippleTexSlope(xz * 0.72 + vec2(0.29, -0.84) * t * 0.16) * 0.24;
+          d += rippleTexSlope(xz * 1.36 + vec2(-0.77, -0.41) * t * 0.24 + vec2(0.37, 0.81)) * 0.15;
+          d += rippleTexSlope(xz * 2.45 + vec2(0.91, 0.36) * t * 0.34 + vec2(0.73, 0.19)) * 0.08;
 
           return d;
         }
@@ -276,15 +311,22 @@ export class Water {
           }
 
           /* --- 水中の見え方 ---
+             法線に応じて屈折オフセットを付けた UV からシーン色を読む。
              シーンを描いたテクスチャから「水面より奥にある物」を取り出し、
              水を通る距離ぶん指数関数で減衰させる。距離はピクセルごとに
              連続なので、透ける／透けないの境目が出ない */
           vec2 suv = gl_FragCoord.xy / uResolution;
-          float sceneZ = eyeZ(texture2D(uSceneDepth, suv).x);
+          float refrAmt = (1.0 - ndv) * smoothstep(0.0, 1.4, vDepth) * mix(0.006, 0.018, 1.0 - uRain * 0.35);
+          vec2 refrOff = N.xz * refrAmt;
+          vec2 ruv0 = clamp(suv + refrOff, vec2(0.001), vec2(0.999));
+          float sceneZ = eyeZ(texture2D(uSceneDepth, ruv0).x);
+          // 深度が大きくずれる場合は元 UV に戻して縁のにじみを抑える
+          float sceneZ0 = eyeZ(texture2D(uSceneDepth, suv).x);
+          vec2 ruv = abs(sceneZ - sceneZ0) > 2.5 ? suv : ruv0;
           // ビュー空間の z 差を視線方向の長さに直す
           float rayScale = length(vWorld - uCamPos) / max(vFogDepth, 0.001);
           float path = max(0.0, sceneZ - vFogDepth) * rayScale;
-          vec3 sceneCol = texture2D(uSceneColor, suv).rgb;
+          vec3 sceneCol = texture2D(uSceneColor, ruv).rgb;
 
           float dn = smoothstep(0.4, 13.0, path);
           vec3 body = mix(uShallow, uDeep, dn);
@@ -293,8 +335,12 @@ export class Water {
           /* --- 水面で反射する光（空 + 太陽・月のきらめき） --- */
           vec3 surf = refl;
           vec3 H = normalize(V + uSunDir);
-          float spec = pow(max(dot(N, H), 0.0), 620.0) * 5.5
-                     + pow(max(dot(N, H), 0.0), 48.0) * 0.35;
+          float specT = max(dot(N, H), 0.0);
+          float glitter = vnoise(vWorld.xz * 7.5 + uSunDir.xz * 4.0 + uTime * 0.35);
+          glitter = smoothstep(0.58, 0.92, glitter);
+          float spec = pow(specT, 620.0) * 5.5
+                     + pow(specT, 48.0) * 0.35
+                     + pow(specT, 180.0) * glitter * 2.8;
           surf += uSunColor * spec * (1.0 - uNight) * (1.0 - uRain * 0.4);
           vec3 MH = normalize(V - uSunDir);
           float mnd = max(dot(N, MH), 0.0);
@@ -309,10 +355,11 @@ export class Water {
              泡の塊の大きさはノイズの周波数（xz の係数）で調整する */
           float lap = smoothstep(0.55, 0.0, vDepth + vWaveH * 1.3);
           float lapN = fbm2(vWorld.xz * 2.0 + vec2(uTime * 0.25, uTime * 0.18));
-          float lapThresh = mix(0.85, -0.15, lap);
-          float shoreFoam = clamp(smoothstep(lapThresh, lapThresh + 0.55, lapN) * lap, 0.0, 1.0);
-          float crest = smoothstep(0.62, 0.95, vWaveH / ${MAX_WAVE_AMP.toFixed(3)} / max(uWind, 0.35));
-          float crestFoam = crest * smoothstep(0.35, 0.75, vnoise(vWorld.xz * 2.2 + uTime * 0.3)) * 0.5;
+          float lapThresh = mix(0.82, -0.12, lap);
+          float shoreFoam = clamp(smoothstep(lapThresh, lapThresh + 0.48, lapN) * lap, 0.0, 1.0);
+          float crest = smoothstep(0.58, 0.92, vWaveH / ${MAX_WAVE_AMP.toFixed(3)} / max(uWind, 0.35));
+          float crestN = vnoise(vWorld.xz * 2.2 + uTime * 0.3);
+          float crestFoam = crest * smoothstep(0.28, 0.72, crestN) * 0.62;
           float foam = clamp(shoreFoam + crestFoam, 0.0, 1.0);
           vec3 foamCol = mix(vec3(0.72, 0.78, 0.80), vec3(1.0), 0.5) * mix(0.35, 1.0, 1.0 - uNight * 0.7);
 
@@ -358,6 +405,19 @@ export class Water {
 
     this._buildRipples();
     this._buildSplash();
+    this._buildPlankton(opts.quality || 'mid');
+    this.quality = opts.quality || 'mid';
+    this._underwaterView = false;
+
+    /* 湖底・魚シェーダが参照するコースティクス uniform */
+    this.causticsUniforms = opts.causticsUniforms || {
+      uCaustTime: { value: 0 },
+      uCaustSunDir: { value: new THREE.Vector3(0, 1, 0) },
+      uCaustNight: { value: 0 },
+      uCaustRain: { value: 0 },
+      uCaustCloud: { value: 0 },
+      uCaustStrength: { value: 0 },
+    };
 
     /* 水面より下を写すレンダーターゲット。水越しの絵はぼやけて見えるので
        解像度は 0.6 倍で足りる（負荷も下がる） */
@@ -474,6 +534,7 @@ export class Water {
     this.uniforms.uTexMat.value.copy(_reflVP);
 
     const hidden = [this.mesh, this.splash];
+    if (this.plankton) hidden.push(this.plankton);
     for (const r of this.ripples) hidden.push(r.mesh);
     hidden.push(...(this._extraHidden || []).filter(Boolean));
     const vis = hidden.map((o) => o.visible);
@@ -497,6 +558,7 @@ export class Water {
     this.uniforms.uCamNear.value = camera.near;
     this.uniforms.uCamFar.value = camera.far;
     const hidden = [this.mesh, this.splash, ...(this._extraHidden || [])];
+    if (this.plankton) hidden.push(this.plankton);
     for (const r of this.ripples) hidden.push(r.mesh);
     const vis = hidden.map((o) => o.visible);
     for (const o of hidden) o.visible = false;
@@ -591,6 +653,204 @@ export class Water {
     }
   }
 
+  /* ---------------- 水中プランクトン（プール済み） ---------------- */
+  _buildPlankton(quality) {
+    const counts = { low: 72, mid: 140, high: 240 };
+    this.planktonMax = counts[quality] || counts.mid;
+    this.planktonParts = [];
+    const pos = new Float32Array(this.planktonMax * 3);
+    const col = new Float32Array(this.planktonMax * 3);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    geo.setDrawRange(0, 0);
+
+    const c = document.createElement('canvas');
+    c.width = c.height = 16;
+    const ctx = c.getContext('2d');
+    const g = ctx.createRadialGradient(8, 8, 0, 8, 8, 8);
+    g.addColorStop(0, 'rgba(220,245,255,0.95)');
+    g.addColorStop(0.45, 'rgba(180,230,250,0.55)');
+    g.addColorStop(1, 'rgba(160,220,240,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 16, 16);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+
+    const mat = new THREE.PointsMaterial({
+      size: 0.14,
+      map: tex,
+      transparent: true,
+      opacity: 0.75,
+      depthWrite: false,
+      fog: true,
+      blending: THREE.AdditiveBlending,
+      vertexColors: true,
+      sizeAttenuation: true,
+    });
+    this.plankton = new THREE.Points(geo, mat);
+    this.plankton.frustumCulled = false;
+    this.plankton.renderOrder = 2;
+    this.plankton.visible = false;
+    this.scene.add(this.plankton);
+
+    for (let i = 0; i < this.planktonMax; i++) {
+      this.planktonParts.push({
+        x: 0, y: -1, z: 0,
+        vx: 0, vy: 0, vz: 0,
+        phase: rand(0, TAU),
+        size: rand(0.6, 1.2),
+      });
+    }
+  }
+
+  setQuality(q) {
+    this.quality = q;
+    const rtScale = q === 'low' ? 0.4 : q === 'high' ? 0.7 : 0.55;
+    if (rtScale !== this.rtScale) {
+      this.rtScale = rtScale;
+      if (this.rt) {
+        this.rt.dispose();
+        this.rt = null;
+      }
+    }
+    if (q !== 'low' && !this.reflEnabled) {
+      this.reflEnabled = true;
+      const reflSize = q === 'high' ? 512 : 320;
+      this.reflRT = new THREE.WebGLRenderTarget(reflSize, reflSize, {
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        generateMipmaps: false,
+        depthBuffer: true,
+      });
+      this.reflRT.texture.colorSpace = THREE.SRGBColorSpace;
+      this.reflClearColor = new THREE.Color(0x8fb8d8);
+      this.reflCam = new THREE.PerspectiveCamera();
+      this.reflPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+      this.uniforms.uReflColor.value = this.reflRT.texture;
+      this.uniforms.uHasRefl.value = 1;
+      this._reflSkip = 0;
+    } else if (q === 'low' && this.reflEnabled) {
+      this.reflEnabled = false;
+      this.uniforms.uHasRefl.value = 0;
+      if (this.reflRT) {
+        this.reflRT.dispose();
+        this.reflRT = null;
+      }
+    } else if (this.reflEnabled && this.reflRT) {
+      const want = q === 'high' ? 512 : 320;
+      if (this.reflRT.width !== want) {
+        this.reflRT.dispose();
+        this.reflRT = new THREE.WebGLRenderTarget(want, want, {
+          minFilter: THREE.LinearFilter,
+          magFilter: THREE.LinearFilter,
+          generateMipmaps: false,
+          depthBuffer: true,
+        });
+        this.reflRT.texture.colorSpace = THREE.SRGBColorSpace;
+        this.uniforms.uReflColor.value = this.reflRT.texture;
+      }
+    }
+    const counts = { low: 72, mid: 140, high: 240 };
+    const wantN = counts[q] || counts.mid;
+    if (wantN !== this.planktonMax) this._resizePlankton(wantN);
+  }
+
+  _resizePlankton(n) {
+    if (!this.plankton) return;
+    this.planktonMax = n;
+    this.planktonParts.length = n;
+    for (let i = 0; i < n; i++) {
+      if (!this.planktonParts[i]) {
+        this.planktonParts[i] = {
+          x: 0, y: -1, z: 0, vx: 0, vy: 0, vz: 0, phase: rand(0, TAU), size: rand(0.6, 1.2),
+        };
+      }
+    }
+    const oldGeo = this.plankton.geometry;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+    geo.setDrawRange(0, 0);
+    this.plankton.geometry = geo;
+    oldGeo.dispose();
+  }
+
+  setUnderwaterView(on) {
+    this._underwaterView = !!on;
+  }
+
+  getUnderwaterContext(camera) {
+    const surf = this.surfaceY(camera.position.x, camera.position.z);
+    return {
+      strength: this._underwaterView ? 1 : 0,
+      time: this.time,
+      sunDir: this.uniforms.uSunDir.value,
+      night: this.uniforms.uNight.value,
+      rain: this.uniforms.uRain.value,
+      cloud: 0,
+      absorb: this.uniforms.uAbsorb.value,
+      camPos: camera.position,
+      camNear: camera.near,
+      camFar: camera.far,
+      waterY: surf,
+    };
+  }
+
+  _updatePlankton(dt, camera) {
+    if (!this.plankton || !this._underwaterView) {
+      if (this.plankton) this.plankton.visible = false;
+      return;
+    }
+    this.plankton.visible = true;
+    const posAttr = this.plankton.geometry.attributes.position;
+    const colAttr = this.plankton.geometry.attributes.color;
+    const cx = camera.position.x;
+    const cy = camera.position.y;
+    const cz = camera.position.z;
+    const spread = this.quality === 'low' ? 7 : this.quality === 'high' ? 11 : 9;
+    let n = 0;
+    for (let i = 0; i < this.planktonMax; i++) {
+      const p = this.planktonParts[i];
+      if (p.y < -0.5) {
+        p.x = cx + rand(-spread, spread);
+        p.y = cy + rand(-spread * 0.5, spread * 0.5);
+        p.z = cz + rand(-spread, spread);
+        const bed = this.terrain.heightAt(p.x, p.z);
+        const surf = this.surfaceY(p.x, p.z);
+        p.y = clamp(p.y, bed + 0.3, surf - 0.25);
+        p.vx = rand(-0.08, 0.08);
+        p.vy = rand(-0.02, 0.02);
+        p.vz = rand(-0.08, 0.08);
+      }
+      p.x += (p.vx + Math.sin(this.time * 0.7 + p.phase) * 0.012) * dt;
+      p.y += (p.vy + Math.sin(this.time * 0.5 + p.phase * 1.7) * 0.004) * dt;
+      p.z += (p.vz + Math.cos(this.time * 0.6 + p.phase) * 0.012) * dt;
+      const bed = this.terrain.heightAt(p.x, p.z);
+      const surf = this.surfaceY(p.x, p.z);
+      if (p.y < bed + 0.2 || p.y > surf - 0.15) {
+        p.y = -1;
+        continue;
+      }
+      const dx = p.x - cx, dy = p.y - cy, dz = p.z - cz;
+      if (dx * dx + dy * dy + dz * dz > spread * spread * 1.4) {
+        p.y = -1;
+        continue;
+      }
+      const tw = 0.45 + 0.55 * Math.sin(this.time * 1.8 + p.phase);
+      posAttr.array[n * 3] = p.x;
+      posAttr.array[n * 3 + 1] = p.y;
+      posAttr.array[n * 3 + 2] = p.z;
+      colAttr.array[n * 3] = tw * p.size;
+      colAttr.array[n * 3 + 1] = tw * p.size * 1.05;
+      colAttr.array[n * 3 + 2] = tw * p.size * 1.1;
+      n++;
+    }
+    this.plankton.geometry.setDrawRange(0, n);
+    posAttr.needsUpdate = true;
+    colAttr.needsUpdate = true;
+  }
+
   addSplash(x, y, z, count = 14, power = 1) {
     let added = 0;
     for (let i = 0; i < this.splashMax && added < count; i++) {
@@ -629,6 +889,16 @@ export class Water {
     u.uNight.value = env.nightAmount;
     u.uRain.value = env.rainIntensity;
     u.uCamPos.value.copy(camera.position);
+
+    const cu = this.causticsUniforms;
+    cu.uCaustTime.value = this.time;
+    cu.uCaustSunDir.value.copy(env.sunDir);
+    cu.uCaustNight.value = env.nightAmount;
+    cu.uCaustRain.value = env.rainIntensity;
+    cu.uCaustCloud.value = env.cloudiness;
+    cu.uCaustStrength.value = this._underwaterView ? 1 : 0;
+
+    this._updatePlankton(dt, camera);
 
     // 波紋
     for (const r of this.ripples) {

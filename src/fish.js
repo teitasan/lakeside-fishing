@@ -2,6 +2,7 @@
    魚：プロシージャル生成メッシュ + 遊泳AI
    =========================================================== */
 import * as THREE from 'three';
+import { CAUSTICS_GLSL } from './shaders.js?v=20260826-uwgfx';
 import { clamp, clamp01, lerp, rand, smoothstep, TAU, damp } from './util.js';
 import { depthBandAt, colorsOf } from './data.js';
 import { textureTypeFor, fishTexture, FIN_UV } from './fishTextures.js';
@@ -927,7 +928,7 @@ export function createCrustGeometry(sp, opts = {}) {
 }
 
 /* ---------------- マテリアル（体をうねらせる） ---------------- */
-export function createFishMaterial(shiny = 0.35) {
+export function createFishMaterial(shiny = 0.35, causticsUniforms = null) {
   const mat = new THREE.MeshStandardMaterial({
     vertexColors: true,
     roughness: 0.55 - shiny * 0.3,
@@ -942,11 +943,14 @@ export function createFishMaterial(shiny = 0.35) {
     uBend: { value: 0 },
   };
   mat.userData.u = u;
-  mat.customProgramCacheKey = () => 'fish-wiggle-v2-tex';
+  mat.customProgramCacheKey = () => `fish-wiggle-v3-caustics-${causticsUniforms ? 1 : 0}`;
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, u);
+    if (causticsUniforms) Object.assign(shader.uniforms, causticsUniforms);
     shader.vertexShader =
-      'uniform float uTime, uAmp, uFreq, uLen, uBend;\n' + shader.vertexShader;
+      'uniform float uTime, uAmp, uFreq, uLen, uBend;\n' +
+      'varying vec3 vFishWorldPos;\n' +
+      shader.vertexShader;
     shader.vertexShader = shader.vertexShader.replace(
       '#include <begin_vertex>',
       /* glsl */ `
@@ -955,8 +959,20 @@ export function createFishMaterial(shiny = 0.35) {
       float wig = sin(position.x / uLen * uFreq - uTime * 6.2831) * uAmp * uLen;
       transformed.z += wig * pow(tailK, 1.6);
       transformed.z += uBend * uLen * pow(tailK, 2.0);
+      vFishWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
       `
     );
+    if (causticsUniforms) {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <common>',
+        `#include <common>\n          varying vec3 vFishWorldPos;\n${CAUSTICS_GLSL}`
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+        totalEmissiveRadiance += causticLight(vFishWorldPos);`
+      );
+    }
   };
   return mat;
 }
@@ -1235,7 +1251,7 @@ export class FishSchool {
     this.geoCache = new Map();
     this.count = opts.count ?? 22;
     this.fishes = [];
-    const matFactory = () => createFishMaterial(0.4);
+    const matFactory = () => createFishMaterial(0.4, water.causticsUniforms);
     for (let i = 0; i < 34; i++) {
       const f = new Fish(this.geoCache, matFactory);
       scene.add(f.mesh);

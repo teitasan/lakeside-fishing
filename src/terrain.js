@@ -2,7 +2,7 @@
    地形・湖底・岸辺の装飾・桟橋
    =========================================================== */
 import * as THREE from 'three';
-import { COMMON_GLSL } from './shaders.js?v=20260826-envgfx';
+import { CAUSTICS_GLSL } from './shaders.js?v=20260826-uwgfx';
 import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js';
 import { WORLD_SIZE, WATER_REGION, MAX_DEPTH, resolveLake } from './lakefield.js';
 
@@ -214,6 +214,7 @@ export class Terrain {
     this._obsGrid = new Map();
 
     this._buildHeightTexture();
+    this._causticsUniforms = opts.causticsUniforms || null;
     this._buildTerrainMesh(opts.bedTextures || null);
     this._findDock();
     this._buildDock();
@@ -314,7 +315,8 @@ export class Terrain {
       metalness: 0,
       flatShading: true,
     });
-    if (bedTextures) this._applyBedTextures(mat, bedTextures);
+    if (bedTextures) this._applyBedTextures(mat, bedTextures, this._causticsUniforms);
+    else this._applyTerrainCaustics(mat, this._causticsUniforms);
     this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.receiveShadow = true;
     this.mesh.castShadow = false;
@@ -326,13 +328,14 @@ export class Terrain {
    * 湖底だけ砂／岩／泥のタイルテクスチャをブレンドして貼る。
    * 陸は従来どおり頂点色のまま。
    */
-  _applyBedTextures(mat, tex) {
+  _applyBedTextures(mat, tex, causticsUniforms) {
     const uniforms = {
       uBedSand: { value: tex.sand },
       uBedRock: { value: tex.rock },
       uBedMud: { value: tex.mud },
       uBedScale: { value: 1 / 12 }, // 1 タイル ≈ 12 m
     };
+    if (causticsUniforms) Object.assign(uniforms, causticsUniforms);
     mat.userData.bedUniforms = uniforms;
     mat.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, uniforms);
@@ -354,6 +357,7 @@ export class Terrain {
         .replace(
           '#include <common>',
           `#include <common>
+          ${CAUSTICS_GLSL}
           uniform sampler2D uBedSand;
           uniform sampler2D uBedRock;
           uniform sampler2D uBedMud;
@@ -379,12 +383,46 @@ export class Terrain {
               vec3 bedCol = (mudC * wMud + sandC * wSand + rockC * wRock) / wSum;
               float d = clamp(-vBedWorldPos.y / 16.0, 0.0, 1.0);
               bedCol *= mix(1.0, 0.38, d);
+              bedCol += causticLight(vBedWorldPos);
               diffuseColor.rgb = mix(diffuseColor.rgb, bedCol, under);
             }
           }`
         );
     };
-    mat.customProgramCacheKey = () => 'terrain-bed-tex-v2';
+    mat.customProgramCacheKey = () => 'terrain-bed-tex-v3-caustics';
+  }
+
+  /** 湖底テクスチャが使えない環境でも、頂点色の湖底へコースティクスを載せる。 */
+  _applyTerrainCaustics(mat, causticsUniforms) {
+    if (!causticsUniforms) return;
+    mat.userData.causticsUniforms = causticsUniforms;
+    mat.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, causticsUniforms);
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+          varying vec3 vTerrainWorldPos;`
+        )
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+          vTerrainWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`
+        );
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+          varying vec3 vTerrainWorldPos;
+          ${CAUSTICS_GLSL}`
+        )
+        .replace(
+          '#include <emissivemap_fragment>',
+          `#include <emissivemap_fragment>
+          totalEmissiveRadiance += causticLight(vTerrainWorldPos);`
+        );
+    };
+    mat.customProgramCacheKey = () => 'terrain-vcolor-v1-caustics';
   }
 
   _terrainColor(h, slope, x, z, out) {

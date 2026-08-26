@@ -86,3 +86,52 @@ vec3 encodeOut(vec3 c, float exposure, float lin) {
   return mix(linearToSRGB(acesToneMap(c, exposure)), c, lin);
 }
 `;
+
+/** 湖底・魚向けの手続きコースティクス（uCaust* uniform が必要） */
+export const CAUSTICS_GLSL = /* glsl */ `
+float caustHash21(vec2 p) {
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+
+float caustVnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = caustHash21(i);
+  float b = caustHash21(i + vec2(1.0, 0.0));
+  float c = caustHash21(i + vec2(0.0, 1.0));
+  float d = caustHash21(i + vec2(1.0, 1.0));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+float caustFbm2(vec2 p) {
+  return caustVnoise(p) * 0.6667 + caustVnoise(p * 2.03) * 0.3333;
+}
+
+uniform float uCaustTime;
+uniform vec3 uCaustSunDir;
+uniform float uCaustNight;
+uniform float uCaustRain;
+uniform float uCaustCloud;
+uniform float uCaustStrength;
+
+vec3 causticLight(vec3 worldPos) {
+  if (uCaustStrength < 0.001 || worldPos.y > -0.02) return vec3(0.0);
+  float depth = -worldPos.y;
+  vec2 sunXZ = uCaustSunDir.xz;
+  float sunLen = length(sunXZ);
+  vec2 sunN = sunLen > 1e-4 ? sunXZ / sunLen : vec2(0.0, 1.0);
+  vec2 p = worldPos.xz * 0.38 + sunN * depth * 0.18;
+  float t = uCaustTime;
+  float c1 = caustFbm2(p + vec2(t * 0.42, t * 0.31));
+  float c2 = caustFbm2(p * 1.65 - vec2(t * 0.51, t * 0.39));
+  float caust = pow(clamp(c1 * c2 * 2.1, 0.0, 1.0), 2.4);
+  float fade = smoothstep(0.08, 0.55, depth) * (1.0 - smoothstep(3.5, 20.0, depth));
+  fade *= (1.0 - uCaustNight * 0.94) * (1.0 - uCaustRain * 0.78) * (1.0 - uCaustCloud * 0.62);
+  fade *= smoothstep(-0.08, 0.28, uCaustSunDir.y);
+  fade *= uCaustStrength;
+  return vec3(0.48, 0.78, 0.92) * caust * fade * 0.42;
+}
+`;
