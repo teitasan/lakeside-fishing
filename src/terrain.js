@@ -2,6 +2,7 @@
    地形・湖底・岸辺の装飾・桟橋
    =========================================================== */
 import * as THREE from 'three';
+import { COMMON_GLSL } from './shaders.js?v=20260826-envgfx';
 import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js';
 import { WORLD_SIZE, WATER_REGION, MAX_DEPTH, resolveLake } from './lakefield.js';
 
@@ -15,6 +16,64 @@ const tmpSand = new THREE.Color();
 const UP = new THREE.Vector3(0, 1, 0);
 const _dl = { al: 0, si: 0 };
 const _dl2 = { al: 0, si: 0 };
+
+/**
+ * 植生マテリアルに風揺れを注入する。
+ * 頂点ごとに「根元は動かない・先端ほど揺れる」重み（高さ比例）をかけ、
+ * 複数周波数のサイン波 + ノイズ的な位相ずれで、木ごと・草ごとに
+ * 揺れのタイミングをずらす。インスタンス座標を位相源にするので
+ * 追加ジオメトリや CPU 更新は不要。
+ */
+function addWindSway(mat, {
+  strength = 0.06,     // 先端の最大振れ幅（m 相当）
+  freq = 1.6,          // 基本の揺れ速さ
+  gustiness = 0.5,     // 突風の強さ（0 で一定風）
+} = {}) {
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uWindTime = { value: 0 };
+    shader.uniforms.uWindStrength = { value: strength };
+    shader.uniforms.uWindGust = { value: gustiness };
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        uniform float uWindTime;
+        uniform float uWindStrength;
+        uniform float uWindGust;`
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        {
+          // ローカルの高さ（幹・葉とも原点が根元なので y のみで良い）
+          float swayW = clamp(transformed.y, 0.0, 8.0);
+          // インスタンス位置で位相をずらす（隣の木が同じタイミングで揺れない）
+          vec3 ipos = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
+          float phase = dot(ipos.xz, vec2(0.71, 0.53));
+          // 全体をなびかせる風 + 局所的なそよぎ
+          float g = 1.0 + uWindGust * sin(uWindTime * 0.9 + phase * 0.35) * sin(uWindTime * 2.13 + phase);
+          float w1 = sin(uWindTime * ${freq.toFixed(2)} + phase);
+          float w2 = sin(uWindTime * ${(freq * 2.37).toFixed(2)} + phase * 1.7 + 1.3);
+          transformed.x += (w1 * 0.7 + w2 * 0.3) * g * uWindStrength * swayW;
+          transformed.z += (w2 * 0.7 - w1 * 0.3) * g * uWindStrength * swayW * 0.62;
+        }`
+      );
+    mat.userData.windUniforms = shader.uniforms;
+  };
+  mat.customProgramCacheKey = () => `wind-sway-${strength}-${freq}-${gustiness}`;
+  mat.userData._windBase = strength;
+  return mat;
+}
+
+/** 風の時刻を進める（terrain.updateLamp などから毎フレーム呼ぶ） */
+export function tickVegetationWind(list, t, windPow = 1) {
+  for (const m of list) {
+    const u = m.userData?.windUniforms;
+    if (!u || !u.uWindTime) continue;   // 初回コンパイル前
+    u.uWindTime.value = t;
+    if (u.uWindStrength) u.uWindStrength.value = m.userData._windBase * windPow;
+  }
+}
 
 /** 線分 vs AABB（スラブ法） */
 function segBoxHit(p0, p1, min, max) {
@@ -669,7 +728,11 @@ export class Terrain {
     const leafGeo = new THREE.ConeGeometry(1, 1, 7);
     leafGeo.translate(0, 0.5, 0);
     const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3524, roughness: 1 });
-    const leafMat = new THREE.MeshStandardMaterial({ color: 0x2f5a2c, roughness: 0.95, flatShading: true });
+    // 葉だけ揺らす（幹は動かさない）
+    const leafMat = addWindSway(
+      new THREE.MeshStandardMaterial({ color: 0x2f5a2c, roughness: 0.95, flatShading: true }),
+      { strength: q === 'low' ? 0.035 : 0.05, freq: 1.4, gustiness: 0.55 }
+    );
 
     const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, treeTarget);
     const leaves = new THREE.InstancedMesh(leafGeo, leafMat, treeTarget * 2);
@@ -734,6 +797,8 @@ export class Terrain {
     // 水中描画用のシーン取り込みでは省いて負荷を下げる）。
     // 岸の岩は水際にまたがって置かれる＝水中部分が見えるので入れない
     this.overWaterProps = [trunks, leaves];
+    // reedMat は後段（葦）で生成するので、ここでは leaf だけ入れて後で追加する
+    this.swayMaterials = [leafMat];
 
     /* --- 岩 --- */
     const rockGeo = new THREE.IcosahedronGeometry(1, 0);
@@ -860,9 +925,9 @@ export class Terrain {
     /* --- 葦（浅場） --- */
     const reedGeo = new THREE.ConeGeometry(0.06, 1, 4, 1, true);
     reedGeo.translate(0, 0.5, 0);
-    const reedMat = new THREE.MeshStandardMaterial({
+    const reedMat = addWindSway(new THREE.MeshStandardMaterial({
       color: 0x4c6b34, roughness: 1, side: THREE.DoubleSide,
-    });
+    }), { strength: q === 'low' ? 0.05 : 0.075, freq: 2.1, gustiness: 0.7 });
     const reeds = new THREE.InstancedMesh(reedGeo, reedMat, reedTarget);
     let rdi = 0; tries = 0;
     while (rdi < reedTarget && tries < reedTarget * 40) {
@@ -884,6 +949,7 @@ export class Terrain {
     reeds.count = rdi;
     reeds.instanceMatrix.needsUpdate = true;
     this.scene.add(reeds);
+    this.swayMaterials.push(reedMat);
 
     // 浅い平場（藻場）にも葦を密生させる。平場は複数あるので順に回す
     const weedGeo = reedGeo.clone();
@@ -916,5 +982,10 @@ export class Terrain {
     const target = nightAmount;
     this.lampMat.emissiveIntensity = lerp(this.lampMat.emissiveIntensity, target * 2.4, 0.06);
     this.lampLight.intensity = lerp(this.lampLight.intensity, target * 26, 0.06);
+  }
+
+  /** 風揺れの時刻を進める（windPow: 雨天ほど強く） */
+  updateWind(time, windPow = 1) {
+    if (this.swayMaterials) tickVegetationWind(this.swayMaterials, time * 1.0, windPow);
   }
 }

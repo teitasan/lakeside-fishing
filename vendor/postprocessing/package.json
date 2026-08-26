@@ -1,0 +1,16 @@
+{
+  "name": "postprocessing",
+  "version": "6.39.4",
+  "description": "A post processing library for three.js (vendored build, no bundler)",
+  "license": "Zlib",
+  "type": "module",
+  "main": "./index.js",
+  "module": "./index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "homepage": "https://github.com/pmndrs/postprocessing",
+  "peerDependencies": {
+    "three": ">= 0.168.0 < 0.186.0"
+  }
+}

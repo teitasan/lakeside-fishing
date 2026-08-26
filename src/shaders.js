@@ -74,4 +74,15 @@ vec3 linearToSRGB(vec3 v) {
 vec3 encodeOutput(vec3 c, float exposure) {
   return linearToSRGB(acesToneMap(c, exposure));
 }
+
+/**
+ * 線形色 -> 出力色（composer 経由対応版）。
+ * lin=0 なら従来どおり ACES + sRGB を自前で適用し、
+ * lin=1 のときはリニアのまま出力する（トーンマップはポスト側で 1 回だけ行う。
+ * HalfFloat バッファへは three が何も焼き込まないので、ここで二重に掛けると
+ * 暗く沈んだ絵になる）
+ */
+vec3 encodeOut(vec3 c, float exposure, float lin) {
+  return mix(linearToSRGB(acesToneMap(c, exposure)), c, lin);
+}
 `;

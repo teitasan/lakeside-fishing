@@ -2,10 +2,10 @@
    ゲーム本体：状態機械・キャスト・ファイト・進行
    =========================================================== */
 import * as THREE from 'three';
-import { Environment } from './sky.js';
-import { Terrain, WATER_REGION } from './terrain.js';
+import { Environment } from './sky.js?v=20260826-envgfx';
+import { Terrain, WATER_REGION } from './terrain.js?v=20260826-envgfx';
 import { resolveLake } from './lakefield.js';
-import { Water } from './water.js';
+import { Water } from './water.js?v=20260826-envgfx';
 import { FishSchool } from './fish.js';
 import { preloadFishTextures } from './fishTextures.js';
 import { preloadTerrainIcons } from './terrainIcons.js';
@@ -30,6 +30,7 @@ import {
 } from './i18n.js';
 import { MultiplayerClient, MULTIPLAYER_SEED } from './network/multiplayer.js';
 import { RemotePlayers } from './multiplayer/remotePlayer.js';
+import { PostFX } from './postfx.js?v=20260826-envgfx';
 
 const GRAVITY = 9.8;
 const EXPOSURE = 0.78;
@@ -328,6 +329,11 @@ export class Game {
     await onProgress(t('ui.loadingWater'));
     this.water = new Water(this.scene, this.terrain, { quality: q, exposure: EXPOSURE });
 
+    // 後処理（Bloom は high のみ）。water/sky はリニア出力へ切り替わる
+    this.postfx = new PostFX(this.renderer, this.scene, this.camera, {
+      quality: q, water: this.water, sky: this.env.skyUniforms, exposure: EXPOSURE,
+    });
+
     await onProgress(t('ui.loadingFishTex'));
     try {
       await Promise.all([preloadFishTextures(), preloadTerrainIcons()]);
@@ -404,6 +410,7 @@ export class Game {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
+      if (this.postfx) this.postfx.setSize(window.innerWidth, window.innerHeight);
     });
 
     c.addEventListener('mousedown', (e) => {
@@ -750,6 +757,12 @@ export class Game {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, q === 'high' ? 2 : q === 'low' ? 1 : 1.5));
     this.renderer.shadowMap.enabled = this.state.settings.shadow;
     this.env.setQuality(q);
+    this.postfx?.setQuality(q);
+    if (this.postfx) {
+      const s = new THREE.Vector2();
+      this.renderer.getSize(s);
+      this.postfx.setSize(s.x, s.y);
+    }
     this.school.setCount(q === 'low' ? 14 : q === 'high' ? 30 : 22);
     this.scene.traverse((o) => { if (o.material) o.material.needsUpdate = true; });
   }
@@ -1417,6 +1430,9 @@ export class Game {
     this._updateCamera(sdt);
 
     this.env.update(sdt, this.state.clock, this.camera, this.pos);
+    // 風揺れ（雨・くもりほど強く）
+    const windPow = 1 + this.env.rainIntensity * 0.9 + this.env.cloudiness * 0.2;
+    this.terrain.updateWind(this.time, windPow);
     this.terrain.updateLamp(this.env.nightAmount, sdt);
     this.water.update(sdt, this.camera, this.env);
 
@@ -1484,7 +1500,9 @@ export class Game {
     this.ui.updateHUD(this);
     // 水越しの絵のために、水面を隠したシーンを 1 枚描いておく
     this.water.capture(this.renderer, this.scene, this.camera);
-    this.renderer.render(this.scene, this.camera);
+    // 水面の映り込み（30Hz に間引き）
+    this.water.captureReflection(this.renderer, this.scene, this.camera);
+    this.postfx.render(sdt);
     this.debug.update(dt);
   }
 

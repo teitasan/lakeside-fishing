@@ -3,7 +3,7 @@
    CPU と GPU で同一の波関数を使い、ウキが正しく浮くようにする
    =========================================================== */
 import * as THREE from 'three';
-import { COMMON_GLSL } from './shaders.js';
+import { COMMON_GLSL } from './shaders.js?v=20260826-envgfx';
 import { WATER_REGION } from './lakefield.js';
 import { smoothstep, rand, TAU } from './util.js';
 
@@ -68,6 +68,29 @@ ${dsum}  return d;
 `;
 }
 
+/* --- planar reflection 用の一時オブジェクト（GC 抑制） --- */
+const _reflMat4 = new THREE.Matrix4();
+const _reflVP = new THREE.Matrix4();
+const _reflPlaneCam = new THREE.Plane();
+const _reflClip = new THREE.Vector4();
+const _reflV = new THREE.Vector3();
+
+/**
+ * 射影行列の near 面を任意平面（カメラ空間）へ置き換える。
+ * Lengyel, "Oblique View Frustum Depth Projection and Clipping" 相当。
+ */
+function _calcOblique(proj, clip) {
+  const e = proj.elements;
+  const qx = (Math.sign(clip.x) + e[8]) / e[0];
+  const qy = (Math.sign(clip.y) + e[9]) / e[5];
+  const qz = -1.0;
+  const f = 1.0 / (e[10] + qx * e[8] + qy * e[9] + qz * e[14]);
+  e[2] = clip.x * f;
+  e[6] = clip.y * f;
+  e[10] = clip.z * f + 1.0;
+  e[14] = clip.w * f;
+}
+
 export class Water {
   constructor(scene, terrain, opts = {}) {
     this.scene = scene;
@@ -107,6 +130,12 @@ export class Water {
       // 1m あたりの吸収（赤から先に消える）
       uAbsorb: { value: new THREE.Vector3(0.46, 0.20, 0.13) },
       uDebug: { value: 0 },   // 1=シーンテクスチャ 2=水の厚み（開発用）
+      uLinearOut: { value: 0 },
+      /* --- 平面反射（planar reflection） ---
+         ミラーカメラで水面より上を描いたテクスチャを、波の法線で揺らして貼る */
+      uReflColor: { value: null },
+      uTexMat: { value: new THREE.Matrix4() },
+      uHasRefl: { value: 0 },
     };
 
     const mat = new THREE.ShaderMaterial({
@@ -147,9 +176,12 @@ export class Water {
         ${COMMON_GLSL}
         uniform vec3 uSunDir, uSunColor, uZenith, uHorizon, uFogColor, uShallow, uDeep, uCamPos, uAbsorb;
         uniform float uTime, uNight, uRain, uFogNear, uFogFar, uExposure, uWind, uCamNear, uCamFar;
-        uniform sampler2D uSceneColor, uSceneDepth;
+        uniform sampler2D uSceneColor, uSceneDepth, uReflColor;
+        uniform mat4 uTexMat;
+        uniform float uHasRefl;
         uniform vec2 uResolution;
         uniform float uDebug;
+        uniform float uLinearOut;
         varying vec3 vWorld;
         varying vec2 vWaveD;
         varying float vDepth;
@@ -227,6 +259,22 @@ export class Water {
           R.y = abs(R.y);
           vec3 refl = skyAt(R);
 
+          /* --- 平面反射 ---
+             水面より上を描いたミラー画像。波の法線で反射ベクトルの足元を
+             揺らしてサンプリングする（uv は uTexMat が画面座標へ運ぶ）。
+             RT に焼いた色は sRGB 済みなので、そのまま合成してよい */
+          if (uHasRefl > 0.5) {
+            vec3 Rd = reflect(-V, N);
+            float dist = length(vWorld - uCamPos);
+            // 波の傾きに応じて反射点を横へずらす（揺れの主役）
+            vec4 rp = uTexMat * vec4(vWorld + Rd * (0.35 + dist * 0.10), 1.0);
+            vec2 ruv = clamp(rp.xy / rp.w, 0.0, 1.0);
+            vec3 mirror = texture2D(uReflColor, ruv).rgb;
+            // 空だけの領域（RT の初期化色）との差が少ない所ほど信頼する
+            float mirrorW = smoothstep(0.02, 0.25, fres) * (under ? 0.35 : 1.0);
+            refl = mix(refl, mirror, mirrorW * 0.85);
+          }
+
           /* --- 水中の見え方 ---
              シーンを描いたテクスチャから「水面より奥にある物」を取り出し、
              水を通る距離ぶん指数関数で減衰させる。距離はピクセルごとに
@@ -284,11 +332,11 @@ export class Water {
           /* --- 合成 ---
              下から来る光（湖底が水で減衰したもの）と、水面の反射をフレネルで混ぜる。
              不透明度で被せる方式と違い、湖底は「水の色に溶けていく」ので境目が出ない */
-          vec3 bodyEnc = encodeOutput(body, uExposure);
+          vec3 bodyEnc = encodeOut(body, uExposure, uLinearOut);
           vec3 trans = exp(-uAbsorb * path);
           vec3 below = mix(bodyEnc, sceneCol, trans);
-          vec3 outc = mix(below, encodeOutput(surf, uExposure), under ? 0.35 : fres);
-          outc = mix(outc, encodeOutput(foamCol, uExposure), foam * 0.9);
+          vec3 outc = mix(below, encodeOut(surf, uExposure, uLinearOut), under ? 0.35 : fres);
+          outc = mix(outc, encodeOut(foamCol, uExposure, uLinearOut), foam * 0.9);
 
           if (uDebug > 0.5) {
             if (uDebug < 1.5) { gl_FragColor = vec4(sceneCol, 1.0); return; }
@@ -296,7 +344,7 @@ export class Water {
           }
           // --- フォグ ---
           float fog = smoothstep(uFogNear, uFogFar, vFogDepth);
-          outc = mix(outc, encodeOutput(uFogColor, uExposure), fog);
+          outc = mix(outc, encodeOut(uFogColor, uExposure, uLinearOut), fog);
           gl_FragColor = vec4(outc, 1.0);
         }
       `,
@@ -315,6 +363,29 @@ export class Water {
        解像度は 0.6 倍で足りる（負荷も下がる） */
     this.rtScale = opts.quality === 'low' ? 0.4 : opts.quality === 'high' ? 0.7 : 0.55;
     this.rt = null;
+
+    /* --- 平面反射の準備 ---
+       low 品質では無効。ミラー RT は小さめで十分（揺らして見るので） */
+    this.reflEnabled = opts.quality !== 'low';
+    if (this.reflEnabled) {
+      const reflSize = opts.quality === 'high' ? 512 : 320;
+      this.reflRT = new THREE.WebGLRenderTarget(reflSize, reflSize, {
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        generateMipmaps: false,
+        depthBuffer: true,
+      });
+      this.reflRT.texture.colorSpace = THREE.SRGBColorSpace;
+      // 描画漏れの領域は空色で埋める（skyAt の近似色）
+      this.reflClearColor = new THREE.Color(0x8fb8d8);
+      this.reflCam = new THREE.PerspectiveCamera();
+      // render() 内の updateMatrixWorld() に position/quaternion を壊されないよう
+      // 通常の autoUpdate のまま使う（_updateReflCam が同期する）
+      this.reflPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+      this.uniforms.uReflColor.value = this.reflRT.texture;
+      this.uniforms.uHasRefl.value = 1;
+      this._reflSkip = 0;
+    }
   }
 
   /** 画面サイズに合わせてレンダーターゲットを用意する */
@@ -346,6 +417,79 @@ export class Water {
   /** 水越しには写らないもの（空・雨・陸の木や岩）を登録しておくと、キャプチャを軽くできる */
   setCaptureHidden(list) {
     this._extraHidden = (list || []).filter(Boolean);
+  }
+
+  /* ---------------- 平面反射 ---------------- */
+  /**
+   * 主カメラを水面（y=0）で鏡映しにしたミラーカメラを作る。
+   * 斜めクリッピング平面（oblique projection）で「水面より上」だけを描く。
+   */
+  _updateReflCam(camera) {
+    const cam = this.reflCam;
+    const p = this.reflPlane;
+    // 反射は水面の少し上（0.06m）で切る：波の峰が平面を突き抜けて
+    // 映り込みが欠けるのを防ぐ。高すぎると岸が切れるので小さく抑える
+    p.constant = 0.06;
+    // 鏡映: M' = S * M（S は y=0 平面での反転）
+    _reflMat4.makeScale(1, -1, 1).multiply(camera.matrixWorld);
+    // 鏡映で利き手が反転するので、three の慣例（カメラは -Z を向く）へ戻す:
+    // z 軸ベクトル（3 列目）と z 行（3 行目）、平行移動の z 成分を反転する
+    const e = _reflMat4.elements;
+    e[2] *= -1; e[6] *= -1; e[10] *= -1; e[14] *= -1;
+    e[8] *= -1; e[9] *= -1;
+    cam.matrixWorld.copy(_reflMat4);
+    cam.matrixWorldInverse.copy(cam.matrixWorld).invert();
+    // three は render() 内で camera.updateMatrixWorld() を呼び、matrixAutoUpdate
+    // なら matrix を position/quaternion から作り直す。手計算した結果を保持するため
+    // decompose で同期しておく（scale は鏡映で負になるが decompose/invert で不変）
+    cam.matrix.copy(_reflMat4);
+    cam.matrix.decompose(cam.position, cam.quaternion, cam.scale);
+    cam.projectionMatrix.copy(camera.projectionMatrix);
+    // 射影行列に斜めクリッピング平面（水面）を焼き込む
+    _reflPlaneCam.copy(p).applyMatrix4(cam.matrixWorldInverse);
+    _reflClip.set(
+      _reflPlaneCam.normal.x, _reflPlaneCam.normal.y, _reflPlaneCam.normal.z, _reflPlaneCam.constant
+    );
+    if (_reflClip.w >= 0) {   // 平面がカメラの裏側ならクリップ不要
+      cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
+      return cam;
+    }
+    _calcOblique(cam.projectionMatrix, _reflClip);
+    cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
+    return cam;
+  }
+
+  /**
+   * 水面より上をミラーカメラで描いて RT に焼く（本描画の直前に呼ぶ）。
+   * 負荷軽減のため 30Hz に間引く。
+   */
+  captureReflection(renderer, scene, camera) {
+    if (!this.reflEnabled) return;
+    if (++this._reflSkip < 2 && this._reflOnce) return;   // 30Hz に間引く
+    this._reflSkip = 0;
+    this._reflOnce = true;
+    const cam = this._updateReflCam(camera);
+    // ワールド → uv 変換行列をシェーダへ渡す（world→clip→[0,1]）
+    _reflVP.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    this.uniforms.uTexMat.value.copy(_reflVP);
+
+    const hidden = [this.mesh, this.splash];
+    for (const r of this.ripples) hidden.push(r.mesh);
+    hidden.push(...(this._extraHidden || []).filter(Boolean));
+    const vis = hidden.map((o) => o.visible);
+    for (const o of hidden) o.visible = false;
+    const prevTarget = renderer.getRenderTarget();
+    renderer.setRenderTarget(this.reflRT);
+    renderer.setClearColor(this.reflClearColor, 1);
+    renderer.clear();
+    // 影は本描画（capture 内）で更新済みなのでここでは作り直さない
+    const prevShadowAuto = renderer.shadowMap.autoUpdate;
+    renderer.shadowMap.autoUpdate = false;
+    renderer.render(scene, cam);
+    renderer.shadowMap.autoUpdate = prevShadowAuto;
+    renderer.setClearColor(null, 0);
+    renderer.setRenderTarget(prevTarget);
+    hidden.forEach((o, i) => { o.visible = vis[i]; });
   }
 
   capture(renderer, scene, camera) {

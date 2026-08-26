@@ -2,7 +2,7 @@
    空・太陽・時間帯・天候
    =========================================================== */
 import * as THREE from 'three';
-import { COMMON_GLSL } from './shaders.js';
+import { COMMON_GLSL } from './shaders.js?v=20260826-envgfx';
 import { clamp01, lerp, smoothstep, rand, TAU, damp } from './util.js';
 
 /* 時刻ごとの色キーフレーム（hour, 天頂色, 地平色, 太陽色, 環境光係数） */
@@ -67,6 +67,7 @@ export class Environment {
       uCloud: { value: 0.2 },
       uTime: { value: 0 },
       uExposure: { value: this.exposure },
+      uLinearOut: { value: 0 },
     };
     const mat = new THREE.ShaderMaterial({
       uniforms: this.skyUniforms,
@@ -82,7 +83,7 @@ export class Environment {
       fragmentShader: /* glsl */ `
         ${COMMON_GLSL}
         uniform vec3 uZenith, uHorizon, uSunColor, uSunDir;
-        uniform float uNight, uCloud, uTime, uExposure;
+        uniform float uNight, uCloud, uTime, uExposure, uLinearOut;
         varying vec3 vDir;
 
         void main() {
@@ -119,6 +120,18 @@ export class Environment {
             float tw = 0.55 + 0.45 * sin(uTime * 2.4 + n * 240.0);
             float horizonFade = smoothstep(-0.02, 0.22, hy);
             col += vec3(0.85, 0.9, 1.0) * bright * tw * 1.7 * uNight * horizonFade;
+
+            /* --- 天の川 ---
+               星空の帯を、ふくらみを持たせたノイズで表す。中心線は
+               大円（軸を少し傾けた銀河面）で、そこからの距離で明るさを決める */
+            vec3 gal = normalize(vec3(0.42, 1.0, 0.26));
+            float gd = abs(dot(dir, gal));
+            float band = exp(-gd * gd * 34.0);
+            float dust = fbm4(suv * 2.6 + vec2(3.1, -7.4));
+            float milky = band * (0.35 + 0.65 * smoothstep(0.25, 0.75, fbm4(suv * 5.2 + 11.0)));
+            milky *= mix(0.45, 1.15, dust) * horizonFade;
+            col += vec3(0.62, 0.70, 0.92) * milky * 0.30
+                 + vec3(0.85, 0.80, 0.95) * band * 0.12;
           }
 
           // 雲
@@ -142,7 +155,8 @@ export class Environment {
             col = mix(col, cloudCol, cover * 0.92);
           }
 
-          gl_FragColor = vec4(encodeOutput(col, uExposure), 1.0);
+          gl_FragColor = vec4(encodeOut(col, uExposure, uLinearOut), 1.0);
+
         }
       `,
     });
