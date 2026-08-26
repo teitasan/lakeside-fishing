@@ -1,15 +1,15 @@
 # Lakeside Fishing
 ### 湖畔のフィッシング
 
+English | **[日本語](README.md)**
+
 **Cast a line into the dawn-lit lake, and wait.**  
 They say the *Lord of the Lake* still sleeps in its deepest waters.
 
-### ▶ [Play in your browser](https://lakeside-fishing.teitasan.workers.dev/)
+### ▶ [Play in your browser](https://teitasan.github.io/lakeside-fishing/)
 
 No installation needed — everything runs in the browser. Sound on. Best with a mouse on desktop.  
-Available in **Japanese / English** (switch from the title screen or the in-game menu). Choose **Play Together** on the title screen to share a lake with friends.
-
-English | **[日本語](README.md)**
+Available in **Japanese / English** (switch from the title screen or the in-game menu). Choose **Play Together** on the title screen to share a lake with friends (multiplayer goes through the Cloudflare Worker and requires Cloudflare Access).
 
 ![Lakeside Fishing](docs/screenshot.png)
 
@@ -91,27 +91,77 @@ You can switch the language from the title screen or the in-game menu.
 ```
 
 Open `http://localhost:8000`. It won't run from `file://`. A WebGL2-capable browser is recommended.
+**Single-player only** on a static server. Use the Worker below for multiplayer.
 
 ### Multiplayer Worker (Node.js 22 recommended)
 
 ```bash
-# Only dependency is wrangler (npm install on first run)
 npm install
-
-# Start with persist-to outside the repo to avoid reload loops in local persistence
 npm run dev:mp
 # or: npx wrangler dev --local --persist-to /tmp/lakeside-fishing-wrangler-state
 ```
 
 Open `http://localhost:8787` and choose **Play Together** on the title screen.
+Locally, `ACCESS_REQUIRED=false`, so no Cloudflare Access is needed.
 
 ```bash
-# Unit tests (Node 22)
 node scripts/run-tests.mjs
-
-# Multiplayer protocol checks (spins up wrangler dev with a temporary persist-to)
 node scripts/run-mp-protocol-test.mjs
 ```
+
+---
+
+## Deployment architecture
+
+| Role | Host | Serves |
+| --- | --- | --- |
+| Single-player | [GitHub Pages](https://teitasan.github.io/lakeside-fishing/) | Static HTML / JS / assets |
+| Multiplayer | Cloudflare Worker | WebSocket `/ws`, voice `/api/voice/join` |
+
+Pushes to `main` deploy GitHub Pages and the Worker independently.
+
+### GitHub Pages (static site)
+
+- Workflow: `.github/workflows/deploy-pages.yml`
+- Project-site base path: `/lakeside-fishing/` (relative `./` paths resolve correctly)
+- Set repository variable **`MP_ORIGIN`** to your multiplayer Worker origin (e.g. `https://your-worker.example.workers.dev`). The deploy step injects it into `<meta name="lakeside-mp-origin">` in `index.html` — no production URL is hardcoded in source.
+- When unset, the client falls back to same-origin (local Worker dev).
+
+### Cloudflare Worker (multiplayer only)
+
+- Workflow: `.github/workflows/deploy-cloudflare.yml` (`wrangler deploy --env production`)
+- Does not serve static assets — only `/ws` and `/api/voice/join`.
+
+Production Worker variables (`env.production.vars` in `wrangler.jsonc` or the dashboard):
+
+| Variable | Purpose |
+| --- | --- |
+| `ACCESS_REQUIRED` | `true` in production (`false` for local dev) |
+| `CF_ACCESS_TEAM_DOMAIN` | Access team domain (e.g. `yourteam.cloudflareaccess.com`) |
+| `CF_ACCESS_AUD` | Access application AUD tag |
+| `CORS_ORIGINS` | GitHub Pages origin (e.g. `https://teitasan.github.io`) |
+
+Secret: `REALTIMEKIT_API_TOKEN` (via `wrangler secret put`, as before).
+
+### Cloudflare Access (manual setup — required)
+
+Before opening multiplayer to players, configure Zero Trust so **one Access application** (or equivalent coverage) protects **both**:
+
+1. **`/ws`** — WebSocket upgrade
+2. **`/api/voice/join`** — voice join API
+
+Recommended steps:
+
+1. Cloudflare Zero Trust → **Access** → **Applications** → create a Self-hosted app
+2. Set **Application domain** to your Worker hostname
+3. Add path rules covering `/ws` and `/api/voice/join` (two apps is also fine)
+4. Configure an allow **Policy** (IdP, email, group, etc.)
+5. Copy the **Application Audience (AUD) Tag** into `CF_ACCESS_AUD`
+6. Set your team domain in `CF_ACCESS_TEAM_DOMAIN`
+
+The Worker verifies `Cf-Access-Jwt-Assertion`. With `ACCESS_REQUIRED=true` and Access not configured, clients receive 401.
+
+**Cross-origin from GitHub Pages:** players must sign in to Access on the Worker domain at least once so the browser stores Worker-scoped cookies. Open the Worker URL to log in, then use **Play Together** on the Pages build.
 
 ---
 
@@ -121,5 +171,5 @@ node scripts/run-mp-protocol-test.mjs
 - Engine: Three.js (bundled in-repo, no external requests)
 - Post-processing: [postprocessing](https://github.com/pmndrs/postprocessing) (bundled in-repo)
 
-Live on Cloudflare Workers → [lakeside-fishing.teitasan.workers.dev](https://lakeside-fishing.teitasan.workers.dev/)  
-(Formerly on GitHub Pages: [teitasan.github.io/lakeside-fishing](https://teitasan.github.io/lakeside-fishing/))
+Single-player → [teitasan.github.io/lakeside-fishing](https://teitasan.github.io/lakeside-fishing/)
+Multiplayer Worker → URL from repository variable `MP_ORIGIN`

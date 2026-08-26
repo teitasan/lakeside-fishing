@@ -1,18 +1,26 @@
-/* Cloudflare Workers: static assets + multiplayer Durable Object + RealtimeKit */
+/* Cloudflare Worker: multiplayer Durable Object + RealtimeKit (static site on GitHub Pages) */
 {
   "name": "lakeside-fishing",
   "main": "worker/index.js",
   "compatibility_date": "2026-08-21",
   "vars": {
+    "ACCESS_REQUIRED": "false",
     "CLOUDFLARE_ACCOUNT_ID": "e9e6f38d80cf6871855475ac06f54693",
-    "REALTIMEKIT_APP_ID": "d8b6f547-fdd1-4b30-bf3e-71287007628e"
-  },
-  "assets": {
-    "directory": ".",
-    "binding": "ASSETS",
-    "run_worker_first": ["/ws", "/api/*"]
+    "REALTIMEKIT_APP_ID": "d8b6f547-fdd1-4b30-bf3e-71287007628e",
+    "CORS_ORIGINS": "https://teitasan.github.io"
   },
   "durable_objects": { "bindings": [{ "name": "ROOM", "class_name": "MultiplayerRoom" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MultiplayerRoom"] }],
-  "observability": { "enabled": true, "head_sampling_rate": 1 }
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  "env": {
+    "production": {
+      "vars": {
+        "ACCESS_REQUIRED": "true",
+        "CLOUDFLARE_ACCOUNT_ID": "e9e6f38d80cf6871855475ac06f54693",
+        "REALTIMEKIT_APP_ID": "d8b6f547-fdd1-4b30-bf3e-71287007628e",
+        "CORS_ORIGINS": "https://teitasan.github.io"
+      },
+      "durable_objects": { "bindings": [{ "name": "ROOM", "class_name": "MultiplayerRoom" }] }
+    }
+  }
 }

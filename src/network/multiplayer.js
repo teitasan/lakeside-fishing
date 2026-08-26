@@ -1,3 +1,5 @@
+import { multiplayerWsUrl } from '../config/runtime.js';
+
 const PROTO = 4, SEND_HZ = 10;
 export const MULTIPLAYER_SEED = 123456789, MP_SESSION_KEY = 'lakeside-fishing-mp-join', MP_NAME_KEY = 'lakeside-fishing-mp-name';
 
@@ -29,9 +31,8 @@ export class MultiplayerClient {
     this._closedByUser = false;
     this._reconnecting = !!this.id;
     this._resetSession();
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     let ws;
-    try { ws = new WebSocket(`${proto}//${location.host}/ws`); } catch (e) { this._scheduleReconnect(); return; }
+    try { ws = new WebSocket(multiplayerWsUrl()); } catch (e) { this._scheduleReconnect(); return; }
     this.ws = ws;
     ws.onopen = () => ws.send(JSON.stringify({ t: 'join', v: PROTO, name: this.name }));
     ws.onmessage = (ev) => {

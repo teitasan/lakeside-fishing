@@ -1,0 +1,66 @@
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Inject multiplayer Worker origin
+        env:
+          MP_ORIGIN: ${{ vars.MP_ORIGIN }}
+        run: |
+          if [ -n "$MP_ORIGIN" ]; then
+            sed -i "s|<meta name=\"lakeside-mp-origin\" content=\"\" />|<meta name=\"lakeside-mp-origin\" content=\"${MP_ORIGIN}\" />|" index.html
+          fi
+
+      - name: Prepare static site
+        run: |
+          mkdir -p _site
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='.wrangler' \
+            --exclude='.img2threejs' \
+            --exclude='worker' \
+            --exclude='scripts' \
+            --exclude='node_modules' \
+            --exclude='serve.sh' \
+            --exclude='wrangler.jsonc' \
+            --exclude='package.json' \
+            --exclude='package-lock.json' \
+            --exclude='.assetsignore' \
+            --exclude='procedural-fisherman.html' \
+            --exclude='fisherman.png' \
+            --exclude='_site' \
+            ./ _site/
+          touch _site/.nojekyll
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

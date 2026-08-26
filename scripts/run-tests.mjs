@@ -18,6 +18,7 @@ const tests = [
   'scripts/mp-single-parity-test.mjs',
   'scripts/mp-bait-rearm-test.mjs',
   'scripts/mp-chat-test.mjs',
+  'scripts/runtime-config-test.mjs',
 ];
 
 for (const rel of tests) {

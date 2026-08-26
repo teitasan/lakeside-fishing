@@ -42,8 +42,8 @@ const ready = new Promise((resolve, reject) => {
       return;
     }
     try {
-      const r = await fetch(`http://127.0.0.1:${port}/`);
-      if (r.ok) {
+      const r = await fetch(`http://127.0.0.1:${port}/ws`);
+      if (r.status === 426 || r.status === 401 || r.status === 403) {
         finish(resolve);
       }
     } catch (e) {}

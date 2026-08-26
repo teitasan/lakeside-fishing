@@ -1,15 +1,15 @@
 # 湖畔のフィッシング
 ### Lakeside Fishing
 
+**[English](README.en.md)** | 日本語
+
 **朝焼けの湖で、静かに糸を垂れる。**  
 深場には *湖の主* が眠っているという。
 
-### ▶ [ブラウザで遊ぶ](https://lakeside-fishing.teitasan.workers.dev/)
+### ▶ [ブラウザで遊ぶ](https://teitasan.github.io/lakeside-fishing/)
 
 インストール不要・ブラウザだけで完結。音が出ます。PC + マウス推奨。  
-**日本語 / English** 両対応（タイトル画面またはメニューから切替）。タイトルから **みんなで遊ぶ** で同じ湖に入れます。
-
-**[English](README.en.md)** | 日本語
+**日本語 / English** 両対応（タイトル画面またはメニューから切替）。タイトルから **みんなで遊ぶ** で同じ湖に入れます（マルチプレイは Cloudflare Worker 経由・Access 認証が必要）。
 
 ![Lakeside Fishing](docs/screenshot.png)
 
@@ -91,27 +91,77 @@
 ```
 
 `http://localhost:8000` を開く。`file://` では動きません。WebGL2 対応ブラウザ推奨。
+**シングルプレイのみ**（静的サーバー）。マルチプレイは下記 Worker を使います。
 
 ### マルチプレイ Worker（Node.js 22 推奨）
 
 ```bash
-# 依存は wrangler のみ（初回のみ npm install）
 npm install
-
-# ローカル永続化の再ロードループを避ける起動（persist-to をリポジトリ外へ）
 npm run dev:mp
 # または: npx wrangler dev --local --persist-to /tmp/lakeside-fishing-wrangler-state
 ```
 
 `http://localhost:8787` を開き、タイトルから **みんなで遊ぶ** を選ぶ。
+ローカルでは `ACCESS_REQUIRED=false` のため Cloudflare Access なしで接続できます。
 
 ```bash
-# 単体テスト（Node 22）
 node scripts/run-tests.mjs
-
-# マルチプロトコル検証（wrangler dev を一時 persist-to で起動）
 node scripts/run-mp-protocol-test.mjs
 ```
+
+---
+
+## デプロイ構成
+
+| 役割 | 配信先 | 内容 |
+| --- | --- | --- |
+| シングルプレイ | [GitHub Pages](https://teitasan.github.io/lakeside-fishing/) | 静的 HTML / JS / アセット |
+| マルチプレイ | Cloudflare Worker | WebSocket `/ws`、ボイス `/api/voice/join` |
+
+`main` への push で GitHub Pages と Worker がそれぞれ自動デプロイされます。
+
+### GitHub Pages（静的サイト）
+
+- ワークフロー: `.github/workflows/deploy-pages.yml`
+- プロジェクトサイトのベースパス: `/lakeside-fishing/`（相対パス `./` で解決）
+- リポジトリ変数 **`MP_ORIGIN`** にマルチプレイ Worker の origin（例: `https://your-worker.example.workers.dev`）を設定すると、デプロイ時に `index.html` の `<meta name="lakeside-mp-origin">` へ注入されます。ソースコードに本番 URL を直書きしません。
+- 未設定の場合は同一 origin フォールバック（ローカル Worker 開発向け）。
+
+### Cloudflare Worker（マルチプレイ専用）
+
+- ワークフロー: `.github/workflows/deploy-cloudflare.yml`（`wrangler deploy --env production`）
+- 静的アセットは配信しません。`/ws` と `/api/voice/join` のみ。
+
+本番 Worker に設定する環境変数（`wrangler.jsonc` の `env.production.vars` またはダッシュボード）:
+
+| 変数 | 用途 |
+| --- | --- |
+| `ACCESS_REQUIRED` | 本番は `true`（ローカル dev は `false`） |
+| `CF_ACCESS_TEAM_DOMAIN` | Access チームドメイン（例: `yourteam.cloudflareaccess.com`） |
+| `CF_ACCESS_AUD` | Access アプリケーションの AUD タグ |
+| `CORS_ORIGINS` | GitHub Pages の origin（例: `https://teitasan.github.io`） |
+
+シークレット: `REALTIMEKIT_API_TOKEN`（既存どおり `wrangler secret put`）。
+
+### Cloudflare Access（手動設定・必須）
+
+マルチプレイを公開する前に、Zero Trust で **同じ Access アプリケーション** が次の両方を保護していることを確認してください。
+
+1. **`/ws`** — WebSocket アップグレード（パス: `/ws` または `/ws*`)
+2. **`/api/voice/join`** — ボイス参加 API（パス: `/api/voice/join` または `/api/voice/*`)
+
+推奨手順:
+
+1. Cloudflare Zero Trust → **Access** → **Applications** → Self-hosted アプリを作成
+2. **Application domain** に Worker のホスト名を指定
+3. **Path** に `/ws` と `/api/voice/join` をカバーするルールを追加（別アプリ 2 本でも可）
+4. 許可する IdP / メール / グループの **Policy** を設定
+5. アプリ詳細の **Application Audience (AUD) Tag** を `CF_ACCESS_AUD` に設定
+6. チームドメインを `CF_ACCESS_TEAM_DOMAIN` に設定
+
+Worker は `Cf-Access-Jwt-Assertion` を検証します。Access 未設定のまま `ACCESS_REQUIRED=true` だと接続は 401 になります。
+
+**GitHub Pages からのクロスオリジン接続:** プレイヤーは Worker ドメインで Access に一度サインインしている必要があります（ブラウザが Worker 向け Cookie を保持）。初回は Worker URL を開いてログインしてから、Pages 版で **みんなで遊ぶ** を選んでください。
 
 ---
 
@@ -121,5 +171,5 @@ node scripts/run-mp-protocol-test.mjs
 - エンジン: Three.js（リポジトリ内に同梱・外部通信なし）
 - 後処理: [postprocessing](https://github.com/pmndrs/postprocessing)（リポジトリ内に同梱）
 
-Cloudflare Workers で配信中 → [lakeside-fishing.teitasan.workers.dev](https://lakeside-fishing.teitasan.workers.dev/)  
-（旧 GitHub Pages: [teitasan.github.io/lakeside-fishing](https://teitasan.github.io/lakeside-fishing/)）
+シングルプレイ → [teitasan.github.io/lakeside-fishing](https://teitasan.github.io/lakeside-fishing/)
+マルチプレイ Worker → リポジトリ変数 `MP_ORIGIN` で指定した Worker URL
