@@ -7,7 +7,9 @@
 ### ▶ [ブラウザで遊ぶ](https://lakeside-fishing.teitasan.workers.dev/)
 
 インストール不要・ブラウザだけで完結。音が出ます。PC + マウス推奨。  
-**日本語 / English** 両対応。タイトルから **みんなで遊ぶ** で同じ湖に入れます。
+**日本語 / English** 両対応（タイトル画面またはメニューから切替）。タイトルから **みんなで遊ぶ** で同じ湖に入れます。
+
+**[English](README.en.md)** | 日本語
 
 ![Lakeside Fishing](docs/screenshot.png)
 
@@ -117,6 +119,7 @@ node scripts/run-mp-protocol-test.mjs
 
 - 釣り人・竿モデル: [Quaternius](https://quaternius.com/)（CC0）
 - エンジン: Three.js（リポジトリ内に同梱・外部通信なし）
+- 後処理: [postprocessing](https://github.com/pmndrs/postprocessing)（リポジトリ内に同梱）
 
 Cloudflare Workers で配信中 → [lakeside-fishing.teitasan.workers.dev](https://lakeside-fishing.teitasan.workers.dev/)  
 （旧 GitHub Pages: [teitasan.github.io/lakeside-fishing](https://teitasan.github.io/lakeside-fishing/)）
