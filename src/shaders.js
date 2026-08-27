@@ -3,6 +3,7 @@
    （three の ACES トーンマップ / sRGB 変換を自前で適用して
      標準マテリアルと見た目を揃える）
    =========================================================== */
+import { waveGLSL } from './waveField.js?v=20260828-wavefield3';
 
 export const COMMON_GLSL = /* glsl */ `
 float hash21(vec2 p) {
@@ -87,54 +88,67 @@ vec3 encodeOut(vec3 c, float exposure, float lin) {
 }
 `;
 
-/** 湖底・魚向けの手続きコースティクス（uCaust* uniform が必要） */
+/**
+ * 湖底・魚向けのコースティクス（uCaust* uniform が必要）。
+ *
+ * fbm の掛け算は「にじみ」しか作れないので、ボロノイ境界の明線を焼いた
+ * タイル可能テクスチャ（uCaustTex）を 2 枚スクロールさせて干渉させる。
+ * さらに投影点を Snell の屈折角でずらし、実際の波面の傾き（csWaveD）で
+ * 歪めるので、水面の波と網目の動きが同期する。
+ * RGB には微妙にずらした同じ模様が入っているので、掛け算で色収差が付く。
+ */
 export const CAUSTICS_GLSL = /* glsl */ `
-float caustHash21(vec2 p) {
-  p = fract(p * vec2(123.34, 456.21));
-  p += dot(p, p + 45.32);
-  return fract(p.x * p.y);
-}
-
-float caustVnoise(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  f = f * f * (3.0 - 2.0 * f);
-  float a = caustHash21(i);
-  float b = caustHash21(i + vec2(1.0, 0.0));
-  float c = caustHash21(i + vec2(0.0, 1.0));
-  float d = caustHash21(i + vec2(1.0, 1.0));
-  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-}
-
-float caustFbm2(vec2 p) {
-  return caustVnoise(p) * 0.6667 + caustVnoise(p * 2.03) * 0.3333;
-}
-
 uniform float uCaustTime;
 uniform vec3 uCaustSunDir;
 uniform float uCaustNight;
 uniform float uCaustRain;
 uniform float uCaustCloud;
 uniform float uCaustStrength;
+uniform sampler2D uCaustTex;
+
+${waveGLSL({ prefix: 'cs', slim: true })}
 
 vec3 causticLight(vec3 worldPos, vec3 viewNormal) {
   if (uCaustStrength < 0.001 || worldPos.y > -0.02) return vec3(0.0);
   float depth = -worldPos.y;
-  vec2 sunXZ = uCaustSunDir.xz;
-  float sunLen = length(sunXZ);
-  vec2 sunN = sunLen > 1e-4 ? sunXZ / sunLen : vec2(0.0, 1.0);
-  vec2 p = worldPos.xz * 0.38 + sunN * depth * 0.18;
+
+  /* 湖底のこの点を照らす光は、真上ではなく太陽と反対側の水面から入る。
+     水中の傾きは Snell（sinθw = sinθa / 1.333）で空気中よりかなり浅い */
+  vec3 sd = normalize(uCaustSunDir);
+  float ca = max(sd.y, 0.08);
+  float sa = sqrt(max(0.0, 1.0 - ca * ca));
+  float sw = sa / 1.333;
+  float tw = sw / max(sqrt(max(0.0, 1.0 - sw * sw)), 1e-3);
+  float sl = length(sd.xz);
+  vec2 sunN = sl > 1e-4 ? sd.xz / sl : vec2(0.0, 1.0);
+  vec2 surf = worldPos.xz + sunN * depth * tw;
+
+  /* 水面の傾きで網目を歪める＝波と同期して揺れる */
+  vec2 slope = csWaveD(surf, uCaustTime);
+  vec2 q = surf + slope * (depth * 1.15 + 0.6);
+
   float t = uCaustTime;
-  float c1 = caustFbm2(p + vec2(t * 0.42, t * 0.31));
-  float c2 = caustFbm2(p * 1.65 - vec2(t * 0.51, t * 0.39));
-  float caust = pow(clamp(c1 * c2 * 2.1, 0.0, 1.0), 2.4);
-  float fade = smoothstep(0.08, 0.55, depth) * (1.0 - smoothstep(3.5, 20.0, depth));
-  fade *= (1.0 - uCaustNight * 0.94) * (1.0 - uCaustRain * 0.78) * (1.0 - uCaustCloud * 0.62);
-  fade *= smoothstep(-0.08, 0.28, uCaustSunDir.y);
-  vec3 sunView = normalize((viewMatrix * vec4(uCaustSunDir, 0.0)).xyz);
+  vec3 a = texture2D(uCaustTex, q * 0.155 + vec2( 0.011, 0.007) * t).rgb;
+  vec3 b = texture2D(uCaustTex, q * 0.245 + vec2(-0.008, 0.012) * t + vec2(0.37, 0.61)).rgb;
+  vec3 net = a * b * 3.6;
+  net = min(net * net, vec3(1.15));    // 太い部分を削って細い明線だけ残す
+
+  /* 2 枚の積を二乗しているので mipmap の平均では帯域が落ちない。
+     遠景をそのまま出すとギラギラした砂目になるため距離で消す
+     （実際の水でも 20m 以上先のコースティクスは見えない） */
+  float viewDist = length(worldPos - cameraPosition);
+  float fade = (1.0 - smoothstep(16.0, 46.0, viewDist));
+  fade *= smoothstep(0.07, 0.60, depth) * (1.0 - smoothstep(6.0, 26.0, depth));
+  /* 上を向いた面ほど強い。これが無いと水際の岩の側面まで青白く光り、
+     低ポリの岩が氷の塊に見えてしまう */
+  vec3 upView = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+  fade *= smoothstep(0.15, 0.72, dot(normalize(viewNormal), upView));
+  fade *= (1.0 - uCaustNight * 0.94) * (1.0 - uCaustRain * 0.72) * (1.0 - uCaustCloud * 0.62);
+  fade *= smoothstep(-0.05, 0.30, sd.y);
+  vec3 sunView = normalize((viewMatrix * vec4(sd, 0.0)).xyz);
   float facing = max(dot(normalize(viewNormal), sunView), 0.0);
   fade *= smoothstep(0.02, 0.38, facing);
   fade *= uCaustStrength;
-  return vec3(0.48, 0.78, 0.92) * caust * fade * 0.42;
+  return vec3(0.62, 0.88, 0.95) * net * fade * 0.24;
 }
 `;

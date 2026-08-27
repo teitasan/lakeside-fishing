@@ -2,7 +2,7 @@
    空・太陽・時間帯・天候
    =========================================================== */
 import * as THREE from 'three';
-import { COMMON_GLSL } from './shaders.js?v=20260826-envgfx';
+import { COMMON_GLSL } from './shaders.js?v=20260828-uwgfx10';
 import { clamp01, lerp, smoothstep, rand, TAU, damp } from './util.js';
 
 /* 時刻ごとの色キーフレーム（hour, 天頂色, 地平色, 太陽色, 環境光係数） */
@@ -282,8 +282,11 @@ export class Environment {
       // 水中カメラ用：短距離の青緑フォグ
       this.fogColor.setRGB(0.055, 0.16, 0.19).multiplyScalar(lerp(1, 0.35, this.nightAmount));
       this.scene.fog.color.copy(this.fogColor);
-      this.scene.fog.near = 0.5;
-      this.scene.fog.far = lerp(52, 26, this.nightAmount);
+      /* 水中の減衰は PostFX の指数散乱が担当する。ここは標準マテリアル用の
+         遠方バックストップに留める。線形フォグを主役にすると、水が波長選択で
+         濁っていく感じが出ず「平たい水色の板」になってしまう */
+      this.scene.fog.near = lerp(14, 6, this.nightAmount);
+      this.scene.fog.far = lerp(120, 62, this.nightAmount);
     } else {
       this.scene.fog.color.copy(this.fogColor);
       this.scene.fog.near = lerp(150, 30, this.rainIntensity);

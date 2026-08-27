@@ -1,54 +1,29 @@
 #!/usr/bin/env node
-/* 湖波の穏やか化・位相ゆらぎ・水中ポストFX軽量化の回帰テスト */
+/* 湖波・渚（swash / 濡れ砂 / 泡）・水中（スネルの窓 / 体積散乱 / コースティクス）の回帰テスト */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import assert from 'node:assert/strict';
+import {
+  WAVES, PHASE_W, W, MAX_WAVE_AMP, WAVE_STEEPNESS, CHOPPINESS, SWASH_GAIN,
+  waveHeight, waveSlope, waveDisplace, shoreRunUp, shoalGain, wavePhaseOffset, waveGLSL,
+} from '../src/waveField.js';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const waterSrc = readFileSync(join(root, 'src/water.js'), 'utf8');
 const postfxSrc = readFileSync(join(root, 'src/postfx.js'), 'utf8');
+const terrainSrc = readFileSync(join(root, 'src/terrain.js'), 'utf8');
+const shadersSrc = readFileSync(join(root, 'src/shaders.js'), 'utf8');
+const gameSrc = readFileSync(join(root, 'src/game.js'), 'utf8');
 
-const TAU = Math.PI * 2;
-
-function extractExportArray(src, name) {
-  const m = src.match(new RegExp(`export const ${name} = \\[([\\s\\S]*?)\\];`));
-  assert.ok(m, `${name} export missing`);
-  return Function(`"use strict"; return [${m[1]}];`)();
-}
-
-const WAVES = extractExportArray(waterSrc, 'WAVES');
-const PHASE_W = [0.28, 0.42, 0.60, 0.78, 0.96];
-const W = WAVES.map((w) => {
-  const l = Math.hypot(w.dx, w.dz);
-  const k = TAU / w.len;
-  return { dx: w.dx / l, dz: w.dz / l, k, amp: w.amp, om: w.speed * k };
-});
-const MAX_WAVE_AMP = W.reduce((a, w) => a + w.amp, 0);
-
-function wavePhaseOffset(x, z) {
-  return Math.sin(x * 0.031 + z * 0.027) * 0.62
-    + Math.sin(x * 0.017 - z * 0.039) * 0.48
-    + Math.sin(x * 0.043 - z * 0.021) * 0.31;
-}
-
-function waveHeight(x, z, t, wind = 1) {
-  const phase = wavePhaseOffset(x, z);
-  let h = 0;
-  for (let i = 0; i < W.length; i++) {
-    const w = W[i];
-    h += w.amp * Math.sin((w.dx * x + w.dz * z) * w.k - t * w.om + phase * PHASE_W[i]);
-  }
-  return h * wind;
-}
-
+/* ---------------- 波そのもの ---------------- */
 assert.ok(WAVES.length >= 4, 'expected multi-octave lake waves');
 for (const w of WAVES) {
   assert.ok(w.speed <= 1.75, `wave speed should stay lake-calm, got ${w.speed}`);
   assert.ok(w.amp <= 0.12, `wave amp should stay moderate, got ${w.amp}`);
 }
-
 assert.ok(MAX_WAVE_AMP < 0.27, `total wave amp should be calmer, got ${MAX_WAVE_AMP}`);
+assert.equal(PHASE_W.length, WAVES.length, 'phase weights must cover every wave');
 
 const t = 12.7;
 const h0 = waveHeight(4.2, -8.1, t);
@@ -56,43 +31,233 @@ const h1 = waveHeight(4.2, -8.1, t + 0.5);
 assert.ok(Number.isFinite(h0) && Number.isFinite(h1), 'waveHeight must stay finite');
 assert.ok(Math.abs(h1 - h0) < 0.08, 'half-second height delta should stay gentle');
 
-const phaseA = wavePhaseOffset(0, 0);
-const phaseB = wavePhaseOffset(40, -22);
-assert.ok(Math.abs(phaseA - phaseB) > 0.05, 'phase offset must vary spatially');
+assert.ok(Math.abs(wavePhaseOffset(0, 0) - wavePhaseOffset(40, -22)) > 0.05,
+  'phase offset must vary spatially');
 
-assert.match(waterSrc, /export function wavePhaseOffset\(/, 'wave phase offset must stay exported');
-assert.match(waterSrc, /wavePhase\(vec2 p\)/, 'GPU wave shader must include spatial phase offset');
-assert.match(waterSrc, /wavePhaseGrad\(vec2 p\)/, 'GPU wave shader must include phase gradient');
-assert.match(waterSrc, /farRip = mix\(1\.0, 0\.38/, 'distant ripples should be attenuated');
-assert.match(waterSrc, /crestWeather = smoothstep\(1\.12, 1\.75, uWind\)/,
-  'clear-weather crest foam should be gated by strong wind');
+/* 解析微分が数値微分と一致すること（法線が波とずれないことの担保） */
+{
+  const e = 1e-4;
+  const s = waveSlope(3.1, -7.4, t);
+  const nx = (waveHeight(3.1 + e, -7.4, t) - waveHeight(3.1 - e, -7.4, t)) / (2 * e);
+  const nz = (waveHeight(3.1, -7.4 + e, t) - waveHeight(3.1, -7.4 - e, t)) / (2 * e);
+  assert.ok(Math.abs(s.dx - nx) < 1e-5, `waveSlope.dx must match finite difference: ${s.dx} vs ${nx}`);
+  assert.ok(Math.abs(s.dz - nz) < 1e-5, `waveSlope.dz must match finite difference: ${s.dz} vs ${nz}`);
+}
 
-assert.match(waterSrc, /float shoreBand = smoothstep\(0\.68, 0\.0, shoreDepth\)/,
-  'shore foam must use depth-driven shore band');
-assert.match(waterSrc, /float shoreFeather = smoothstep\(0\.018, 0\.075, vDepth\)/,
-  'shore edge feather must stay narrow so the shallowest water keeps foam coverage');
-assert.match(waterSrc, /float breakThresh = mix\(0\.26, 0\.74, 1\.0 - shoreBand\)/,
-  'shore foam breakup threshold must vary with depth');
-assert.match(waterSrc, /float coarseN = fbm2\(coarseP\)/,
-  'shore foam must use coarse fbm2 breakup');
-assert.match(waterSrc, /float fineN = vnoise\(fineP\)/,
-  'shore foam must use fine vnoise streaks');
-assert.match(waterSrc, /float foamLag = runUp \* 2\.1 - uTime \* 0\.06/,
-  'shore foam must trail wave height with phase lag');
-assert.match(waterSrc, /shoreFoam \*= 1\.0 - smoothstep\(55\.0, 180\.0, vFogDepth\)/,
-  'shore foam must fade with view distance');
-assert.match(waterSrc, /vec3 foamTint = mix\(uShallow \* 1\.35, vec3\(0\.88, 0\.94, 0\.96\), shoreBand\)/,
-  'shore foam tint must be lighting-aware, not flat white');
-assert.doesNotMatch(waterSrc, /float lapThresh = mix\(0\.82, -0\.12, lap\)/,
-  'legacy flat shore foam threshold must be removed');
+/* ---------------- Gerstner（峰の尖り） ---------------- */
+assert.ok(CHOPPINESS > 1, 'Gerstner choppiness must actually sharpen crests');
+assert.ok(WAVE_STEEPNESS < 1,
+  `sum of Q*A*k must stay under 1 or the Gerstner surface self-intersects, got ${WAVE_STEEPNESS}`);
+{
+  const d = waveDisplace(11.3, 4.9, t);
+  assert.ok(Number.isFinite(d.dx) && Number.isFinite(d.dz), 'waveDisplace must stay finite');
+  let maxDisp = 0;
+  for (let i = 0; i < 400; i++) {
+    const p = waveDisplace(i * 0.73, -i * 1.19, t + i * 0.031);
+    maxDisp = Math.max(maxDisp, Math.hypot(p.dx, p.dz));
+  }
+  assert.ok(maxDisp > 0.05, 'horizontal displacement must be visible');
+  assert.ok(maxDisp < 1.2, `horizontal displacement must stay lake-scale, got ${maxDisp}`);
+}
+
+/* ---------------- 浅水変形（shoaling） ---------------- */
+assert.equal(shoalGain(0), 0, 'no waves exactly at the waterline');
+assert.ok(shoalGain(0.95) > shoalGain(0.3) * 4, 'waves must swell before the shore');
+assert.ok(shoalGain(0.95) > shoalGain(5) * 0.7, 'the shoaling bump must be substantial');
+assert.ok(Math.abs(shoalGain(5) - 1) < 1e-6, 'deep water must be unchanged (gain 1)');
+assert.ok(shoalGain(2) < 1, 'shoaling must not brighten the whole lake');
+
+/* ---------------- 渚の遡上（swash） ---------------- */
+{
+  let mn = Infinity, mx = -Infinity, sum = 0, n = 0;
+  for (let tt = 0; tt < 240; tt += 0.11) {
+    for (const [x, z] of [[10, 20], [-40, 55], [120, 70], [-95, -33]]) {
+      const r = shoreRunUp(x, z, tt, 1);
+      mn = Math.min(mn, r); mx = Math.max(mx, r); sum += r; n++;
+    }
+  }
+  assert.ok(mx > 0.06, `run-up must actually push water up the beach, got ${mx}`);
+  assert.ok(mn < -0.06, `back-wash must actually expose sand, got ${mn}`);
+  assert.ok(mx < 0.35, `run-up must stay lake-scale, got ${mx}`);
+  // 平均が 0 付近でないと汀線の平均位置がずれ、水深・キャスト距離の意味が変わる
+  assert.ok(Math.abs(sum / n) < 0.03, `mean waterline must not drift, got ${sum / n}`);
+}
+assert.ok(SWASH_GAIN > 0, 'swash gain must be positive');
+
+/* ---------------- CPU / GPU の式が同一であること ---------------- */
+{
+  const glsl = waveGLSL();
+  for (const fn of ['float waveH(', 'vec2 waveD(', 'vec2 waveDisp(', 'float shoreRunUp(', 'float shoalGain(']) {
+    assert.ok(glsl.includes(fn), `generated GLSL must define ${fn}`);
+  }
+  // 波テーブルの数値がそのまま GLSL に焼かれていること
+  for (const w of W) {
+    assert.ok(glsl.includes(w.amp.toFixed(5)), `GLSL must carry amp ${w.amp}`);
+    assert.ok(glsl.includes(w.k.toFixed(5)), `GLSL must carry k ${w.k}`);
+    assert.ok(glsl.includes((CHOPPINESS * w.amp).toFixed(5)), `GLSL must carry Q*A for ${w.amp}`);
+  }
+  assert.ok(glsl.includes(SWASH_GAIN.toFixed(5)), 'GLSL must carry the swash gain');
+
+  const slim = waveGLSL({ prefix: 'cs', slim: true });
+  assert.ok(slim.includes('vec2 csWaveD('), 'slim GLSL must expose the prefixed slope');
+  assert.ok(!slim.includes('csWaveH('), 'slim GLSL must not emit the unused height sum');
+  assert.ok(waveGLSL({ prefix: 'sw' }).includes('float swShoreRunUp('),
+    'prefixed GLSL must expose the shore run-up for the terrain shader');
+}
+
+/* ---------------- 水面シェーダ ---------------- */
+// 汀線：頂点補間ではなくフラグメントで高さテクスチャから引く（等高線ファセット対策）
+assert.match(waterSrc, /float ground = groundAtF\(vWorld\.xz\);/,
+  'shore depth must be sampled per fragment from the height texture');
+assert.match(waterSrc, /float wet = still \+ runUp;/,
+  'the waterline must include the swash run-up');
+assert.match(waterSrc, /if \(wet <= 0\.004\) discard;/,
+  'the water edge must be driven by the moving waterline, not the static bathymetry');
+assert.doesNotMatch(waterSrc, /if \(vDepth <= 0\.02\) discard;/,
+  'the frozen static waterline must be gone');
+assert.match(waterSrc, /float runUp = shoreRunUp\(vWorld\.xz, uTime\) \* uWind;/,
+  'run-up must use the shared wave field');
+// 渚では水面が薄いシートになって砂に沿う
+assert.match(waterSrc, /float sheet = min\(ground \+ uShoreLift/,
+  'the swash sheet must climb the beach instead of being clipped at y=0');
+assert.match(waterSrc, /polygonOffset: true/, 'the near-coplanar shore needs a depth offset');
+
+// Gerstner
+assert.match(waterSrc, /wp\.xz \+= waveDisp\(wp\.xz, uTime\) \* uWind \* shoalGain\(depth\);/,
+  'the vertex shader must apply Gerstner horizontal displacement');
+assert.match(waterSrc, /float gain = shoalGain\(depth\) \* uWind;/,
+  'wave amplitude must use the shared shoaling gain');
+
+// 逆光の峰の透け
+assert.match(waterSrc, /float backLit = pow\(max\(dot\(V, -uSunDir\), 0\.0\), 3\.0\);/,
+  'back-lit crest transmittance must exist');
+assert.match(waterSrc, /vec3 sss = uShallow \* uSunColor/, 'crest SSS must tint with the shallow colour');
+assert.match(waterSrc, /\+ encodeOut\(sss, uExposure, uLinearOut\)/, 'SSS must be added below the Fresnel mix');
+
+// スネルの窓 / 全反射
+assert.match(waterSrc, /const float CRIT = 0\.7442;/,
+  'the underwater surface must build a Snell window around the critical angle');
+assert.match(waterSrc, /vec3 aboveLin = skyAt\(vec3\(Rf\.x, max\(Rf\.y, 0\.012\), Rf\.z\)\);/,
+  'the window content must come from the sky, not the capture RT (which hides the sky dome)');
+assert.match(waterSrc, /float sinT = min\(sinI \* 1\.333, 0\.9995\);/,
+  'the window must refract through Snell so the rim compresses');
+assert.match(waterSrc, /vec3 tirLin = mix\(uDeep, uShallow, 0\.34\)/,
+  'outside the window the surface must act as a total-internal-reflection mirror');
+assert.doesNotMatch(waterSrc, /under \? 0\.35 : fres/,
+  'the flat 0.35 underwater blend must be gone');
+
+// リップルはテクスチャのみ（フラグメント fbm 撤退）
+{
+  const m = waterSrc.match(/vec2 rippleSlope\(vec2 xz, float t\) \{[\s\S]*?\n        \}/);
+  assert.ok(m, 'rippleSlope must exist');
+  assert.ok(!/fbm2\(/.test(m[0]), 'rippleSlope must not evaluate fbm in the fragment shader any more');
+  assert.equal((m[0].match(/rippleTexSlope\(/g) || []).length, 5,
+    'rippleSlope should use five rotated texture taps');
+}
+assert.match(waterSrc, /const size = 256;/, 'the ripple normal texture must be 256 for the low-frequency layer');
+
+// 映り込み：縦 3 タップ + 粗さ LOD
+assert.equal((waterSrc.match(/texture2D\(uReflColor,/g) || []).length, 3,
+  'planar reflection must be smeared vertically with three taps');
+assert.match(waterSrc, /float rough = clamp\(length\(slope\) \* 1\.55/,
+  'reflection blur must grow with wave slope and distance');
+assert.match(waterSrc, /reflSize = opts\.quality === 'high' \? 1024 : 512/,
+  'reflection render target must be larger than the old 512/320');
+
+// 泡：細かいスケール + 先端の白線 + 時間減衰
+assert.match(waterSrc, /float tip = smoothstep\(0\.075, 0\.008, wet\);/,
+  'the swash tip must produce a tight bright line');
+assert.match(waterSrc, /float age = smoothstep\(0\.04, 0\.22, wet\);/,
+  'foam must fade with age behind the tip');
+assert.match(waterSrc, /vnoise\(sp \* 17\.0/, 'foam must carry a fine lace octave');
+assert.match(waterSrc, /vnoise\(sp \* 38\.0/, 'foam must carry a bubble-scale octave');
+assert.doesNotMatch(waterSrc, /shoreP \* 3\.6/, 'the old metre-scale smoky foam must be gone');
+assert.doesNotMatch(waterSrc, /float shoreBand = smoothstep\(0\.68, 0\.0, shoreDepth\)/,
+  'the old depth-band foam must be gone');
+assert.doesNotMatch(waterSrc, /float breakThresh = mix\(0\.26, 0\.74/,
+  'the contour-banding foam threshold must be gone');
+
+// 屈折：浅場の湖底がちゃんと揺れる
+assert.match(waterSrc, /mix\(0\.020, 0\.052, 1\.0 - uRain \* 0\.35\)/,
+  'refraction offset must be big enough to wobble the shallow bed');
+
+// タイルテクスチャの約束は据え置き
 assert.match(waterSrc, /makeTileableHeightField/, 'ripple normal must keep tileable noise');
 assert.match(waterSrc, /RepeatWrapping/, 'ripple normal must keep RepeatWrapping');
 assert.doesNotMatch(waterSrc, /fract\s*\([^)]*uRippleNormal/, 'ripple normal must not use manual fract()');
 
+// プランクトン
+assert.match(waterSrc, /gl_PointSize = min\(gl_PointSize, 5\.0\);/,
+  'plankton must not become giant blobs up close');
+assert.match(waterSrc, /const fade = smoothstep\(0\.35, 1\.4, d\)/,
+  'plankton must fade in near the camera instead of looking like stars');
+
+/* ---------------- 地形：濡れ砂 ---------------- */
+assert.match(terrainSrc, /vec3 shoreWetness\(vec3 wp\)/, 'the terrain must compute shore wetness');
+assert.match(terrainSrc, /uniform sampler2D uShoreHeightTex;/,
+  'the wet band must key off the same height texture as the water, so the waterline agrees');
+assert.match(terrainSrc, /swShoreRunUp\(wp\.xz, uShoreTime\) \* uShoreWind/,
+  'the wet band must follow the same run-up as the water');
+assert.match(terrainSrc, /float capillary = 1\.0 - smoothstep\(0\.0, top, max\(ground, 0\.0\)\);/,
+  'a permanently damp capillary band must exist above the run-up');
+assert.match(terrainSrc, /float top = uShoreTop \* \(0\.62 \+ 0\.76 \* shoreNoise/,
+  'the damp band must have a ragged top edge, not a dead-straight contour');
+assert.match(terrainSrc, /base \*= mix\(1\.0, 0\.66, sw\.x\);/, 'wet sand must darken');
+assert.match(shadersSrc, /net = min\(net \* net, vec3\(1\.15\)\);/,
+  'caustic highlights must be clamped so shallow rocks do not blow out to cyan');
+assert.match(terrainSrc, /roughnessFactor = mix\(roughnessFactor, 0\.28, gShoreWet\.x \* 0\.85\);/,
+  'wet sand must go glossy so the sun sheens off it');
+assert.match(terrainSrc, /float wrack = smoothstep\(0\.60, 0\.86, shoreNoise\(wp\.xz \* 2\.7\)\)/,
+  'the high-water mark needs a wrack line so the beach is not blank');
+assert.match(terrainSrc, /float peb = smoothstep\(0\.90, 0\.99, shoreNoise/,
+  'the beach needs pebble speckle');
+assert.match(terrainSrc, /float lod = 1\.0 - smoothstep\(5\.0, 20\.0, length\(wp - cameraPosition\)\);/,
+  'procedural beach detail has no mipmaps, so it must be band-limited by distance');
+assert.match(terrainSrc, /base = mix\(base, vec3\(0\.88, 0\.91, 0\.92\), sw\.y \* 0\.32\);/,
+  'left-behind foam must stay a sparse lace, not white blotches over the whole beach');
+assert.match(terrainSrc, /float atReach = mix\(0\.30, 1\.0, smoothstep\(0\.12, 0\.0, abs\(ground - past\)\)\);/,
+  'foam residue must concentrate at the high-water mark');
+assert.match(waterSrc, /float foamLod = 1\.0 - smoothstep\(9\.0, 32\.0, vFogDepth\);/,
+  'the fine foam octaves must be band-limited by distance too');
+assert.match(terrainSrc, /vec3 gShoreWet = vec3\(0\.0\);/,
+  'shore wetness must be evaluated once and shared by colour/roughness/normal');
+assert.match(gameSrc, /this\.terrain\.updateShore\(this\.water\.time, this\.water\.wind\);/,
+  'the terrain shore must be driven by the water clock every frame');
+
+/* ---------------- コースティクス ---------------- */
+assert.match(shadersSrc, /uniform sampler2D uCaustTex;/,
+  'caustics must come from a baked Voronoi-ridge texture, not fragment fbm');
+assert.match(shadersSrc, /vec2 slope = csWaveD\(surf, uCaustTime\);/,
+  'caustics must be warped by the real wave slope');
+assert.match(shadersSrc, /float sw = sa \/ 1\.333;/,
+  'the caustic projection point must be refracted through Snell');
+assert.doesNotMatch(shadersSrc, /caustFbm2\(/, 'the old blobby fbm caustics must be gone');
+assert.match(shadersSrc, /float viewDist = length\(worldPos - cameraPosition\);/,
+  'caustics must fade with view distance or the squared product aliases into glitter');
+assert.match(shadersSrc, /fade \*= smoothstep\(0\.15, 0\.72, dot\(normalize\(viewNormal\), upView\)\);/,
+  'caustics must favour upward-facing surfaces so shallow rocks do not turn into ice');
+assert.doesNotMatch(shadersSrc, /pow\(clamp\(c1 \* c2 \* 2\.1, 0\.0, 1\.0\), 2\.4\)/,
+  'the old caustic blob formula must be gone');
+assert.match(gameSrc, /uCaustTex: \{ value: createCausticTexture\(256\) \}/,
+  'the caustic texture must be created once and shared');
+
+/* ---------------- 水中ポストFX ---------------- */
+assert.match(postfxSrc, /vec3 trans = exp\(-sigma \* dist\);/,
+  'underwater extinction must be exponential and wavelength selective');
+assert.match(postfxSrc, /vec3 inscatter = scatterCol \* ambient \* \(vec3\(1\.0\) - trans\);/,
+  'the light removed by extinction must come back as in-scattering');
+assert.match(postfxSrc, /float ambient = exp\(-camDepth \* 0\.085\)/,
+  'ambient light must fall off exponentially with camera depth');
+assert.match(postfxSrc, /uniform vec2 uSunUv;/, 'god rays need the projected sun position');
+assert.match(postfxSrc, /float shaft = fbm2\(vec2\(ang \* 5\.2, r \* 2\.4 - uTime \* 0\.11\)\);/,
+  'god rays must be radial around the sun, not screen-space noise');
+assert.doesNotMatch(postfxSrc, /float caust = fbm2\(uv \* 18\.0/,
+  'screen-space caustics must be gone (they swim with the camera)');
+assert.doesNotMatch(postfxSrc, /mix\(0\.16, 0\.35, uStrength\)/,
+  'the token underwater absorption must be gone');
+assert.doesNotMatch(postfxSrc, /haze \* 0\.14/, 'the token underwater haze must be gone');
 assert.match(postfxSrc, /0\.0007 \* uStrength/, 'underwater UV wobble should stay subtle');
-assert.match(postfxSrc, /mix\(0\.16, 0\.35, uStrength\)/, 'underwater absorption should stay light');
-assert.match(postfxSrc, /0\.04 \* uStrength/, 'underwater tint mix should stay light');
-assert.match(postfxSrc, /haze \* 0\.14/, 'underwater haze should stay light');
 assert.match(postfxSrc, /lerp\(0\.55, 0\.10, strength\)/, 'underwater bloom should stay subdued');
+assert.match(gameSrc, /this\._fillSunScreenPos\(uwCtx\);/, 'the sun screen position must be fed each frame');
 
 console.log('lake-calm-water-test: ok');

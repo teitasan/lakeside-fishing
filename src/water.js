@@ -3,113 +3,27 @@
    CPU と GPU で同一の波関数を使い、ウキが正しく浮くようにする
    =========================================================== */
 import * as THREE from 'three';
-import { COMMON_GLSL } from './shaders.js?v=20260826-uwgfx';
+import { COMMON_GLSL } from './shaders.js?v=20260828-uwgfx10';
 import { WATER_REGION } from './lakefield.js';
-import { smoothstep, rand, TAU, clamp } from './util.js';
+import { rand, TAU, clamp, smoothstep } from './util.js';
 import { makeTileableHeightField } from './tileableNoise.js?v=20260827-orgnoise4';
 import { reflectCameraMatrixY } from './reflectionMath.js?v=20260827-lkwgfx';
+import {
+  WAVES, MAX_WAVE_AMP, waveGLSL, waveHeight, waveSlope, waveDisplace, shoreRunUp, shoalGain,
+  wavePhaseOffset, wavePhaseOffsetGrad,
+} from './waveField.js?v=20260828-wavefield3';
 
-/** 波の定義（dir は正規化して使用） */
-export const WAVES = [
-  { dx: 1.00, dz: 0.20, len: 16.2, amp: 0.118, speed: 0.62 },
-  { dx: 0.62, dz: -0.78, len: 9.40, amp: 0.070, speed: 0.78 },
-  { dx: -0.34, dz: 0.94, len: 5.70, amp: 0.039, speed: 0.98 },
-  { dx: 0.88, dz: 0.47, len: 3.35, amp: 0.020, speed: 1.28 },
-  { dx: -0.72, dz: -0.69, len: 2.10, amp: 0.010, speed: 1.72 },
-];
-
-/** 大域的な位相ゆらぎ：遠景の規則的な干渉縞を崩す（CPU/GPU 共通） */
-export function wavePhaseOffset(x, z) {
-  return Math.sin(x * 0.031 + z * 0.027) * 0.62
-    + Math.sin(x * 0.017 - z * 0.039) * 0.48
-    + Math.sin(x * 0.043 - z * 0.021) * 0.31;
-}
-
-export function wavePhaseOffsetGrad(x, z) {
-  return {
-    dx: Math.cos(x * 0.031 + z * 0.027) * 0.031 * 0.62
-      + Math.cos(x * 0.017 - z * 0.039) * 0.017 * 0.48
-      + Math.cos(x * 0.043 - z * 0.021) * 0.043 * 0.31,
-    dz: Math.cos(x * 0.031 + z * 0.027) * 0.027 * 0.62
-      + Math.cos(x * 0.017 - z * 0.039) * (-0.039) * 0.48
-      + Math.cos(x * 0.043 - z * 0.021) * (-0.021) * 0.31,
-  };
-}
-
-const PHASE_W = [0.28, 0.42, 0.60, 0.78, 0.96];
-
-const W = WAVES.map((w) => {
-  const l = Math.hypot(w.dx, w.dz);
-  const k = TAU / w.len;
-  return { dx: w.dx / l, dz: w.dz / l, k, amp: w.amp, om: w.speed * k };
-});
-
-export const MAX_WAVE_AMP = W.reduce((a, w) => a + w.amp, 0);
-
-/** 波の高さ（wind: 1 で標準） */
-export function waveHeight(x, z, t, wind = 1) {
-  const phase = wavePhaseOffset(x, z);
-  let h = 0;
-  for (let i = 0; i < W.length; i++) {
-    const w = W[i];
-    h += w.amp * Math.sin((w.dx * x + w.dz * z) * w.k - t * w.om + phase * PHASE_W[i]);
-  }
-  return h * wind;
-}
+/* 波の定義そのものは waveField.js（CPU/GPU 共通の単一定義元）にある。
+   従来の import 経路を壊さないよう、ここから再輸出しておく */
+export {
+  WAVES, MAX_WAVE_AMP, waveHeight, waveSlope, waveDisplace, shoreRunUp, shoalGain,
+  wavePhaseOffset, wavePhaseOffsetGrad,
+};
 
 /** 波の法線（解析微分） */
 export function waveNormal(x, z, t, wind = 1, out = new THREE.Vector3()) {
-  const phase = wavePhaseOffset(x, z);
-  const grad = wavePhaseOffsetGrad(x, z);
-  let dx = 0, dz = 0;
-  for (let i = 0; i < W.length; i++) {
-    const w = W[i];
-    const pw = PHASE_W[i];
-    const c = Math.cos((w.dx * x + w.dz * z) * w.k - t * w.om + phase * pw) * w.amp * wind;
-    dx += c * (w.k * w.dx + pw * grad.dx);
-    dz += c * (w.k * w.dz + pw * grad.dz);
-  }
-  return out.set(-dx, 1, -dz).normalize();
-}
-
-/** GPU 用に同じ式を GLSL として生成 */
-function waveGLSL() {
-  let sum = '', dsum = '';
-  W.forEach((w, i) => {
-    const ph = `((${w.dx.toFixed(5)} * p.x + ${w.dz.toFixed(5)} * p.y) * ${w.k.toFixed(5)} - t * ${w.om.toFixed(5)} + phase * ${PHASE_W[i].toFixed(5)})`;
-    sum += `  h += ${w.amp.toFixed(5)} * sin(${ph});\n`;
-    dsum += `  c = cos(${ph}) * ${w.amp.toFixed(5)};\n` +
-      `  d += vec2(${w.k.toFixed(5)} * ${w.dx.toFixed(5)} + ${PHASE_W[i].toFixed(5)} * pg.x, ${w.k.toFixed(5)} * ${w.dz.toFixed(5)} + ${PHASE_W[i].toFixed(5)} * pg.y) * c;\n`;
-  });
-  return /* glsl */ `
-float wavePhase(vec2 p) {
-  return sin(p.x * 0.031 + p.y * 0.027) * 0.62
-       + sin(p.x * 0.017 - p.y * 0.039) * 0.48
-       + sin(p.x * 0.043 - p.y * 0.021) * 0.31;
-}
-vec2 wavePhaseGrad(vec2 p) {
-  return vec2(
-    cos(p.x * 0.031 + p.y * 0.027) * 0.031 * 0.62
-      + cos(p.x * 0.017 - p.y * 0.039) * 0.017 * 0.48
-      + cos(p.x * 0.043 - p.y * 0.021) * 0.043 * 0.31,
-    cos(p.x * 0.031 + p.y * 0.027) * 0.027 * 0.62
-      + cos(p.x * 0.017 - p.y * 0.039) * (-0.039) * 0.48
-      + cos(p.x * 0.043 - p.y * 0.021) * (-0.021) * 0.31
-  );
-}
-float waveH(vec2 p, float t) {
-  float phase = wavePhase(p);
-  float h = 0.0;
-${sum}  return h;
-}
-vec2 waveD(vec2 p, float t) {
-  float phase = wavePhase(p);
-  vec2 pg = wavePhaseGrad(p);
-  vec2 d = vec2(0.0);
-  float c;
-${dsum}  return d;
-}
-`;
+  const s = waveSlope(x, z, t, wind);
+  return out.set(-s.dx, 1, -s.dz).normalize();
 }
 
 /* --- planar reflection 用の一時オブジェクト（GC 抑制） --- */
@@ -145,14 +59,16 @@ function _calcOblique(proj, clip) {
  * fragment ごとの vnoise 評価を抑える。
  */
 function createRippleNormalTexture() {
-  const size = 128;
+  /* フラグメント側の fbm を全部ここへ寄せるので、以前の 128 では
+     低周波レイヤに使ったときに解像度が足りない。256 / 5 octave にする */
+  const size = 256;
   const data = new Uint8Array(size * size * 4);
   const height = makeTileableHeightField(size, 0xa1f0001, {
-    octaves: 4,
-    baseFrequency: 5,
-    secondaryFrequency: 11,
-    secondaryMix: 0.32,
-    gain: 0.52,
+    octaves: 5,
+    baseFrequency: 4,
+    secondaryFrequency: 9,
+    secondaryMix: 0.34,
+    gain: 0.54,
     amplitude: 4.2,
   });
 
@@ -190,12 +106,16 @@ export class Water {
     const segs = opts.quality === 'low' ? 150 : opts.quality === 'high' ? 300 : 230;
     const geo = new THREE.PlaneGeometry(WATER_REGION, WATER_REGION, segs, segs);
     geo.rotateX(-Math.PI / 2);
+    /* 渚では水面を「地形に沿う薄いシート」に持ち上げる。持ち上げ量は
+       水面メッシュ 1 マスぶんの地形補間誤差を吸収できる大きさが必要 */
+    const shoreLift = clamp((WATER_REGION / segs) * 0.075, 0.08, 0.22);
 
     this.uniforms = {
       uTime: { value: 0 },
       uWind: { value: 1 },
       uHeightTex: { value: terrain.heightTexture },
       uRegion: { value: WATER_REGION },
+      uShoreLift: { value: shoreLift },
       uSunDir: { value: new THREE.Vector3(0, 1, 0) },
       uSunColor: { value: new THREE.Color(0xffffff) },
       uZenith: { value: new THREE.Color(0x2c72cc) },
@@ -224,6 +144,7 @@ export class Water {
       /* --- 平面反射（planar reflection） ---
          ミラーカメラで水面より上を描いたテクスチャを、波の法線で揺らして貼る */
       uReflColor: { value: null },
+      uReflTexel: { value: 1 / 512 },
       uTexMat: { value: new THREE.Matrix4() },
       uHasRefl: { value: 0 },
     };
@@ -233,9 +154,13 @@ export class Water {
       transparent: false,
       side: THREE.DoubleSide,
       depthWrite: true,
+      /* 渚で地形とほぼ同一平面になるので、深度の綴じ込みを一段ずらす */
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -2,
       vertexShader: /* glsl */ `
         ${waveGLSL()}
-        uniform float uTime, uWind, uRegion;
+        uniform float uTime, uWind, uRegion, uShoreLift;
         uniform sampler2D uHeightTex;
         varying vec3 vWorld;
         varying vec2 vWaveD;
@@ -243,18 +168,33 @@ export class Water {
         varying float vFogDepth;
         varying float vWaveH;
 
+        float groundAt(vec2 xz) {
+          vec2 uv = clamp(xz / uRegion + 0.5, vec2(0.0005), vec2(0.9995));
+          return texture2D(uHeightTex, uv).r;
+        }
+
         void main() {
           vec4 wp = modelMatrix * vec4(position, 1.0);
-          vec2 uv = wp.xz / uRegion + 0.5;
-          float ground = texture2D(uHeightTex, clamp(uv, vec2(0.0005), vec2(0.9995))).r;
-          float depth = max(0.0, -ground);
+
+          /* Gerstner 水平変位。岸では 0 に落として地形へ乗り上げないようにする */
+          float depth = max(0.0, -groundAt(wp.xz));
+          wp.xz += waveDisp(wp.xz, uTime) * uWind * shoalGain(depth);
+
+          // 変位後の位置で水深を取り直す（浅場の見た目がずれないように）
+          float ground = groundAt(wp.xz);
+          depth = max(0.0, -ground);
           vDepth = depth;
 
-          float damp = smoothstep(0.0, 1.6, depth) * 0.85 + 0.15 * smoothstep(0.0, 5.0, depth);
-          float h = waveH(wp.xz, uTime) * uWind * damp;
+          float gain = shoalGain(depth) * uWind;
+          float h = waveH(wp.xz, uTime) * gain;
           vWaveH = h;
-          vWaveD = waveD(wp.xz, uTime) * uWind * damp;
-          wp.y += h;
+          vWaveD = waveD(wp.xz, uTime) * gain;
+
+          /* 渚：水は薄いシートになって砂に沿って登る。
+             ground + uShoreLift が波面より高いのは水際の数十cmだけなので、
+             深場では max が自動的に波面を選ぶ。陸側は遡上の上限で止める */
+          float sheet = min(ground + uShoreLift, uShoreLift + 0.36 * uWind);
+          wp.y += max(h, sheet);
 
           vWorld = wp.xyz;
           vec4 mv = viewMatrix * wp;
@@ -264,45 +204,48 @@ export class Water {
       `,
       fragmentShader: /* glsl */ `
         ${COMMON_GLSL}
+        ${waveGLSL()}
         uniform vec3 uSunDir, uSunColor, uZenith, uHorizon, uFogColor, uShallow, uDeep, uCamPos, uAbsorb;
         uniform float uTime, uNight, uRain, uFogNear, uFogFar, uExposure, uWind, uCamNear, uCamFar;
-        uniform sampler2D uSceneColor, uSceneDepth, uReflColor, uRippleNormal;
+        uniform sampler2D uSceneColor, uSceneDepth, uReflColor, uRippleNormal, uHeightTex;
         uniform mat4 uTexMat;
-        uniform float uHasRefl;
+        uniform float uHasRefl, uReflTexel;
         uniform vec2 uResolution;
         uniform float uDebug;
         uniform float uLinearOut;
+        uniform float uRegion;
         varying vec3 vWorld;
         varying vec2 vWaveD;
         varying float vDepth;
         varying float vFogDepth;
         varying float vWaveH;
 
-        /* 中波は手続きノイズ、極小リップルはスクロールする法線テクスチャ。
-           すべてを fbm で生成するよりも、表情を保ったまま fragment 負荷を
-           下げられるハイブリッド構成にする。 */
+        float groundAtF(vec2 xz) {
+          vec2 uv = clamp(xz / uRegion + 0.5, vec2(0.0005), vec2(0.9995));
+          return texture2D(uHeightTex, uv).r;
+        }
+
+        /* 微細リップルはすべてスクロールする法線テクスチャで作る。
+           以前は fbm2 を差分法で 6 回評価していて 1 px あたり hash が 48 回
+           走っていた。回転させた 5 枚のタップに寄せると、表情を保ったまま
+           テクスチャフェッチ 5 回で済む（帯域は mipmap が面倒を見る）。 */
         vec2 rippleTexSlope(vec2 uv) {
           return texture2D(uRippleNormal, uv).xy * 2.0 - 1.0;
         }
 
+        /* 各レイヤを違う角度へ回して、タイルの格子が重なるのを避ける */
+        vec2 rot(vec2 p, float a) {
+          float c = cos(a), s = sin(a);
+          return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
+        }
+
         vec2 rippleSlope(vec2 xz, float t) {
-          const float EPS = 0.08;
           vec2 d = vec2(0.0);
-          float n;
-          vec2 p;
-
-          p = xz * 0.9 + vec2(0.97, 0.24) * t * 0.30;
-          n = fbm2(p);
-          d += vec2(n - fbm2(p + vec2(EPS, 0.0)), n - fbm2(p + vec2(0.0, EPS))) * 1.15;
-
-          p = xz * 1.6 + vec2(0.60, -0.80) * t * 0.46;
-          n = fbm2(p);
-          d += vec2(n - fbm2(p + vec2(EPS, 0.0)), n - fbm2(p + vec2(0.0, EPS))) * 0.88;
-
-          d += rippleTexSlope(xz * 0.72 + vec2(0.29, -0.84) * t * 0.09) * 0.20;
-          d += rippleTexSlope(xz * 1.36 + vec2(-0.77, -0.41) * t * 0.13 + vec2(0.37, 0.81)) * 0.12;
-          d += rippleTexSlope(xz * 2.45 + vec2(0.91, 0.36) * t * 0.18 + vec2(0.73, 0.19)) * 0.06;
-
+          d += rot(rippleTexSlope(rot(xz, 0.00) * 0.185 + vec2(0.21, -0.61) * t * 0.030), -0.00) * 0.185;
+          d += rot(rippleTexSlope(rot(xz, 0.91) * 0.390 + vec2(0.83, 0.37) * t * 0.055 + vec2(0.19, 0.53)), -0.91) * 0.125;
+          d += rot(rippleTexSlope(rot(xz, 2.05) * 0.760 + vec2(-0.47, 0.79) * t * 0.090 + vec2(0.61, 0.11)), -2.05) * 0.100;
+          d += rot(rippleTexSlope(rot(xz, 3.44) * 1.480 + vec2(0.62, -0.72) * t * 0.135 + vec2(0.37, 0.81)), -3.44) * 0.060;
+          d += rot(rippleTexSlope(rot(xz, 4.77) * 2.850 + vec2(-0.91, -0.28) * t * 0.190 + vec2(0.73, 0.29)), -4.77) * 0.035;
           return d;
         }
 
@@ -322,12 +265,23 @@ export class Water {
         }
 
         void main() {
-          if (vDepth <= 0.02) discard;
+          /* --- 汀線 ---
+             水深は頂点補間ではなくフラグメントで高さテクスチャから直接引く。
+             頂点補間だと閾値が粗い三角形の上で折れて、浅場に等高線図のような
+             同心リングとファセットが出る。
+             さらに遡上（swash）を足すので、水際の線が波に合わせて前後する */
+          float ground = groundAtF(vWorld.xz);
+          float still = -ground;                                  // 静水深（負なら陸）
+          float runUp = shoreRunUp(vWorld.xz, uTime) * uWind;
+          float wet = still + runUp;                              // 実効水深
+          if (wet <= 0.004) discard;
+          float depth = max(still, 0.0);
 
           // --- 法線（大波 + 細かいリップル） ---
           vec2 rip = rippleSlope(vWorld.xz, uTime);
           float farRip = mix(1.0, 0.38, smoothstep(75.0, 220.0, vFogDepth));
-          float ripAmt = (0.34 + uRain * 0.90) * smoothstep(0.0, 1.2, vDepth) * farRip;
+          float ripAmt = (0.34 + uRain * 0.90) * smoothstep(0.0, 1.2, depth) * farRip;
+          vec2 slope = vec2(vWaveD.x + rip.x * ripAmt, vWaveD.y + rip.y * ripAmt);
           vec3 N = normalize(vec3(-vWaveD.x - rip.x * ripAmt, 1.0, -vWaveD.y - rip.y * ripAmt));
 
           vec3 V = normalize(uCamPos - vWorld);
@@ -336,6 +290,41 @@ export class Water {
 
           float ndv = clamp(dot(N, V), 0.0, 1.0);
           float fres = pow(1.0 - ndv, 5.0) * 0.94 + 0.045;
+          vec2 suv = gl_FragCoord.xy / uResolution;
+
+          /* --- 水中から見上げた水面：スネルの窓と全反射 ---
+             水中では臨界角（cos ≈ 0.744）より内側だけ水上が見え、外側は
+             全反射で水中側が鏡のように映る。以前は水路長の計算が空気側の
+             距離を拾っていたため、見上げても濃紺の霧壁しか出ていなかった */
+          if (under) {
+            /* 臨界角 cos(asin(1/1.333)) = 0.7442。ここより内側だけ空が見える。
+               窓の中身は capture ではなく skyAt で作る：capture は空ドームを
+               隠してあるので、そこから読むと窓の中心が真っ暗になる。
+               また Snell で屈折方向を作ると、臨界角へ近づくほど視線が水平へ
+               寝るので、窓の縁が自然に明るい環になる（全方位の圧縮） */
+            const float CRIT = 0.7442;
+            float win = smoothstep(CRIT - 0.045, CRIT + 0.085, ndv);
+            vec3 up = -N;                                  // 水面の外向き（上）法線
+            vec3 I = -V;                                   // 目 → 水面
+            float sinI = sqrt(max(0.0, 1.0 - ndv * ndv));
+            float sinT = min(sinI * 1.333, 0.9995);        // 水 → 空気
+            float cosT = sqrt(max(0.0, 1.0 - sinT * sinT));
+            vec3 horiz = I - dot(I, up) * up;
+            vec3 tangent = length(horiz) > 1e-4 ? normalize(horiz) : vec3(1.0, 0.0, 0.0);
+            vec3 Rf = tangent * sinT + up * cosT;
+            vec3 aboveLin = skyAt(vec3(Rf.x, max(Rf.y, 0.012), Rf.z));
+            // 窓の外：全反射。水中の濁りが波形にゆらぐ鏡になる
+            float shimmer = smoothstep(0.0, 0.34, length(slope));
+            vec3 tirLin = mix(uDeep, uShallow, 0.34) * (0.62 + 1.05 * shimmer);
+            tirLin *= mix(0.22, 1.0, 1.0 - uNight * 0.82);
+            vec3 lin = mix(tirLin, aboveLin, win);
+            // 縁の環をもう一段立てる（win=0.5 付近で最大）
+            float rim = win * (1.0 - win) * 4.0;
+            lin += uSunColor * rim * 0.30 * (1.0 - uNight * 0.9);
+            if (uDebug > 0.5) { gl_FragColor = vec4(vec3(win), 1.0); return; }
+            gl_FragColor = vec4(encodeOut(lin, uExposure, uLinearOut), 1.0);
+            return;
+          }
 
           // --- 反射 ---
           vec3 R = reflect(-V, N);
@@ -345,16 +334,23 @@ export class Water {
           /* --- 平面反射 ---
              水面より上を描いたミラー画像。波の法線で反射ベクトルの足元を
              揺らしてサンプリングする（uv は uTexMat が画面座標へ運ぶ）。
-             RT に焼いた色は sRGB 済みなので、そのまま合成してよい */
+             RT に焼いた色は sRGB 済みなので、そのまま合成してよい。
+             実物の水面は映り込みが縦へ伸びてにじむので、縦 3 タップで
+             ぼかす。ぼかし幅は波の傾きと距離で増やす（＝粗さ LOD）。 */
           if (uHasRefl > 0.5) {
             vec3 Rd = reflect(-V, N);
             float dist = length(vWorld - uCamPos);
             // 波の傾きに応じて反射点を横へずらす（揺れの主役）
             vec4 rp = uTexMat * vec4(vWorld + Rd * (0.35 + dist * 0.10), 1.0);
             vec2 ruv = clamp(rp.xy / rp.w * 0.5 + 0.5, 0.0, 1.0);
-            vec3 mirror = texture2D(uReflColor, ruv).rgb;
-            // 空だけの領域（RT の初期化色）との差が少ない所ほど信頼する
-            float mirrorW = smoothstep(0.02, 0.25, fres) * (under ? 0.35 : 1.0);
+            float rough = clamp(length(slope) * 1.55 + smoothstep(70.0, 300.0, dist) * 0.7, 0.0, 1.6);
+            float blur = uReflTexel * (1.4 + rough * 7.0);
+            vec3 mirror = texture2D(uReflColor, clamp(ruv + vec2(0.0, -blur), 0.0, 1.0)).rgb * 0.27
+                        + texture2D(uReflColor, ruv).rgb * 0.46
+                        + texture2D(uReflColor, clamp(ruv + vec2(0.0, blur), 0.0, 1.0)).rgb * 0.27;
+            // 空だけの領域（RT の初期化色）との差が少ない所ほど信頼する。
+            // 粗い（＝法線が散る）所は鏡像を信じず空色へ返す
+            float mirrorW = smoothstep(0.02, 0.25, fres) * (1.0 - smoothstep(0.95, 2.0, rough));
             refl = mix(refl, mirror, mirrorW * 0.85);
           }
 
@@ -363,8 +359,11 @@ export class Water {
              シーンを描いたテクスチャから「水面より奥にある物」を取り出し、
              水を通る距離ぶん指数関数で減衰させる。距離はピクセルごとに
              連続なので、透ける／透けないの境目が出ない */
-          vec2 suv = gl_FragCoord.xy / uResolution;
-          float refrAmt = (1.0 - ndv) * smoothstep(0.0, 1.4, vDepth) * mix(0.006, 0.018, 1.0 - uRain * 0.35);
+          /* 屈折のずらし量は以前 0.018 が上限で、浅場の湖底がほぼ歪んで
+             いなかった。実際の浅い水は湖底が大きく揺らぐので、波の傾きに
+             比例させたうえで上限を引き上げる */
+          float refrAmt = (0.45 + length(slope) * 2.2) * smoothstep(0.0, 1.4, depth)
+                        * mix(0.020, 0.052, 1.0 - uRain * 0.35);
           vec2 refrOff = N.xz * refrAmt;
           vec2 ruv0 = clamp(suv + refrOff, vec2(0.001), vec2(0.999));
           float sceneZ = eyeZ(texture2D(uSceneDepth, ruv0).x);
@@ -380,6 +379,16 @@ export class Water {
           vec3 body = mix(uShallow, uDeep, dn);
           body *= mix(0.22, 1.0, 1.0 - uNight * 0.82);
 
+          /* --- 逆光の峰が透ける（sub-surface scattering 近似） ---
+             太陽を背にした波の峰は、薄い水を光が通って緑〜黄に発光する。
+             これが無いと、どれだけ反射を作り込んでも「板」に見える */
+          float hUp = clamp(vWaveH / ${MAX_WAVE_AMP.toFixed(3)} * 1.35, 0.0, 1.0);
+          float backLit = pow(max(dot(V, -uSunDir), 0.0), 3.0);
+          /* 定数項は付けない。付けると太陽と反対を向いた浅場ぜんたいが
+             緑がかって光り、水が氷のように見えてしまう */
+          vec3 sss = uShallow * uSunColor * (hUp * hUp * 0.55)
+                   * backLit * (1.0 - uNight) * (1.0 - uRain * 0.5);
+
           /* --- 水面で反射する光（空 + 太陽・月のきらめき） --- */
           vec3 surf = refl;
           vec3 H = normalize(V + uSunDir);
@@ -394,55 +403,50 @@ export class Water {
           float mnd = max(dot(N, MH), 0.0);
           surf += vec3(0.72, 0.82, 1.0) * (pow(mnd, 300.0) * 1.5 + pow(mnd, 34.0) * 0.10) * uNight;
 
-          /* --- 泡（渚：深度帯 + 二段ノイズ + 波位相追従） ---
-             浅い渚は coverage/brightness を上げ、やや深い岸沿いは
-             fbm/vnoise の二段でまばらな筋に崩す。foamLag で波高に
-             わずかに遅れて乗り、距離フェードで遠景の白帯を抑える。
-             沖の波頭泡は従来どおり強風・雨のみ。 */
-          float runUp = vWaveH * 1.15;
-          float shoreDepth = max(0.0, vDepth - runUp * 0.72);
-          float shoreBand = smoothstep(0.68, 0.0, shoreDepth);
-          // 幾何境界のギザつきだけ数cmで馴染ませ、浅い領域の泡量は落とさない。
-          float shoreFeather = smoothstep(0.018, 0.075, vDepth)
-                             * (1.0 - smoothstep(0.78, 1.08, shoreDepth));
+          /* --- 泡（渚） ---
+             遡上（swash）の先端に細い白線を立て、その後ろをレース状に崩す。
+             以前は fbm の特徴サイズが数メートルあり、泡ではなく「煙」に
+             見えていたので 5〜10 倍細かくした。さらに先端から離れた泡は
+             古いものとして薄め、寄せて引く一往復が絵に出るようにする。
+             沖の波頭泡は従来どおり強風・雨のときだけ。 */
+          float tip = smoothstep(0.075, 0.008, wet);
+          float band = smoothstep(0.22, 0.02, wet);
+          float shoreFoam = 0.0;
+          float foamBright = 0.55;
+          if (tip + band > 0.002) {
+            vec2 wFlow = normalize(vWaveD * 1.4 + vec2(0.02, 0.01));
+            vec2 fPerp = vec2(-wFlow.y, wFlow.x);
+            vec2 sp = vWorld.xz;
+            // 泡は水と一緒に運ばれる：遡上量で位相をずらして波に追従させる
+            float foamLag = runUp * 2.6 - uTime * 0.05;
+            // 岸に平行へ伸ばした座標。泡の筋が汀線に沿って走る
+            vec2 fa = vec2(dot(sp, wFlow) * 3.4, dot(sp, fPerp) * 9.5);
 
-          vec2 wFlow = normalize(vWaveD * 1.4 + vec2(0.02, 0.01));
-          vec2 fPerp = vec2(-wFlow.y, wFlow.x);
-          vec2 shoreP = vWorld.xz;
-          float foamLag = runUp * 2.1 - uTime * 0.06;
-
-          vec2 coarseP = vec2(dot(shoreP, wFlow), dot(shoreP, fPerp)) * 1.25
-                       + wFlow * foamLag + vec2(uTime * 0.12, uTime * 0.08);
-          float coarseN = fbm2(coarseP);
-          vec2 fineP = shoreP * 3.6 + wFlow * (foamLag * 1.35 + 0.5)
-                     + vec2(-uTime * 0.15, uTime * 0.19);
-          float fineN = vnoise(fineP);
-
-          // 浅いほど閾値を下げて面積を増やす。ただし負値にはせず、
-          // 最浅部にもノイズの穴を残して一枚の白い板になるのを防ぐ。
-          float breakThresh = mix(0.26, 0.74, 1.0 - shoreBand);
-          float coarseMask = smoothstep(breakThresh, breakThresh + 0.24, coarseN);
-          float streakMask = smoothstep(breakThresh + 0.08, breakThresh + 0.36, fineN);
-          float shoreBreakup = coarseMask * mix(0.42, 1.0, streakMask);
-
-          float freshN = vnoise(shoreP * 5.0 + wFlow * foamLag * 2.0
-                              + vec2(uTime * 0.21, -uTime * 0.11));
-          float freshWash = smoothstep(0.58, 0.84, freshN) * shoreBand * 0.38;
-
-          float shoreCover = mix(0.28, 1.0, shoreBand);
-          float shoreFoam = clamp((shoreBreakup * shoreCover + freshWash) * shoreFeather, 0.0, 1.0);
-          shoreFoam *= 1.0 - smoothstep(55.0, 180.0, vFogDepth);
+            /* 手続きノイズは mipmap が効かないので、細かい層は距離で寝かせる。
+               そうしないと遠景の泡が 1 px 以下の格子に落ちて斑に化ける */
+            float foamLod = 1.0 - smoothstep(9.0, 32.0, vFogDepth);
+            float n1 = fbm2(fa + wFlow * foamLag * 3.4 + vec2(uTime * 0.42, uTime * 0.28));
+            float n2 = vnoise(sp * 17.0 + wFlow * (foamLag * 1.5) + vec2(-uTime * 0.31, uTime * 0.24));
+            float n3 = vnoise(sp * 38.0 - wFlow * (foamLag * 2.2) + vec2(uTime * 0.44, -uTime * 0.37));
+            float lace = smoothstep(0.42, 0.70, n1)
+                       * mix(0.10, 1.0, mix(0.65, smoothstep(0.34, 0.74, n2), foamLod))
+                       * mix(0.35, 1.0, mix(0.7, smoothstep(0.34, 0.80, n3), foamLod));
+            // 先端は連続した白線、後方は古くなるほど薄いレース
+            float age = smoothstep(0.04, 0.22, wet);
+            shoreFoam = clamp(tip * (0.50 + 0.50 * lace) + band * lace * (1.0 - age * 0.80), 0.0, 1.0);
+            shoreFoam *= 1.0 - smoothstep(70.0, 230.0, vFogDepth);
+            foamBright = mix(0.60, 1.02, tip) + lace * 0.10;
+          }
 
           float crest = smoothstep(0.58, 0.92, vWaveH / ${MAX_WAVE_AMP.toFixed(3)} / max(uWind, 0.35));
-          float crestN = vnoise(vWorld.xz * 2.2 + uTime * 0.17);
+          float crestN = vnoise(vWorld.xz * 6.5 + uTime * 0.29);
           // 晴天の湖に白波を常在させず、強風・雨のときだけ波頭を泡立たせる。
           float crestWeather = smoothstep(1.12, 1.75, uWind) * mix(0.25, 1.0, uRain);
           float crestFoam = crest * smoothstep(0.34, 0.76, crestN) * 0.42 * crestWeather;
           float foam = clamp(shoreFoam + crestFoam, 0.0, 1.0);
 
-          float foamBright = mix(0.42, 0.92, shoreBand) + freshWash * 0.22;
           float sunFoam = pow(max(dot(N, normalize(V + uSunDir)), 0.0), 3.0) * 0.18 * (1.0 - uNight);
-          vec3 foamTint = mix(uShallow * 1.35, vec3(0.88, 0.94, 0.96), shoreBand);
+          vec3 foamTint = mix(uShallow * 1.35, vec3(0.90, 0.95, 0.97), clamp(tip + band, 0.0, 1.0));
           vec3 foamCol = foamTint * foamBright + uSunColor * sunFoam;
           foamCol *= mix(0.38, 1.0, 1.0 - uNight * 0.72);
 
@@ -464,8 +468,9 @@ export class Water {
              不透明度で被せる方式と違い、湖底は「水の色に溶けていく」ので境目が出ない */
           vec3 bodyEnc = encodeOut(body, uExposure, uLinearOut);
           vec3 trans = exp(-uAbsorb * path);
-          vec3 below = mix(bodyEnc, sceneCol, trans);
-          vec3 outc = mix(below, encodeOut(surf, uExposure, uLinearOut), under ? 0.35 : fres);
+          vec3 below = mix(bodyEnc, sceneCol, trans)
+                     + encodeOut(sss, uExposure, uLinearOut);
+          vec3 outc = mix(below, encodeOut(surf, uExposure, uLinearOut), fres);
           outc = mix(outc, encodeOut(foamCol, uExposure, uLinearOut), foam * 0.9);
 
           if (uDebug > 0.5) {
@@ -510,8 +515,11 @@ export class Water {
     /* --- 平面反射の準備 ---
        low 品質では無効。ミラー RT は小さめで十分（揺らして見るので） */
     this.reflEnabled = opts.quality !== 'low';
+    /* 映り込みは縦にぼかして貼るので、以前の 512 では対岸の木が
+       ブロック状の「シール」に見えていた。high は 1024 に上げる */
+    this.reflHz = opts.quality === 'high' ? 0 : 30;   // 0 = 毎フレーム
     if (this.reflEnabled) {
-      const reflSize = opts.quality === 'high' ? 512 : 320;
+      const reflSize = opts.quality === 'high' ? 1024 : 512;
       this.reflRT = new THREE.WebGLRenderTarget(reflSize, reflSize, {
         minFilter: THREE.LinearFilter,
         magFilter: THREE.LinearFilter,
@@ -526,6 +534,7 @@ export class Water {
       // 通常の autoUpdate のまま使う（_updateReflCam が同期する）
       this.reflPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
       this.uniforms.uReflColor.value = this.reflRT.texture;
+      this.uniforms.uReflTexel.value = 1 / reflSize;
       this.uniforms.uHasRefl.value = 1;
       this._lastReflAt = -Infinity;
     }
@@ -605,7 +614,7 @@ export class Water {
    */
   captureReflection(renderer, scene, camera) {
     if (!this.reflEnabled) return;
-    if (this.time - this._lastReflAt < 1 / 30) return;
+    if (this.reflHz > 0 && this.time - this._lastReflAt < 1 / this.reflHz) return;
     this._lastReflAt = this.time;
     const cam = this._updateReflCam(camera);
     // ワールド → uv 変換行列をシェーダへ渡す（world→clip→[0,1]）
@@ -656,14 +665,18 @@ export class Water {
   surfaceY(x, z) {
     const depth = this.terrain.depthAt(x, z);
     if (depth <= 0) return 0;
-    const damp = smoothstep(0, 1.6, depth) * 0.85 + 0.15 * smoothstep(0, 5, depth);
-    return waveHeight(x, z, this.time, this.wind) * damp;
+    // GPU 側と同じ浅水変形込みの係数を使う（ウキが波とずれないように）
+    return waveHeight(x, z, this.time, this.wind) * shoalGain(depth);
   }
 
   surfaceNormal(x, z, out) {
     const depth = this.terrain.depthAt(x, z);
-    const damp = depth <= 0 ? 0 : smoothstep(0, 1.6, depth) * 0.85 + 0.15 * smoothstep(0, 5, depth);
-    return waveNormal(x, z, this.time, this.wind * damp, out);
+    return waveNormal(x, z, this.time, this.wind * (depth <= 0 ? 0 : shoalGain(depth)), out);
+  }
+
+  /** 渚の遡上量（m）。地形シェーダの濡れ砂と同じ式を CPU からも引ける */
+  shoreRunUpAt(x, z) {
+    return shoreRunUp(x, z, this.time, this.wind);
   }
 
   /* ---------------- 波紋 ---------------- */
@@ -757,7 +770,7 @@ export class Water {
     tex.colorSpace = THREE.SRGBColorSpace;
 
     const mat = new THREE.PointsMaterial({
-      size: 0.14,
+      size: 0.075,
       map: tex,
       transparent: true,
       opacity: 0.75,
@@ -767,6 +780,16 @@ export class Water {
       vertexColors: true,
       sizeAttenuation: true,
     });
+    /* sizeAttenuation だけだと目の前の粒が巨大な白丸になり、
+       レンズの汚れか降雪に見える。画面上のサイズに上限を入れる */
+    mat.onBeforeCompile = (shader) => {
+      // sizeAttenuation の直後（logdepthbuf の手前）で画面サイズを丸める
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <logdepthbuf_vertex>',
+        'gl_PointSize = min(gl_PointSize, 5.0);\n#include <logdepthbuf_vertex>'
+      );
+    };
+    mat.customProgramCacheKey = () => 'plankton-clamped-v1';
     this.plankton = new THREE.Points(geo, mat);
     this.plankton.frustumCulled = false;
     this.plankton.renderOrder = 2;
@@ -793,9 +816,10 @@ export class Water {
         this.rt = null;
       }
     }
+    this.reflHz = q === 'high' ? 0 : 30;
     if (q !== 'low' && !this.reflEnabled) {
       this.reflEnabled = true;
-      const reflSize = q === 'high' ? 512 : 320;
+      const reflSize = q === 'high' ? 1024 : 512;
       this.reflRT = new THREE.WebGLRenderTarget(reflSize, reflSize, {
         minFilter: THREE.LinearFilter,
         magFilter: THREE.LinearFilter,
@@ -807,6 +831,7 @@ export class Water {
       this.reflCam = new THREE.PerspectiveCamera();
       this.reflPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
       this.uniforms.uReflColor.value = this.reflRT.texture;
+      this.uniforms.uReflTexel.value = 1 / reflSize;
       this.uniforms.uHasRefl.value = 1;
       this._lastReflAt = -Infinity;
     } else if (q === 'low' && this.reflEnabled) {
@@ -817,7 +842,7 @@ export class Water {
         this.reflRT = null;
       }
     } else if (this.reflEnabled && this.reflRT) {
-      const want = q === 'high' ? 512 : 320;
+      const want = q === 'high' ? 1024 : 512;
       if (this.reflRT.width !== want) {
         this.reflRT.dispose();
         this.reflRT = new THREE.WebGLRenderTarget(want, want, {
@@ -828,6 +853,7 @@ export class Water {
         });
         this.reflRT.texture.colorSpace = THREE.SRGBColorSpace;
         this.uniforms.uReflColor.value = this.reflRT.texture;
+        this.uniforms.uReflTexel.value = 1 / want;
       }
     }
     const counts = { low: 72, mid: 140, high: 240 };
@@ -917,12 +943,17 @@ export class Water {
         continue;
       }
       const tw = 0.45 + 0.55 * Math.sin(this.time * 1.8 + p.phase);
+      /* 近すぎる粒はフェードインさせ、遠い粒は視界の霧へ溶かす。
+         これが無いと粒が「星」に見えて距離感が壊れる */
+      const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const fade = smoothstep(0.35, 1.4, d) * (1 - smoothstep(spread * 0.55, spread * 1.1, d));
+      const a = tw * p.size * fade;
       posAttr.array[n * 3] = p.x;
       posAttr.array[n * 3 + 1] = p.y;
       posAttr.array[n * 3 + 2] = p.z;
-      colAttr.array[n * 3] = tw * p.size;
-      colAttr.array[n * 3 + 1] = tw * p.size * 1.05;
-      colAttr.array[n * 3 + 2] = tw * p.size * 1.1;
+      colAttr.array[n * 3] = a;
+      colAttr.array[n * 3 + 1] = a * 1.05;
+      colAttr.array[n * 3 + 2] = a * 1.1;
       n++;
     }
     this.plankton.geometry.setDrawRange(0, n);

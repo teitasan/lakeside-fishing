@@ -31,6 +31,9 @@ uniform float uCamNear;
 uniform float uCamFar;
 uniform float uWaterY;
 uniform float uLinear;
+uniform vec2 uSunUv;      // 水面上の太陽を投影した画面座標（光の柱の起点）
+uniform float uSunOn;     // 太陽が画面内・水面上にあるか 0..1
+uniform float uTurbidity; // 濁り（1 で標準）
 
 float hash21(vec2 p) {
   p = fract(p * vec2(123.34, 456.21));
@@ -79,26 +82,47 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
 
   vec3 col = inputColor.rgb;
 
-  /* Beer-Lambert 風の距離減衰（赤→緑→青の順に吸収） */
-  vec3 trans = exp(-uAbsorb * dist * mix(0.16, 0.35, uStrength));
-  vec3 waterTint = mix(vec3(0.18, 0.52, 0.58), vec3(0.04, 0.14, 0.22), clamp(dist / 42.0, 0.0, 1.0));
-  waterTint *= mix(1.0, 0.32, uNight);
-  col = mix(col * trans, waterTint, 0.04 * uStrength);
+  /* --- 体積散乱（Beer-Lambert + 単一散乱の内向き加算） ---
+     以前は線形の THREE.Fog がほぼすべてを担っていたため、水が「平たい
+     水色の板」に見えていた。水は指数かつ波長選択で減衰するので、
+     透過に exp を、抜けた分に散乱光を足す形へ置き換える。
+     こうすると遠くが「水の色に収束」し、近くだけ素の色が残る */
+  float camDepth = max(0.0, uWaterY - uCamPos.y);
+  vec3 sigma = uAbsorb * uTurbidity;
+  vec3 trans = exp(-sigma * dist);
 
-  /* 水中ヘイズ（深度に応じた青緑の靄） */
-  float haze = smoothstep(8.0, 52.0, dist) * uStrength;
-  haze *= mix(1.0, 0.45, uNight) * (1.0 - uRain * 0.25);
-  vec3 hazeCol = mix(vec3(0.07, 0.22, 0.26), vec3(0.02, 0.08, 0.11), uNight);
-  col = mix(col, hazeCol, haze * 0.14);
-
-  /* 水面からの拡散光（太陽方向＋カメラ上方） */
-  float waterDepth = max(0.0, uWaterY - uCamPos.y);
-  float surfaceLight = exp(-waterDepth * 0.42);
   float sunGate = smoothstep(-0.05, 0.35, uSunDir.y) * (1.0 - uNight * 0.88) * (1.0 - uCloud * 0.55);
-  float caust = fbm2(uv * 18.0 + uTime * 0.18) * fbm2(uv * 24.0 - uTime * 0.14);
-  caust = pow(clamp(caust * 1.6, 0.0, 1.0), 2.0);
-  vec3 surfaceGlow = vec3(0.35, 0.72, 0.82) * surfaceLight * sunGate * (0.08 + caust * 0.11) * uStrength;
-  col += surfaceGlow * mix(0.35, 1.0, uLinear);
+  /* 水中の環境光は深さで指数的に落ちる。20m 潜れば同じ湖底でも別の暗さになる */
+  float ambient = exp(-camDepth * 0.085) * mix(0.28, 1.0, sunGate);
+  vec3 scatterCol = mix(vec3(0.085, 0.30, 0.34), vec3(0.020, 0.075, 0.105), uNight);
+  vec3 inscatter = scatterCol * ambient * (vec3(1.0) - trans);
+
+  col = col * trans + inscatter * uStrength;
+
+  /* --- 光の柱（薄明光線） ---
+     水面で屈折した平行光が濁りに散乱して筋になる。太陽の画面位置から
+     放射状にノイズを引くだけの近似だが、水中の絵で一番効く要素 */
+  if (uSunOn > 0.001) {
+    vec2 d = uv - uSunUv;
+    float r = length(d);
+    float ang = atan(d.y, d.x);
+    float shaft = fbm2(vec2(ang * 5.2, r * 2.4 - uTime * 0.11));
+    shaft += fbm2(vec2(ang * 11.0 + 3.7, r * 1.3 + uTime * 0.07)) * 0.6;
+    shaft = smoothstep(0.62, 1.05, shaft);
+    float reach = exp(-camDepth * 0.14) * (1.0 - smoothstep(0.05, 0.95, r));
+    vec3 shaftCol = vec3(0.42, 0.78, 0.86);
+    col += shaftCol * shaft * reach * sunGate * uSunOn * uStrength * 0.13
+         * (1.0 - uRain * 0.4);
+  }
+
+  /* --- 水面直下の明るみ --- */
+  float surfaceLight = exp(-camDepth * 0.42);
+  col += vec3(0.30, 0.66, 0.76) * surfaceLight * sunGate * uStrength * 0.05
+       * mix(0.35, 1.0, uLinear);
+
+  /* 周辺減光：水中は視界が閉じる */
+  float vig = 1.0 - smoothstep(0.32, 0.92, length(uv - 0.5) * 1.42);
+  col *= mix(1.0, 0.62 + 0.38 * vig, uStrength);
 
   /* コントラストをわずかに落として水中感を出す */
   col = mix(col, col * col, 0.015 * uStrength);
@@ -124,6 +148,9 @@ class UnderwaterEffect extends Effect {
         ['uCamFar', new THREE.Uniform(3000)],
         ['uWaterY', new THREE.Uniform(0)],
         ['uLinear', new THREE.Uniform(0)],
+        ['uSunUv', new THREE.Uniform(new THREE.Vector2(0.5, 0.9))],
+        ['uSunOn', new THREE.Uniform(0)],
+        ['uTurbidity', new THREE.Uniform(1)],
       ]),
     });
   }
@@ -212,6 +239,9 @@ export class PostFX {
     u.get('uCamNear').value = ctx.camNear ?? 0.1;
     u.get('uCamFar').value = ctx.camFar ?? 3000;
     u.get('uWaterY').value = ctx.waterY ?? 0;
+    if (ctx.sunUv) u.get('uSunUv').value.copy(ctx.sunUv);
+    u.get('uSunOn').value = ctx.sunOn ?? 0;
+    u.get('uTurbidity').value = ctx.turbidity ?? 1;
     // 水中でもBloomは残すが、視界を白く曇らせないよう大幅に弱める。
     if (this.bloom) this.bloom.intensity = THREE.MathUtils.lerp(0.55, 0.10, strength);
   }

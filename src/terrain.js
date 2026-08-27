@@ -2,8 +2,9 @@
    地形・湖底・岸辺の装飾・桟橋
    =========================================================== */
 import * as THREE from 'three';
-import { CAUSTICS_GLSL } from './shaders.js?v=20260827-lkwgfx';
-import { UnderwaterPropScatter, addUnderwaterCaustics } from './underwaterProps.js?v=20260827-lkwgfx';
+import { CAUSTICS_GLSL } from './shaders.js?v=20260828-uwgfx10';
+import { waveGLSL } from './waveField.js?v=20260828-wavefield3';
+import { UnderwaterPropScatter, addUnderwaterCaustics } from './underwaterProps.js?v=20260828-uwgfx10';
 import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js';
 import { makeTileableHeightField } from './tileableNoise.js?v=20260827-orgnoise4';
 import { WORLD_SIZE, WATER_REGION, MAX_DEPTH, resolveLake } from './lakefield.js';
@@ -18,6 +19,106 @@ const tmpSand = new THREE.Color();
 const UP = new THREE.Vector3(0, 1, 0);
 const _dl = { al: 0, si: 0 };
 const _dl2 = { al: 0, si: 0 };
+
+/* ===========================================================
+   渚の濡れ砂
+
+   乾いた砂と水中の砂が同じアルベドで直結していると、水際が
+   「紙を切って貼った」ように見える。ここでは
+     ・いま水を被っている帯（遡上に追従して前後する）
+     ・引き波が置いていった泡の名残
+     ・毛管上昇でいつも湿っている帯
+   の 3 段を作る。判定は水面シェーダと同じ高さテクスチャ基準なので、
+   汀線の位置が水と地形でずれない。
+   =========================================================== */
+const SHORE_WET_GLSL = /* glsl */ `
+uniform sampler2D uShoreHeightTex;
+uniform float uShoreRegion;
+uniform float uShoreTime;
+uniform float uShoreWind;
+uniform float uShoreTop;
+
+${waveGLSL({ prefix: 'sw' })}
+
+float shoreHash(vec2 p) {
+  p = fract(p * vec2(127.31, 311.71));
+  p += dot(p, p + 41.23);
+  return fract(p.x * p.y);
+}
+
+float shoreNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = shoreHash(i);
+  float b = shoreHash(i + vec2(1.0, 0.0));
+  float c = shoreHash(i + vec2(0.0, 1.0));
+  float d = shoreHash(i + vec2(1.0, 1.0));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+/* color / roughness / normal の 3 か所で使い回すので 1 回だけ評価する */
+vec3 gShoreWet = vec3(0.0);
+
+/** x = 濡れ具合 0..1、y = 泡の名残 0..1、z = 渚バンド（砂の作り込み用） */
+vec3 shoreWetness(vec3 wp) {
+  vec2 uv = clamp(wp.xz / uShoreRegion + 0.5, vec2(0.0005), vec2(0.9995));
+  float ground = texture2D(uShoreHeightTex, uv).r;
+  // 渚バンドの外（山側・深場）は何もしない
+  float band = smoothstep(-0.60, -0.12, ground)
+             * (1.0 - smoothstep(uShoreTop * 2.2, uShoreTop * 4.5, ground));
+  if (band < 0.002) return vec3(0.0);
+  // 陸側だけを濡らす（水中側は水シェーダの減衰が担当する）
+  float onLand = smoothstep(-0.14, 0.02, ground);
+  float now = swShoreRunUp(wp.xz, uShoreTime) * uShoreWind;
+  float past = max(now, swShoreRunUp(wp.xz, uShoreTime - 2.1) * uShoreWind);
+  float wetNow = smoothstep(0.035, -0.035, ground - now);
+  float wetPast = smoothstep(0.09, -0.09, ground - past);
+  // 毛管上昇の上端はノイズで崩す（真横一直線の境目にしない）
+  float top = uShoreTop * (0.62 + 0.76 * shoreNoise(wp.xz * 0.42));
+  float capillary = 1.0 - smoothstep(0.0, top, max(ground, 0.0));
+  float wet = clamp(max(wetNow, wetPast * 0.82) + capillary * 0.34, 0.0, 1.0) * onLand;
+  /* 引き波が残した泡：いま水が無いところにだけ、まばらなレースで乗る。
+     ここを広く強く塗ると砂浜が白い斑（牛柄）になるので、面積も濃さも絞る。
+     遡上が届いた上端ほど泡が残るので、そこへ寄せる */
+  float laceLod = 1.0 - smoothstep(6.0, 24.0, length(wp - cameraPosition));
+  float lace = smoothstep(0.60, 0.88, shoreNoise(wp.xz * 5.5))
+             * mix(0.20, 1.0, smoothstep(0.42, 0.82, shoreNoise(wp.xz * 13.0)))
+             * mix(0.55, 1.0, laceLod);
+  float atReach = mix(0.30, 1.0, smoothstep(0.12, 0.0, abs(ground - past)));
+  float residue = clamp(wetPast - wetNow, 0.0, 1.0) * lace * onLand * atReach;
+  return vec3(wet, residue, band);
+}
+
+/**
+ * 渚の砂を「無地」から救う。粒のムラ、満潮線の漂着物、濡れによる暗色化、
+ * 引き波が残した泡の 4 段を、乾いた砂側だけに乗せる。
+ */
+vec3 shoreDress(vec3 base, vec3 wp, float under) {
+  vec3 sw = gShoreWet;
+  if (sw.z < 0.002) return base;
+  float dry = sw.z * (1.0 - under);
+  /* 手続きノイズには mipmap が無いので、遠景では 1 px より細かい模様が
+     エイリアスして大きな斑（牛柄）になる。距離で帯域を落とす */
+  float lod = 1.0 - smoothstep(5.0, 20.0, length(wp - cameraPosition));
+  float fine = dry * lod;
+  // 砂の粒ムラ
+  float grain = shoreNoise(wp.xz * 6.0) * 0.6 + shoreNoise(wp.xz * 1.8) * 0.4;
+  base *= mix(1.0, mix(0.965, 1.035, grain), fine);
+  // 小石：まばらな明暗の点（強くすると牛柄になるので控えめに）
+  float peb = smoothstep(0.90, 0.99, shoreNoise(wp.xz * 3.2 + 13.7));
+  base = mix(base, base * mix(0.88, 1.10, shoreNoise(wp.xz * 9.0)), peb * fine * 0.30);
+  // 満潮線に残る漂着物のすじ
+  float wrack = smoothstep(0.60, 0.86, shoreNoise(wp.xz * 2.7))
+              * smoothstep(0.26, 0.04, abs(wp.y - uShoreTop * 1.2)) * dry;
+  base = mix(base, vec3(0.30, 0.26, 0.19), wrack * 0.45);
+  // 濡れた砂は暗く濃くなる（これが無いと水際が紙を貼ったように見える）
+  base *= mix(1.0, 0.66, sw.x);
+  // 引き波が置いていった泡
+  base = mix(base, vec3(0.88, 0.91, 0.92), sw.y * 0.32);
+  return base;
+}
+`;
 
 /** 湖底のmicro normal・roughness・色ムラを1枚にまとめたタイルテクスチャ。 */
 function createBedDetailTexture() {
@@ -251,6 +352,14 @@ export class Terrain {
 
     this._buildHeightTexture();
     this.bedDetailTexture = createBedDetailTexture();
+    /* 渚の濡れ砂は水面シェーダと同じ高さテクスチャ・同じ遡上式を見る */
+    this._shoreUniforms = {
+      uShoreHeightTex: { value: this.heightTexture },
+      uShoreRegion: { value: WATER_REGION },
+      uShoreTime: { value: 0 },
+      uShoreWind: { value: 1 },
+      uShoreTop: { value: 0.34 },
+    };
     this._causticsUniforms = opts.causticsUniforms || null;
     this._buildTerrainMesh(opts.bedTextures || null);
     this._findDock();
@@ -275,6 +384,13 @@ export class Terrain {
   /** 水中プロップ：カメラ・流れ・時刻 */
   updateUnderwaterProps(time, camera, flowDir, flowStrength) {
     this.underwaterProps?.update(time, camera, flowDir, flowStrength);
+  }
+
+  /** 渚の濡れ砂：水面と同じ時刻・風速を渡す（毎フレーム） */
+  updateShore(time, wind) {
+    const u = this._shoreUniforms;
+    u.uShoreTime.value = time;
+    u.uShoreWind.value = wind;
   }
 
   /** 砂地・岩場・泥底のタイルテクスチャを読み込む */
@@ -394,6 +510,7 @@ export class Terrain {
       uBedDetailScale: { value: 1 / 1.8 },
       uBedDetailStrength: { value: this.quality === 'high' ? 0.34 : this.quality === 'low' ? 0.16 : 0.25 },
     };
+    Object.assign(uniforms, this._shoreUniforms);
     if (causticsUniforms) Object.assign(uniforms, causticsUniforms);
     mat.userData.bedUniforms = uniforms;
     mat.onBeforeCompile = (shader) => {
@@ -417,6 +534,7 @@ export class Terrain {
           '#include <common>',
           `#include <common>
           ${CAUSTICS_GLSL}
+          ${SHORE_WET_GLSL}
           uniform sampler2D uBedSand;
           uniform sampler2D uBedRock;
           uniform sampler2D uBedMud;
@@ -449,6 +567,8 @@ export class Terrain {
               bedCol *= mix(1.0, 0.38, d);
               diffuseColor.rgb = mix(diffuseColor.rgb, bedCol, under);
             }
+            gShoreWet = shoreWetness(vBedWorldPos);
+            diffuseColor.rgb = shoreDress(diffuseColor.rgb, vBedWorldPos, under);
           }`
         )
         .replace(
@@ -461,6 +581,8 @@ export class Terrain {
             bedRough = mix(bedRough, 0.76, smoothstep(0.62, 0.74, vBed));
             bedRough = clamp(bedRough + (detail.a - 0.5) * 0.14, 0.66, 1.0);
           roughnessFactor = mix(roughnessFactor, bedRough, under);
+          // 濡れた砂は鏡面が立つ。太陽が低いときの照り返しがここで出る
+          roughnessFactor = mix(roughnessFactor, 0.28, gShoreWet.x * 0.85);
           }`
         )
         .replace(
@@ -470,7 +592,9 @@ export class Terrain {
             float under = smoothstep(0.12, -0.28, vBedWorldPos.y);
             vec2 detailSlope = texture2D(uBedDetail, vBedWorldPos.xz * uBedDetailScale).xy * 2.0 - 1.0;
             vec3 detailView = mat3(viewMatrix) * vec3(-detailSlope.x, 0.0, -detailSlope.y);
-            normal = normalize(normal + detailView * uBedDetailStrength * under);
+            float detailAmt = uBedDetailStrength * max(under, gShoreWet.z * 0.28)
+                            * (1.0 - gShoreWet.x * 0.65);
+            normal = normalize(normal + detailView * detailAmt);
           }`
         )
         .replace(
@@ -479,7 +603,7 @@ export class Terrain {
           totalEmissiveRadiance += causticLight(vBedWorldPos, normal);`
         );
     };
-    mat.customProgramCacheKey = () => 'terrain-bed-tex-v5-detail-normal-caustics';
+    mat.customProgramCacheKey = () => 'terrain-bed-tex-v6-shorewet-caustics';
   }
 
   /** 湖底テクスチャが使えない環境でも、頂点色の湖底へコースティクスを載せる。 */
@@ -487,6 +611,7 @@ export class Terrain {
     if (!causticsUniforms) return;
     mat.userData.causticsUniforms = causticsUniforms;
     mat.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, this._shoreUniforms);
       Object.assign(shader.uniforms, causticsUniforms);
       shader.vertexShader = shader.vertexShader
         .replace(
@@ -504,7 +629,22 @@ export class Terrain {
           '#include <common>',
           `#include <common>
           varying vec3 vTerrainWorldPos;
-          ${CAUSTICS_GLSL}`
+          ${CAUSTICS_GLSL}
+          ${SHORE_WET_GLSL}`
+        )
+        .replace(
+          '#include <color_fragment>',
+          `#include <color_fragment>
+          {
+            float under = smoothstep(0.12, -0.28, vTerrainWorldPos.y);
+            gShoreWet = shoreWetness(vTerrainWorldPos);
+            diffuseColor.rgb = shoreDress(diffuseColor.rgb, vTerrainWorldPos, under);
+          }`
+        )
+        .replace(
+          '#include <roughnessmap_fragment>',
+          `#include <roughnessmap_fragment>
+          roughnessFactor = mix(roughnessFactor, 0.28, gShoreWet.x * 0.85);`
         )
         .replace(
           '#include <emissivemap_fragment>',
@@ -512,7 +652,7 @@ export class Terrain {
           totalEmissiveRadiance += causticLight(vTerrainWorldPos, normal);`
         );
     };
-    mat.customProgramCacheKey = () => 'terrain-vcolor-v2-normal-caustics';
+    mat.customProgramCacheKey = () => 'terrain-vcolor-v3-shorewet-caustics';
   }
 
   _terrainColor(h, slope, x, z, out) {

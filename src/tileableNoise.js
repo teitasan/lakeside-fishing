@@ -146,3 +146,80 @@ export function makeTileableHeightField(size, seed, {
     return ((1 - secondaryMix) * h0 + secondaryMix * h1) * amplitude;
   };
 }
+
+/**
+ * タイル可能なコースティクス網目（0..1）。
+ *
+ * 水面で屈折した光が集まる線は、実際には波面の曲率が焦点を結ぶ場所で、
+ * 見た目は「セル境界に沿った細い明線」になる。ボロノイの F2-F1 を細く
+ * 立てるとその網目が素直に出る。fbm の掛け算では「にじみ」しか作れない。
+ *
+ * @param {number} size texel 数（一辺）
+ * @param {number} seed
+ */
+export function makeTileableCausticField(size, seed, {
+  cells = 7,
+  ridge = 0.34,
+  sharpness = 1.5,
+  jitter = 0.92,
+  layers = 2,
+} = {}) {
+  positiveInt(size, 'size');
+  positiveInt(cells, 'cells');
+  positiveInt(layers, 'layers');
+  if (!(ridge > 0)) throw new RangeError('ridge must be positive');
+
+  const bands = [];
+  let bandCells = cells;
+  let weight = 1;
+  let norm = 0;
+  for (let l = 0; l < layers; l++) {
+    const n = bandCells;
+    const pts = new Float32Array(n * n * 2);
+    const rng = makeRng(mixSeed(seed >>> 0, 0xc0ffee01, l));
+    for (let i = 0; i < n * n; i++) {
+      pts[i * 2] = 0.5 + (rng() - 0.5) * jitter;
+      pts[i * 2 + 1] = 0.5 + (rng() - 0.5) * jitter;
+    }
+    bands.push({ n, pts, weight, spin: l * 0.7853981634 });
+    norm += weight;
+    weight *= 0.55;
+    bandCells *= 2;
+  }
+
+  const bandValue = (band, x, y) => {
+    const { n, pts } = band;
+    const cx = (x / size) * n;
+    const cy = (y / size) * n;
+    const ix = Math.floor(cx);
+    const iy = Math.floor(cy);
+    let f1 = 1e9, f2 = 1e9;
+    for (let oy = -1; oy <= 1; oy++) {
+      for (let ox = -1; ox <= 1; ox++) {
+        const gx = ix + ox;
+        const gy = iy + oy;
+        const wx = ((gx % n) + n) % n;
+        const wy = ((gy % n) + n) % n;
+        const idx = (wy * n + wx) * 2;
+        const dx = gx + pts[idx] - cx;
+        const dy = gy + pts[idx + 1] - cy;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d < f1) { f2 = f1; f1 = d; } else if (d < f2) { f2 = d; }
+      }
+    }
+    // セル境界（F2 ≈ F1）で 1、内部で 0 になる細い明線
+    const edge = 1 - Math.min(1, (f2 - f1) / ridge);
+    return edge > 0 ? Math.pow(edge, sharpness) : 0;
+  };
+
+  return (x, y) => {
+    let s = 0;
+    for (const band of bands) {
+      // 帯ごとに整数トーラス変換で回して、格子の重なりを避ける
+      const rx = band.spin === 0 ? x : x + y + size * 0.283;
+      const ry = band.spin === 0 ? y : -x + y - size * 0.157;
+      s += band.weight * bandValue(band, rx, ry);
+    }
+    return Math.min(1, s / norm);
+  };
+}
