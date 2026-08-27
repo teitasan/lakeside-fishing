@@ -28,7 +28,7 @@ jobs:
 
       - name: Inject multiplayer Worker origin
         env:
-          MP_ORIGIN: ${{ vars.MP_ORIGIN }}
+          MP_ORIGIN: ${{ secrets.MP_ORIGIN }}
         run: |
           if [ -n "$MP_ORIGIN" ]; then
             sed -i "s|<meta name=\"lakeside-mp-origin\" content=\"\" />|<meta name=\"lakeside-mp-origin\" content=\"${MP_ORIGIN}\" />|" index.html

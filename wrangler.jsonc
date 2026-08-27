@@ -4,7 +4,6 @@
   "main": "worker/index.js",
   "compatibility_date": "2026-08-21",
   "vars": {
-    "ACCESS_REQUIRED": "false",
     "CLOUDFLARE_ACCOUNT_ID": "e9e6f38d80cf6871855475ac06f54693",
     "REALTIMEKIT_APP_ID": "d8b6f547-fdd1-4b30-bf3e-71287007628e",
     "CORS_ORIGINS": "https://teitasan.github.io"
@@ -15,7 +14,6 @@
   "env": {
     "production": {
       "vars": {
-        "ACCESS_REQUIRED": "true",
         "CLOUDFLARE_ACCOUNT_ID": "e9e6f38d80cf6871855475ac06f54693",
         "REALTIMEKIT_APP_ID": "d8b6f547-fdd1-4b30-bf3e-71287007628e",
         "CORS_ORIGINS": "https://teitasan.github.io"

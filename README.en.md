@@ -9,7 +9,7 @@ They say the *Lord of the Lake* still sleeps in its deepest waters.
 ### ▶ [Play in your browser](https://teitasan.github.io/lakeside-fishing/)
 
 No installation needed — everything runs in the browser. Sound on. Best with a mouse on desktop.  
-Available in **Japanese / English** (switch from the title screen or the in-game menu). Choose **Play Together** on the title screen to share a lake with friends (multiplayer goes through the Cloudflare Worker and requires Cloudflare Access).
+Available in **Japanese / English** (switch from the title screen or the in-game menu). Choose **Play Together** on the title screen to share a lake with friends (multiplayer goes through the Cloudflare Worker; the Worker URL is not public—anyone who knows it may join).
 
 ![Lakeside Fishing](docs/screenshot.png)
 
@@ -102,7 +102,7 @@ npm run dev:mp
 ```
 
 Open `http://localhost:8787` and choose **Play Together** on the title screen.
-Locally, `ACCESS_REQUIRED=false`, so no Cloudflare Access is needed.
+Locally, the client and Worker share the same origin, so no `MP_ORIGIN` injection is needed.
 
 ```bash
 node scripts/run-tests.mjs
@@ -124,44 +124,22 @@ Pushes to `main` deploy GitHub Pages and the Worker independently.
 
 - Workflow: `.github/workflows/deploy-pages.yml`
 - Project-site base path: `/lakeside-fishing/` (relative `./` paths resolve correctly)
-- Set repository variable **`MP_ORIGIN`** to your multiplayer Worker origin (e.g. `https://your-worker.example.workers.dev`). The deploy step injects it into `<meta name="lakeside-mp-origin">` in `index.html` — no production URL is hardcoded in source.
+- Set GitHub Actions **secret** **`MP_ORIGIN`** to the origin of the existing multiplayer Worker. The deploy step injects it into `<meta name="lakeside-mp-origin">` in `index.html`. **Never commit a real production Worker URL to the repository, README, or tracked source.**
 - When unset, the client falls back to same-origin (local Worker dev).
 
 ### Cloudflare Worker (multiplayer only)
 
 - Workflow: `.github/workflows/deploy-cloudflare.yml` (`wrangler deploy --env production`)
 - Does not serve static assets — only `/ws` and `/api/voice/join`.
+- Security is **URL obscurity**: anyone who knows the Worker URL may join. There is no Cloudflare Access or JWT verification.
 
 Production Worker variables (`env.production.vars` in `wrangler.jsonc` or the dashboard):
 
 | Variable | Purpose |
 | --- | --- |
-| `ACCESS_REQUIRED` | `true` in production (`false` for local dev) |
-| `CF_ACCESS_TEAM_DOMAIN` | Access team domain (e.g. `yourteam.cloudflareaccess.com`) |
-| `CF_ACCESS_AUD` | Access application AUD tag |
-| `CORS_ORIGINS` | GitHub Pages origin (e.g. `https://teitasan.github.io`) |
+| `CORS_ORIGINS` | GitHub Pages origin (e.g. `https://teitasan.github.io`) for cross-origin voice API |
 
 Secret: `REALTIMEKIT_API_TOKEN` (via `wrangler secret put`, as before).
-
-### Cloudflare Access (manual setup — required)
-
-Before opening multiplayer to players, configure Zero Trust so **one Access application** (or equivalent coverage) protects **both**:
-
-1. **`/ws`** — WebSocket upgrade
-2. **`/api/voice/join`** — voice join API
-
-Recommended steps:
-
-1. Cloudflare Zero Trust → **Access** → **Applications** → create a Self-hosted app
-2. Set **Application domain** to your Worker hostname
-3. Add path rules covering `/ws` and `/api/voice/join` (two apps is also fine)
-4. Configure an allow **Policy** (IdP, email, group, etc.)
-5. Copy the **Application Audience (AUD) Tag** into `CF_ACCESS_AUD`
-6. Set your team domain in `CF_ACCESS_TEAM_DOMAIN`
-
-The Worker verifies `Cf-Access-Jwt-Assertion`. With `ACCESS_REQUIRED=true` and Access not configured, clients receive 401.
-
-**Cross-origin from GitHub Pages:** players must sign in to Access on the Worker domain at least once so the browser stores Worker-scoped cookies. Open the Worker URL to log in, then use **Play Together** on the Pages build.
 
 ---
 
@@ -172,4 +150,4 @@ The Worker verifies `Cf-Access-Jwt-Assertion`. With `ACCESS_REQUIRED=true` and A
 - Post-processing: [postprocessing](https://github.com/pmndrs/postprocessing) (bundled in-repo)
 
 Single-player → [teitasan.github.io/lakeside-fishing](https://teitasan.github.io/lakeside-fishing/)
-Multiplayer Worker → URL from repository variable `MP_ORIGIN`
+Multiplayer Worker → injected via GitHub Actions secret `MP_ORIGIN` (not stored in the repo)

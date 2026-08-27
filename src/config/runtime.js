@@ -43,8 +43,3 @@ export function multiplayerVoiceJoinUrl(room = DEFAULT_ROOM) {
   u.searchParams.set('room', String(room || DEFAULT_ROOM).slice(0, 32));
   return u.toString();
 }
-
-export function isCrossOriginMultiplayer() {
-  if (typeof location === 'undefined') return false;
-  return getMultiplayerOrigin() !== location.origin;
-}

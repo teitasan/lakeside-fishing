@@ -9,7 +9,7 @@
 ### ▶ [ブラウザで遊ぶ](https://teitasan.github.io/lakeside-fishing/)
 
 インストール不要・ブラウザだけで完結。音が出ます。PC + マウス推奨。  
-**日本語 / English** 両対応（タイトル画面またはメニューから切替）。タイトルから **みんなで遊ぶ** で同じ湖に入れます（マルチプレイは Cloudflare Worker 経由・Access 認証が必要）。
+**日本語 / English** 両対応（タイトル画面またはメニューから切替）。タイトルから **みんなで遊ぶ** で同じ湖に入れます（マルチプレイは Cloudflare Worker 経由。Worker URL は非公開で、知っている人だけ参加できます）。
 
 ![Lakeside Fishing](docs/screenshot.png)
 
@@ -102,7 +102,7 @@ npm run dev:mp
 ```
 
 `http://localhost:8787` を開き、タイトルから **みんなで遊ぶ** を選ぶ。
-ローカルでは `ACCESS_REQUIRED=false` のため Cloudflare Access なしで接続できます。
+ローカルでは Worker と同一 origin のため、GitHub Actions シークレット `MP_ORIGIN` の注入なしで接続できます。
 
 ```bash
 node scripts/run-tests.mjs
@@ -124,44 +124,22 @@ node scripts/run-mp-protocol-test.mjs
 
 - ワークフロー: `.github/workflows/deploy-pages.yml`
 - プロジェクトサイトのベースパス: `/lakeside-fishing/`（相対パス `./` で解決）
-- リポジトリ変数 **`MP_ORIGIN`** にマルチプレイ Worker の origin（例: `https://your-worker.example.workers.dev`）を設定すると、デプロイ時に `index.html` の `<meta name="lakeside-mp-origin">` へ注入されます。ソースコードに本番 URL を直書きしません。
+- GitHub Actions **シークレット** **`MP_ORIGIN`** に、既存マルチプレイ Worker のoriginを設定すると、デプロイ時に `index.html` の `<meta name="lakeside-mp-origin">` へ注入されます。**本番 Worker URL をリポジトリ・README・追跡ソースにコミットしないでください。**
 - 未設定の場合は同一 origin フォールバック（ローカル Worker 開発向け）。
 
 ### Cloudflare Worker（マルチプレイ専用）
 
 - ワークフロー: `.github/workflows/deploy-cloudflare.yml`（`wrangler deploy --env production`）
 - 静的アセットは配信しません。`/ws` と `/api/voice/join` のみ。
+- セキュリティは **URL の非公開** によるものです。Worker URL を知っている人は参加できます。Access や JWT 検証は行いません。
 
 本番 Worker に設定する環境変数（`wrangler.jsonc` の `env.production.vars` またはダッシュボード）:
 
 | 変数 | 用途 |
 | --- | --- |
-| `ACCESS_REQUIRED` | 本番は `true`（ローカル dev は `false`） |
-| `CF_ACCESS_TEAM_DOMAIN` | Access チームドメイン（例: `yourteam.cloudflareaccess.com`） |
-| `CF_ACCESS_AUD` | Access アプリケーションの AUD タグ |
-| `CORS_ORIGINS` | GitHub Pages の origin（例: `https://teitasan.github.io`） |
+| `CORS_ORIGINS` | GitHub Pages の origin（例: `https://teitasan.github.io`）。ボイス API のクロスオリジン用 |
 
 シークレット: `REALTIMEKIT_API_TOKEN`（既存どおり `wrangler secret put`）。
-
-### Cloudflare Access（手動設定・必須）
-
-マルチプレイを公開する前に、Zero Trust で **同じ Access アプリケーション** が次の両方を保護していることを確認してください。
-
-1. **`/ws`** — WebSocket アップグレード（パス: `/ws` または `/ws*`)
-2. **`/api/voice/join`** — ボイス参加 API（パス: `/api/voice/join` または `/api/voice/*`)
-
-推奨手順:
-
-1. Cloudflare Zero Trust → **Access** → **Applications** → Self-hosted アプリを作成
-2. **Application domain** に Worker のホスト名を指定
-3. **Path** に `/ws` と `/api/voice/join` をカバーするルールを追加（別アプリ 2 本でも可）
-4. 許可する IdP / メール / グループの **Policy** を設定
-5. アプリ詳細の **Application Audience (AUD) Tag** を `CF_ACCESS_AUD` に設定
-6. チームドメインを `CF_ACCESS_TEAM_DOMAIN` に設定
-
-Worker は `Cf-Access-Jwt-Assertion` を検証します。Access 未設定のまま `ACCESS_REQUIRED=true` だと接続は 401 になります。
-
-**GitHub Pages からのクロスオリジン接続:** プレイヤーは Worker ドメインで Access に一度サインインしている必要があります（ブラウザが Worker 向け Cookie を保持）。初回は Worker URL を開いてログインしてから、Pages 版で **みんなで遊ぶ** を選んでください。
 
 ---
 
@@ -172,4 +150,4 @@ Worker は `Cf-Access-Jwt-Assertion` を検証します。Access 未設定のま
 - 後処理: [postprocessing](https://github.com/pmndrs/postprocessing)（リポジトリ内に同梱）
 
 シングルプレイ → [teitasan.github.io/lakeside-fishing](https://teitasan.github.io/lakeside-fishing/)
-マルチプレイ Worker → リポジトリ変数 `MP_ORIGIN` で指定した Worker URL
+マルチプレイ Worker → GitHub Actions シークレット `MP_ORIGIN` で注入（リポジトリには含めない）
