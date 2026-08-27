@@ -3,7 +3,7 @@
    （three の ACES トーンマップ / sRGB 変換を自前で適用して
      標準マテリアルと見た目を揃える）
    =========================================================== */
-import { waveGLSL } from './waveField.js?v=20260828-wavefield3';
+import { waveGLSL } from './waveField.js?v=20260828-lakescale1';
 
 export const COMMON_GLSL = /* glsl */ `
 float hash21(vec2 p) {

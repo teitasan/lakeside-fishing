@@ -11,7 +11,7 @@ import { reflectCameraMatrixY } from './reflectionMath.js?v=20260827-lkwgfx';
 import {
   WAVES, MAX_WAVE_AMP, waveGLSL, waveHeight, waveSlope, waveDisplace, shoreRunUp, shoalGain,
   wavePhaseOffset, wavePhaseOffsetGrad,
-} from './waveField.js?v=20260828-wavefield3';
+} from './waveField.js?v=20260828-lakescale1';
 
 /* 波の定義そのものは waveField.js（CPU/GPU 共通の単一定義元）にある。
    従来の import 経路を壊さないよう、ここから再輸出しておく */
@@ -141,9 +141,9 @@ export class Water {
       uRippleNormal: { value: this.rippleNormalTex },
       /* 渚の泡もランタイムで詰めたいので出しておく
          x,y = 先端の白線の内外幅 / z,w = 後方の泡帯の内外幅 */
-      uFoamTip: { value: new THREE.Vector4(0.030, 0.004, 0.085, 0.010) },
+      uFoamTip: { value: new THREE.Vector4(0.016, 0.002, 0.042, 0.005) },
       // x = レースの下閾値, y = 上閾値, z = 泡の合成量, w = 古い泡の減衰
-      uFoamLace: { value: new THREE.Vector4(0.54, 0.80, 0.90, 0.90) },
+      uFoamLace: { value: new THREE.Vector4(0.62, 0.88, 0.55, 0.92) },
       /* 水越しの見え方の内訳。切り分け・調整用に uniform で出しておく
          x = 水の色（内向き散乱）, y = 逆光の透け, z = 水面反射 */
       uMixAmt: { value: new THREE.Vector3(1.0, 1.0, 1.0) },

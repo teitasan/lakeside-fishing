@@ -24,8 +24,13 @@ export const PHASE_W = [0.28, 0.42, 0.60, 0.78, 0.96];
  */
 export const CHOPPINESS = 2.2;
 
-/** 渚の遡上量（m 単位のゲイン）。長い成分だけを使うので風波より周期が長い */
-export const SWASH_GAIN = 0.85;
+/**
+ * 渚の遡上量（m 単位のゲイン）。
+ * ここは「湖」なので、砂浜のような数メートルの打ち上げ／引き波にはしない。
+ * 0.85 だと汀線が 5m 近く往復して海になる。0.15 で往復 1m 弱の、
+ * 岸をぺちゃぺちゃ舐める程度の動きになる（止めると汀線が凍って見える）。
+ */
+export const SWASH_GAIN = 0.15;
 
 export const W = WAVES.map((w) => {
   const l = Math.hypot(w.dx, w.dz);
@@ -124,14 +129,19 @@ export function shoreRunUp(x, z, t, wind = 1) {
 
 /**
  * 水深に応じた波の振幅係数。
- * 深場は 1、浅場では一度盛り上がってから（浅水変形＝shoaling）岸で 0 に落ちる。
- * 岸ぎわで単に減衰させるだけだと波が「岸に近づくほど静まる」逆の絵になる。
+ * 深場は 1、浅場では一度わずかに盛り上がってから（浅水変形＝shoaling）
+ * 岸で 0 に落ちる。岸ぎわで単に減衰させるだけだと波が「岸に近づくほど
+ * 静まる」逆の絵になるので、盛り上がり自体は残す。
+ * ただし湖にうねりは来ないので、+12% 程度に抑える（+45% は砕ける前の
+ * 海の波の膨らみで、渚が磯みたいに見える）。
  */
+export const SHOAL_BUMP = 0.12;
+
 export function shoalGain(depth) {
   const d = depth > 0 ? depth : 0;
   const damp = smoothstep(0, 1.6, d) * 0.85 + 0.15 * smoothstep(0, 5, d);
   const e = (d - 0.95) / 0.75;
-  return damp * (1 + 0.45 * Math.exp(-e * e));
+  return damp * (1 + SHOAL_BUMP * Math.exp(-e * e));
 }
 
 /**
@@ -206,7 +216,7 @@ float ${fn('shoalGain')}(float depth) {
   float d = max(depth, 0.0);
   float damp = smoothstep(0.0, 1.6, d) * 0.85 + 0.15 * smoothstep(0.0, 5.0, d);
   float e = (d - 0.95) / 0.75;
-  return damp * (1.0 + 0.45 * exp(-e * e));
+  return damp * (1.0 + ${SHOAL_BUMP.toFixed(5)} * exp(-e * e));
 }
 `;
 }

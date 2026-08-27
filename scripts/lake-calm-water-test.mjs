@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import assert from 'node:assert/strict';
 import {
-  WAVES, PHASE_W, W, MAX_WAVE_AMP, WAVE_STEEPNESS, CHOPPINESS, SWASH_GAIN,
+  WAVES, PHASE_W, W, MAX_WAVE_AMP, WAVE_STEEPNESS, CHOPPINESS, SWASH_GAIN, SHOAL_BUMP,
   waveHeight, waveSlope, waveDisplace, shoreRunUp, shoalGain, wavePhaseOffset, waveGLSL,
 } from '../src/waveField.js';
 import { makeTileableFoldCaustics } from '../src/tileableNoise.js';
@@ -63,11 +63,21 @@ assert.ok(WAVE_STEEPNESS < 1,
 }
 
 /* ---------------- 浅水変形（shoaling） ---------------- */
+const pureDamp = (d) => {
+  const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  return ss(0, 1.6, d) * 0.85 + 0.15 * ss(0, 5, d);
+};
 assert.equal(shoalGain(0), 0, 'no waves exactly at the waterline');
 assert.ok(shoalGain(0.95) > shoalGain(0.3) * 4, 'waves must swell before the shore');
-assert.ok(shoalGain(0.95) > shoalGain(5) * 0.7, 'the shoaling bump must be substantial');
 assert.ok(Math.abs(shoalGain(5) - 1) < 1e-6, 'deep water must be unchanged (gain 1)');
 assert.ok(shoalGain(2) < 1, 'shoaling must not brighten the whole lake');
+{
+  // 盛り上がりは残すが、湖にうねりは来ないので海の surf 並みには膨らませない
+  const bump = shoalGain(0.95) / pureDamp(0.95);
+  assert.ok(bump > 1.05, `the shoaling bump must still be visible, got ${bump}`);
+  assert.ok(bump < 1.25, `a lake must not swell like pre-breaking surf, got ${bump}`);
+  assert.ok(SHOAL_BUMP > 0 && SHOAL_BUMP < 0.2, `SHOAL_BUMP must stay lake-scale, got ${SHOAL_BUMP}`);
+}
 
 /* ---------------- 渚の遡上（swash） ---------------- */
 {
@@ -78,13 +88,20 @@ assert.ok(shoalGain(2) < 1, 'shoaling must not brighten the whole lake');
       mn = Math.min(mn, r); mx = Math.max(mx, r); sum += r; n++;
     }
   }
-  assert.ok(mx > 0.06, `run-up must actually push water up the beach, got ${mx}`);
-  assert.ok(mn < -0.06, `back-wash must actually expose sand, got ${mn}`);
-  assert.ok(mx < 0.35, `run-up must stay lake-scale, got ${mx}`);
+  assert.ok(mx > 0.012, `run-up must still move the waterline, got ${mx}`);
+  assert.ok(mn < -0.012, `back-wash must still expose a little sand, got ${mn}`);
+  /* ここは「湖」なので、遡上は砂浜のスケールにしない。
+     典型的な岸の勾配 0.065 で汀線の往復が 1.5m を超えると海に見える
+     （0.85 のときは 4.9m 動いていて「波打ち際が荒すぎて海みたい」だった） */
+  const shoreSlope = 0.065;
+  const sweep = (mx - mn) / shoreSlope;
+  assert.ok(sweep > 0.25, `the waterline must not look frozen, got ${sweep}m`);
+  assert.ok(sweep < 1.5, `a lake shoreline must only lap, not run up a beach, got ${sweep}m`);
   // 平均が 0 付近でないと汀線の平均位置がずれ、水深・キャスト距離の意味が変わる
   assert.ok(Math.abs(sum / n) < 0.03, `mean waterline must not drift, got ${sum / n}`);
 }
 assert.ok(SWASH_GAIN > 0, 'swash gain must be positive');
+assert.ok(SWASH_GAIN < 0.3, `swash gain must stay lake-scale, got ${SWASH_GAIN}`);
 
 /* ---------------- CPU / GPU の式が同一であること ---------------- */
 {
@@ -169,8 +186,10 @@ assert.match(waterSrc, /reflSize = opts\.quality === 'high' \? 1024 : 512/,
 // 泡：細かいスケール + 先端の白線 + 時間減衰
 assert.match(waterSrc, /float tip = smoothstep\(uFoamTip\.x, uFoamTip\.y, wet\);/,
   'the swash tip must produce a tight bright line');
-assert.match(waterSrc, /uFoamTip: \{ value: new THREE\.Vector4\(0\.030, 0\.004, 0\.085, 0\.010\) \}/,
-  'the shore foam must stay a narrow line, not a metres-wide white field');
+assert.match(waterSrc, /uFoamTip: \{ value: new THREE\.Vector4\(0\.016, 0\.002, 0\.042, 0\.005\) \}/,
+  'a lake shore only gets a thin lapping line of foam, never a surf band');
+assert.match(waterSrc, /uFoamLace: \{ value: new THREE\.Vector4\(0\.62, 0\.88, 0\.55, 0\.92\) \}/,
+  'lake foam must stay sparse and faint');
 assert.match(waterSrc, /float age = smoothstep\(0\.04, 0\.22, wet\);/,
   'foam must fade with age behind the tip');
 assert.match(waterSrc, /vnoise\(sp \* 17\.0/, 'foam must carry a fine lace octave');
