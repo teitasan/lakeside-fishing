@@ -111,7 +111,9 @@ uniform vec2 uCaustShape;    // x = 積のゲイン, y = 立ち上がりの指�
 uniform vec2 uCaustRange;    // x = 明線の上限, y = 最終強度
 uniform vec2 uCaustDepth;    // 水深フェード（開始, 終了）
 uniform vec2 uCaustDist;     // 視距離フェード（開始, 終了）
-uniform float uCaustWarp;    // 波の傾きで歪める量
+uniform vec2 uCaustFar;      // 深すぎる所で消すフェード（開始, 終了）
+uniform vec2 uCaustWarp;     // x = 波の傾きで歪める量, y = 有効深度の上限(m)
+uniform float uCaustMag;     // 深さ 1m あたり網目が何倍に広がるか
 uniform vec3 uCaustMixW;     // 2 枚の合成比（A, B, A*B）
 
 ${waveGLSL({ prefix: 'cs', slim: true })}
@@ -131,13 +133,20 @@ vec3 causticLight(vec3 worldPos, vec3 viewNormal) {
   vec2 sunN = sl > 1e-4 ? sd.xz / sl : vec2(0.0, 1.0);
   vec2 surf = worldPos.xz + sunN * depth * tw;
 
-  /* 水面の傾きで網目を歪める＝波と同期して揺れる */
+  /* 水面の傾きで網目を歪める＝波と同期して揺れる。
+     ただし横ずれは深さに比例するので、無制限だと深場で網目 2〜4 セルぶん
+     滑り、底面全体がスロッシングして見える。有効深度を頭打ちにする */
   vec2 slope = csWaveD(surf, uCaustTime);
-  vec2 q = surf + slope * (depth * uCaustWarp + 0.6);
+  vec2 q = surf + slope * (min(depth, uCaustWarp.y) * uCaustWarp.x + 0.6);
+
+  /* 屈折した光束は進むほど広がるので、深い湖底に写る網目ほど大きくなる。
+     世界固定スケールのままだと深場でも数十cmの細かい網目が底一面を覆い、
+     上の横ずれと相まって「底が揺れている」ように見えてしまう */
+  float mag = 1.0 / (1.0 + depth * uCaustMag);
 
   float t = uCaustTime;
-  vec3 a = texture2D(uCaustTex, q * uCaustScale.x + vec2( 0.011, 0.007) * t).rgb;
-  vec3 b = texture2D(uCaustTex, q * uCaustScale.y + vec2(-0.008, 0.012) * t + vec2(0.37, 0.61)).rgb;
+  vec3 a = texture2D(uCaustTex, (q * uCaustScale.x + vec2( 0.011, 0.007) * t) * mag).rgb;
+  vec3 b = texture2D(uCaustTex, (q * uCaustScale.y + vec2(-0.008, 0.012) * t) * mag + vec2(0.37, 0.61)).rgb;
   /* 実際のコースティクスは「1 枚の網目が粗細で重なったもの」なので、
      既定は 2 枚の和。積にすると交点だけが光る点描になってしまう */
   vec3 net = a * uCaustMixW.x + b * uCaustMixW.y + a * b * uCaustMixW.z;
@@ -149,7 +158,10 @@ vec3 causticLight(vec3 worldPos, vec3 viewNormal) {
      （実際の水でも 20m 以上先のコースティクスは見えない） */
   float viewDist = length(worldPos - cameraPosition);
   float fade = (1.0 - smoothstep(uCaustDist.x, uCaustDist.y, viewDist));
-  fade *= smoothstep(uCaustDepth.x, uCaustDepth.y, depth) * (1.0 - smoothstep(6.0, 26.0, depth));
+  /* 深いほど波面の焦点はぼけて網目が消える。湖の濁りだと 10m 先には
+     もう届かないので、26m まで引っぱらずに早めに畳む */
+  fade *= smoothstep(uCaustDepth.x, uCaustDepth.y, depth)
+        * (1.0 - smoothstep(uCaustFar.x, uCaustFar.y, depth));
   /* 上を向いた面ほど強い。これが無いと水際の岩の側面まで青白く光り、
      低ポリの岩が氷の塊に見えてしまう */
   vec3 upView = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz);

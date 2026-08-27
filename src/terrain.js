@@ -2,7 +2,7 @@
    地形・湖底・岸辺の装飾・桟橋
    =========================================================== */
 import * as THREE from 'three';
-import { CAUSTICS_GLSL } from './shaders.js?v=20260828-uwgfx18';
+import { CAUSTICS_GLSL } from './shaders.js?v=20260828-caustdeep1';
 import { waveGLSL } from './waveField.js?v=20260828-lakescale1';
 import { UnderwaterPropScatter, addUnderwaterCaustics } from './underwaterProps.js?v=20260828-uwgfx18';
 import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js';

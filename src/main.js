@@ -1,7 +1,7 @@
 /* ===========================================================
    エントリポイント
    =========================================================== */
-import { Game, AUTOSTART_KEY } from './game.js?v=20260827-docktex1';
+import { Game, AUTOSTART_KEY } from './game.js?v=20260828-caustdeep1';
 import { hasSave } from './save.js';
 import { iconHtml } from './icons.js';
 import { t, setLang } from './i18n.js';

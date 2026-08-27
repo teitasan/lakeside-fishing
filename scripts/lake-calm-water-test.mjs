@@ -268,6 +268,20 @@ assert.match(shadersSrc, /uniform sampler2D uCaustTex;/,
   'caustics must come from a baked texture, not fragment fbm');
 assert.match(shadersSrc, /vec2 slope = csWaveD\(surf, uCaustTime\);/,
   'caustics must be warped by the real wave slope');
+/* 深場でのふるまい。横ずれは深さに比例するので上限を切らないと、深い湖底で
+   網目が数セルぶん滑って「底面全体が揺れている」ように見える */
+assert.match(shadersSrc, /vec2 q = surf \+ slope \* \(min\(depth, uCaustWarp\.y\) \* uCaustWarp\.x \+ 0\.6\);/,
+  'the caustic warp must cap the depth it scales with, or the deep bed sloshes');
+assert.match(shadersSrc, /float mag = 1\.0 \/ \(1\.0 \+ depth \* uCaustMag\);/,
+  'the caustic net must magnify with depth: a fixed world scale puts a fine mesh over the whole deep floor');
+assert.match(shadersSrc, /\* \(1\.0 - smoothstep\(uCaustFar\.x, uCaustFar\.y, depth\)\);/,
+  'caustics must fade out with depth through a tunable range');
+assert.doesNotMatch(shadersSrc, /1\.0 - smoothstep\(6\.0, 26\.0, depth\)/,
+  'a lake must not keep caustics down to 26m');
+assert.match(gameSrc, /uCaustWarp: \{ value: new THREE\.Vector2\(1\.15, 2\.5\) \}/,
+  'the warp depth cap must stay a few metres');
+assert.match(gameSrc, /uCaustFar: \{ value: new THREE\.Vector2\(3\.5, 12\.0\) \}/,
+  'caustics must be gone by ~12m in lake water');
 assert.match(shadersSrc, /float sw = sa \/ 1\.333;/,
   'the caustic projection point must be refracted through Snell');
 assert.doesNotMatch(shadersSrc, /caustFbm2\(/, 'the old blobby fbm caustics must be gone');
