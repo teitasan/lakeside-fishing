@@ -2,9 +2,9 @@
    地形・湖底・岸辺の装飾・桟橋
    =========================================================== */
 import * as THREE from 'three';
-import { CAUSTICS_GLSL } from './shaders.js?v=20260828-uwgfx15';
+import { CAUSTICS_GLSL } from './shaders.js?v=20260828-uwgfx18';
 import { waveGLSL } from './waveField.js?v=20260828-wavefield3';
-import { UnderwaterPropScatter, addUnderwaterCaustics } from './underwaterProps.js?v=20260828-uwgfx15';
+import { UnderwaterPropScatter, addUnderwaterCaustics } from './underwaterProps.js?v=20260828-uwgfx18';
 import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js';
 import { makeTileableHeightField } from './tileableNoise.js?v=20260827-orgnoise4';
 import { WORLD_SIZE, WATER_REGION, MAX_DEPTH, resolveLake } from './lakefield.js';
@@ -13,6 +13,76 @@ export { WORLD_SIZE, WATER_REGION, MAX_DEPTH };
 
 const DOCK_HALF_W = 1.62;   // 床の半幅（見た目 3.4m のうち内側）
 const OBS_CELL = 8;         // 障害物グリッドのセルサイズ(m)
+const DOCK_WOOD_TILE = 0.62; // 桟橋テクスチャ 1 枚ぶんの実寸 (m)
+
+/** BoxGeometry（1 セグメント）の各面 UV を実寸 / tile でスケールする */
+function scaleBoxUVs(geo, width, height, depth, tile = DOCK_WOOD_TILE) {
+  const uv = geo.attributes.uv;
+  const faceWH = [
+    [depth, height], [depth, height],
+    [width, depth], [width, depth],
+    [width, height], [width, height],
+  ];
+  for (let f = 0; f < 6; f++) {
+    const uScale = faceWH[f][0] / tile;
+    const vScale = faceWH[f][1] / tile;
+    for (let i = 0; i < 4; i++) {
+      const idx = f * 4 + i;
+      uv.setXY(idx, uv.getX(idx) * uScale, uv.getY(idx) * vScale);
+    }
+  }
+  uv.needsUpdate = true;
+}
+
+/** 杭テクスチャの縦木目を、箱の長辺へ回す */
+function swapBoxUVs(geo) {
+  const uv = geo.attributes.uv;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getY(i), uv.getX(i));
+  uv.needsUpdate = true;
+}
+
+function scaleCylinderUVs(geo, radius, height, tile = DOCK_WOOD_TILE) {
+  const uv = geo.attributes.uv;
+  const uScale = (Math.PI * 2 * radius) / tile;
+  const vScale = height / tile;
+  for (let i = 0; i < uv.count; i++) {
+    uv.setXY(i, uv.getX(i) * uScale, uv.getY(i) * vScale);
+  }
+  uv.needsUpdate = true;
+}
+
+function makeDockWoodMat(map, fallbackColor, roughness, causticsUniforms, cacheKey, mapTint = 0xffffff) {
+  return addUnderwaterCaustics(
+    new THREE.MeshStandardMaterial({
+      map: map || null,
+      color: map ? mapTint : fallbackColor,
+      roughness,
+    }),
+    causticsUniforms,
+    cacheKey
+  );
+}
+
+/** InstancedMesh の Y スケールを UV.y に乗せる（杭の高さごとに木目が伸びないように） */
+function withInstanceUvY(mat, cacheKey) {
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (shader) => {
+    if (typeof prev === 'function') prev(shader);
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <uv_vertex>',
+      `#include <uv_vertex>
+#ifdef USE_MAP
+#ifdef USE_INSTANCING
+        vMapUv.y *= length(instanceMatrix[1].xyz);
+#endif
+#endif`
+    );
+  };
+  const prevKey = mat.customProgramCacheKey;
+  mat.customProgramCacheKey = () =>
+    `${typeof prevKey === 'function' ? prevKey() : cacheKey}-inst-uvy`;
+  return mat;
+}
 
 const tmpColor = new THREE.Color();
 const tmpSand = new THREE.Color();
@@ -361,6 +431,7 @@ export class Terrain {
       uShoreTop: { value: 0.34 },
     };
     this._causticsUniforms = opts.causticsUniforms || null;
+    this._dockTextures = opts.dockTextures || null;
     this._buildTerrainMesh(opts.bedTextures || null);
     this._findDock();
     this._buildDock();
@@ -393,11 +464,9 @@ export class Terrain {
     u.uShoreWind.value = wind;
   }
 
-  /** 砂地・岩場・泥底のタイルテクスチャを読み込む */
-  static loadBedTextures() {
-    const loader = new THREE.TextureLoader();
-    const load = (url) => new Promise((resolve, reject) => {
-      loader.load(url, (tex) => {
+  static _loadRepeatTexture(url) {
+    return new Promise((resolve, reject) => {
+      new THREE.TextureLoader().load(url, (tex) => {
         tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
         tex.colorSpace = THREE.SRGBColorSpace;
         tex.anisotropy = 4;
@@ -405,11 +474,23 @@ export class Terrain {
         resolve(tex);
       }, undefined, reject);
     });
+  }
+
+  /** 砂地・岩場・泥底のタイルテクスチャを読み込む */
+  static loadBedTextures() {
     return Promise.all([
-      load('./assets/textures/bed-sand.webp'),
-      load('./assets/textures/bed-rock.webp'),
-      load('./assets/textures/bed-mud.webp'),
+      Terrain._loadRepeatTexture('./assets/textures/bed-sand.webp'),
+      Terrain._loadRepeatTexture('./assets/textures/bed-rock.webp'),
+      Terrain._loadRepeatTexture('./assets/textures/bed-mud.webp'),
     ]).then(([sand, rock, mud]) => ({ sand, rock, mud }));
+  }
+
+  /** 桟橋の木材アルベド（床板 / 杭・桁） */
+  static loadDockTextures() {
+    return Promise.all([
+      Terrain._loadRepeatTexture('./assets/textures/dock-plank.webp'),
+      Terrain._loadRepeatTexture('./assets/textures/dock-piling.webp'),
+    ]).then(([plank, piling]) => ({ plank, piling }));
   }
 
   /* ---------------- 高さ関数（lakefield へ委譲） ---------------- */
@@ -712,15 +793,19 @@ export class Terrain {
 
   _buildDock() {
     const g = new THREE.Group();
-    const woodMat = addUnderwaterCaustics(
-      new THREE.MeshStandardMaterial({ color: 0x7a5b3c, roughness: 0.92 }),
-      this._causticsUniforms,
-      'dock-wood-caustics-v1'
+    const plankMap = this._dockTextures?.plank || null;
+    const pilingMap = this._dockTextures?.piling || null;
+    const woodMat = makeDockWoodMat(
+      plankMap, 0x7a5b3c, 0.92, this._causticsUniforms, 'dock-wood-caustics-v1'
     );
-    const woodDark = addUnderwaterCaustics(
-      new THREE.MeshStandardMaterial({ color: 0x5a4029, roughness: 0.95 }),
-      this._causticsUniforms,
-      'dock-dark-caustics-v1'
+    const woodDark = makeDockWoodMat(
+      pilingMap, 0x5a4029, 0.95, this._causticsUniforms, 'dock-dark-caustics-v1', 0xc8b49a
+    );
+    const postMat = withInstanceUvY(
+      makeDockWoodMat(
+        pilingMap, 0x5a4029, 0.95, this._causticsUniforms, 'dock-post-caustics-v1', 0xc8b49a
+      ),
+      'dock-post-caustics-v1'
     );
 
     const a = this.dockStart, b = this.dockEnd;
@@ -733,6 +818,7 @@ export class Terrain {
     // 板（インスタンス）
     const plankCount = Math.max(6, Math.floor(len / 0.55));
     const plankGeo = new THREE.BoxGeometry(W, 0.12, 0.42);
+    scaleBoxUVs(plankGeo, W, 0.12, 0.42);
     const planks = new THREE.InstancedMesh(plankGeo, woodMat, plankCount);
     planks.castShadow = true; planks.receiveShadow = true;
     const m = new THREE.Matrix4();
@@ -751,6 +837,8 @@ export class Terrain {
 
     // 縦桁
     const beamGeo = new THREE.BoxGeometry(0.22, 0.28, len);
+    scaleBoxUVs(beamGeo, 0.22, 0.28, len);
+    swapBoxUVs(beamGeo);
     for (const off of [-W / 2 + 0.2, W / 2 - 0.2]) {
       const beam = new THREE.Mesh(beamGeo, woodDark);
       beam.position.copy(mid).setY(this.dockY - 0.2);
@@ -763,8 +851,9 @@ export class Terrain {
 
     // 杭
     const postGeo = new THREE.CylinderGeometry(0.16, 0.19, 1, 7);
+    scaleCylinderUVs(postGeo, 0.175, 1);
     const postRows = Math.max(2, Math.floor(len / 3.2));
-    const posts = new THREE.InstancedMesh(postGeo, woodDark, postRows * 2);
+    const posts = new THREE.InstancedMesh(postGeo, postMat, postRows * 2);
     posts.castShadow = true;
     let pi = 0;
     for (let i = 0; i < postRows; i++) {
@@ -789,7 +878,11 @@ export class Terrain {
     // 手すり（先端の3方向）
     const railMat = woodDark;
     const railPost = new THREE.CylinderGeometry(0.07, 0.08, 0.95, 6);
-    const railBar = new THREE.BoxGeometry(0.09, 0.09, 1);
+    scaleCylinderUVs(railPost, 0.075, 0.95);
+    const barLen = W - 0.4;
+    const railBar = new THREE.BoxGeometry(0.09, 0.09, barLen);
+    scaleBoxUVs(railBar, 0.09, 0.09, barLen);
+    swapBoxUVs(railBar);
     const tip = b.clone();
     const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
     const corners = [
@@ -807,12 +900,13 @@ export class Terrain {
     // 先端の横バー
     const bar = new THREE.Mesh(railBar, railMat);
     bar.position.copy(tip).setY(this.dockY + 0.9);
-    bar.scale.z = W - 0.4;
     bar.rotation.y = yaw + Math.PI / 2;
     g.add(bar);
 
     // 灯篭（夜に点く）
-    const lampPost = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 2.2, 7), woodDark);
+    const lampPostGeo = new THREE.CylinderGeometry(0.08, 0.1, 2.2, 7);
+    scaleCylinderUVs(lampPostGeo, 0.09, 2.2);
+    const lampPost = new THREE.Mesh(lampPostGeo, woodDark);
     const lampBase = a.clone().addScaledVector(dir, 1.2).addScaledVector(right, W / 2 - 0.15);
     lampPost.position.copy(lampBase).setY(this.dockY + 1.0);
     lampPost.castShadow = true;
@@ -833,10 +927,8 @@ export class Terrain {
     const boat = new THREE.Group();
     const hull = new THREE.Mesh(
       new THREE.CapsuleGeometry(0.62, 2.6, 4, 10),
-      addUnderwaterCaustics(
-        new THREE.MeshStandardMaterial({ color: 0x8a6a45, roughness: 0.9 }),
-        this._causticsUniforms,
-        'boat-hull-caustics-v1'
+      makeDockWoodMat(
+        pilingMap, 0x8a6a45, 0.9, this._causticsUniforms, 'boat-hull-caustics-v1'
       )
     );
     hull.rotation.z = Math.PI / 2;

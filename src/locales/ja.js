@@ -42,7 +42,6 @@ export default {
       namePh: 'なまえ（12文字まで）',
       defaultName: 'つりびと',
       footHtml: 'Three.js 製 / 音が出ます <img class="ico inline" src="./assets/icons/ui-sound.webp" alt="" width="14" height="14"> <a href="./manual.html" target="_blank" rel="noopener">パラメータ解説を見る ↗</a> <a href="./motion-editor.html" target="_blank" rel="noopener">モーションを調整する ↗</a>',
-      creditHtml: '<small style="opacity:.6">釣り人と竿のモデル: <a href="https://quaternius.com/" target="_blank" rel="noopener">Quaternius</a>（CC0）</small>',
     },
 
     hud: {

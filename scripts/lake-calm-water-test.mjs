@@ -184,6 +184,18 @@ assert.doesNotMatch(waterSrc, /float breakThresh = mix\(0\.26, 0\.74/,
 // 屈折：浅場の湖底がちゃんと揺れる
 assert.match(waterSrc, /mix\(0\.020, 0\.052, 1\.0 - uRain \* 0\.35\)/,
   'refraction offset must be big enough to wobble the shallow bed');
+assert.match(waterSrc, /bool refrBad = sceneZ < vFogDepth - 0\.02 \|\| abs\(sceneZ - sceneZ0\) > 2\.5;/,
+  'refraction must not sample things in front of the surface: dock posts and the rod would smear onto the water');
+assert.match(waterSrc, /float path = max\(0\.0, sceneZ0 - vFlatDepth\) \* rayScale;/,
+  'water thickness must come from the un-offset sample and the still-water plane, '
+  + 'or the veil pulses with the waves and dark objects seen through it shimmer');
+assert.match(waterSrc, /vFlatDepth = -\(viewMatrix \* vec4\(wp\.x, 0\.0, wp\.z, 1\.0\)\)\.z;/,
+  'the still-water reference depth must be carried to the fragment shader');
+assert.match(waterSrc, /uMixAmt: \{ value: new THREE\.Vector3\(1\.0, 1\.0, 1\.0\) \}/,
+  'the through-water terms must stay individually tunable for diagnosis');
+assert.match(waterSrc, /float sssPath = 1\.0 - exp\(-uAbsorb\.g \* path \* 1\.6\);/,
+  'back-lit transmittance is in-scattered light, so it must scale with the optical path — '
+  + 'otherwise it lifts dark objects seen through thin water into a yellow shimmer');
 
 // タイルテクスチャの約束は据え置き
 assert.match(waterSrc, /makeTileableHeightField/, 'ripple normal must keep tileable noise');

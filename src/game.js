@@ -2,10 +2,10 @@
    ゲーム本体：状態機械・キャスト・ファイト・進行
    =========================================================== */
 import * as THREE from 'three';
-import { Environment } from './sky.js?v=20260828-uwgfx15';
-import { Terrain, WATER_REGION } from './terrain.js?v=20260828-uwgfx15';
+import { Environment } from './sky.js?v=20260828-uwgfx18';
+import { Terrain, WATER_REGION } from './terrain.js?v=20260827-docktex1';
 import { resolveLake } from './lakefield.js';
-import { Water } from './water.js?v=20260828-uwgfx15';
+import { Water } from './water.js?v=20260828-uwgfx18';
 import { FishSchool } from './fish.js?v=20260827-lkwgfx';
 import { preloadFishTextures } from './fishTextures.js';
 import { preloadTerrainIcons } from './terrainIcons.js';
@@ -30,7 +30,7 @@ import {
 } from './i18n.js';
 import { MultiplayerClient, MULTIPLAYER_SEED } from './network/multiplayer.js';
 import { RemotePlayers } from './multiplayer/remotePlayer.js';
-import { PostFX } from './postfx.js?v=20260828-uwgfx15';
+import { PostFX } from './postfx.js?v=20260828-uwgfx18';
 import { createCausticTexture } from './causticTexture.js?v=20260828-caustnet3';
 import { FrameProfiler } from './performance.js?v=20260827-lkwgfx';
 
@@ -322,11 +322,15 @@ export class Game {
     }
     await onProgress(t('ui.loadingBed'));
     let bedTextures = null;
-    try {
-      bedTextures = await Terrain.loadBedTextures();
-    } catch (e) {
-      console.warn('湖底テクスチャの読み込みに失敗、頂点色で描画します', e);
-    }
+    let dockTextures = null;
+    const texResults = await Promise.allSettled([
+      Terrain.loadBedTextures(),
+      Terrain.loadDockTextures(),
+    ]);
+    if (texResults[0].status === 'fulfilled') bedTextures = texResults[0].value;
+    else console.warn('湖底テクスチャの読み込みに失敗、頂点色で描画します', texResults[0].reason);
+    if (texResults[1].status === 'fulfilled') dockTextures = texResults[1].value;
+    else console.warn('桟橋テクスチャの読み込みに失敗、単色で描画します', texResults[1].reason);
     const causticsUniforms = {
       // ボロノイ境界の明線を焼いたタイルテクスチャ（湖底・魚・水中プロップ共用）
       uCaustTex: { value: createCausticTexture() },
@@ -347,7 +351,7 @@ export class Game {
       uCaustStrength: { value: 0 },
     };
     this.terrain = new Terrain(this.scene, {
-      quality: q, lake: resolved.lake, bedTextures, causticsUniforms,
+      quality: q, lake: resolved.lake, bedTextures, dockTextures, causticsUniforms,
     });
     this._initMap();
 

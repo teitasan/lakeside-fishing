@@ -43,7 +43,6 @@ export default {
       namePh: 'Name (up to 12 chars)',
       defaultName: 'Angler',
       footHtml: 'Made with Three.js / Sound on <img class="ico inline" src="./assets/icons/ui-sound.webp" alt="" width="14" height="14"> <a href="./manual.html" target="_blank" rel="noopener">View parameter guide ↗</a> <a href="./motion-editor.html" target="_blank" rel="noopener">Tune animations ↗</a>',
-      creditHtml: '<small style="opacity:.6">Angler and rod models: <a href="https://quaternius.com/" target="_blank" rel="noopener">Quaternius</a> (CC0)</small>',
     },
 
     hud: {

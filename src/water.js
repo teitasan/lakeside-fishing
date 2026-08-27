@@ -3,7 +3,7 @@
    CPU と GPU で同一の波関数を使い、ウキが正しく浮くようにする
    =========================================================== */
 import * as THREE from 'three';
-import { COMMON_GLSL } from './shaders.js?v=20260828-uwgfx15';
+import { COMMON_GLSL } from './shaders.js?v=20260828-uwgfx18';
 import { WATER_REGION } from './lakefield.js';
 import { rand, TAU, clamp, smoothstep } from './util.js';
 import { makeTileableHeightField } from './tileableNoise.js?v=20260827-orgnoise4';
@@ -144,6 +144,9 @@ export class Water {
       uFoamTip: { value: new THREE.Vector4(0.030, 0.004, 0.085, 0.010) },
       // x = レースの下閾値, y = 上閾値, z = 泡の合成量, w = 古い泡の減衰
       uFoamLace: { value: new THREE.Vector4(0.54, 0.80, 0.90, 0.90) },
+      /* 水越しの見え方の内訳。切り分け・調整用に uniform で出しておく
+         x = 水の色（内向き散乱）, y = 逆光の透け, z = 水面反射 */
+      uMixAmt: { value: new THREE.Vector3(1.0, 1.0, 1.0) },
       uDebug: { value: 0 },   // 1=シーンテクスチャ 2=水の厚み（開発用）
       uLinearOut: { value: 0 },
       /* --- 平面反射（planar reflection） ---
@@ -171,6 +174,7 @@ export class Water {
         varying vec2 vWaveD;
         varying float vDepth;
         varying float vFogDepth;
+        varying float vFlatDepth;
         varying float vWaveH;
 
         float groundAt(vec2 xz) {
@@ -204,6 +208,8 @@ export class Water {
           vWorld = wp.xyz;
           vec4 mv = viewMatrix * wp;
           vFogDepth = -mv.z;
+          // 静水面（y=0）までの視距離。水の厚みはこちらを基準にする
+          vFlatDepth = -(viewMatrix * vec4(wp.x, 0.0, wp.z, 1.0)).z;
           gl_Position = projectionMatrix * mv;
         }
       `,
@@ -216,6 +222,7 @@ export class Water {
         uniform mat4 uTexMat;
         uniform float uHasRefl, uReflTexel;
         uniform vec4 uFoamTip, uFoamLace;
+        uniform vec3 uMixAmt;
         uniform vec2 uResolution;
         uniform float uDebug;
         uniform float uLinearOut;
@@ -224,6 +231,7 @@ export class Water {
         varying vec2 vWaveD;
         varying float vDepth;
         varying float vFogDepth;
+        varying float vFlatDepth;
         varying float vWaveH;
 
         float groundAtF(vec2 xz) {
@@ -373,12 +381,20 @@ export class Water {
           vec2 refrOff = N.xz * refrAmt;
           vec2 ruv0 = clamp(suv + refrOff, vec2(0.001), vec2(0.999));
           float sceneZ = eyeZ(texture2D(uSceneDepth, ruv0).x);
-          // 深度が大きくずれる場合は元 UV に戻して縁のにじみを抑える
           float sceneZ0 = eyeZ(texture2D(uSceneDepth, suv).x);
-          vec2 ruv = abs(sceneZ - sceneZ0) > 2.5 ? suv : ruv0;
+          /* ずらした先が水面より手前にある＝水上の物（桟橋の杭・竿・釣り人）を
+             拾っている。そのまま使うとその色が水面へにじみ、波に合わせて
+             揺れる「陽炎」になるので、元の UV に戻す。
+             深度が大きく飛ぶ場合も同様に縁のにじみを抑える */
+          bool refrBad = sceneZ < vFogDepth - 0.02 || abs(sceneZ - sceneZ0) > 2.5;
+          vec2 ruv = refrBad ? suv : ruv0;
           // ビュー空間の z 差を視線方向の長さに直す
           float rayScale = length(vWorld - uCamPos) / max(vFogDepth, 0.001);
-          float path = max(0.0, sceneZ - vFogDepth) * rayScale;
+          /* 厚みはずらす前のサンプル × 静水面基準で測る。
+             屈折でずらした深度や波で上下する面から測ると、厚みが波と一緒に
+             脈打ち、水越しの暗い物（杭・竿・釣り人）の上でヴェールが明滅して
+             陽炎のように見える */
+          float path = max(0.0, sceneZ0 - vFlatDepth) * rayScale;
           vec3 sceneCol = texture2D(uSceneColor, ruv).rgb;
 
           float dn = smoothstep(0.4, 13.0, path);
@@ -391,8 +407,12 @@ export class Water {
           float hUp = clamp(vWaveH / ${MAX_WAVE_AMP.toFixed(3)} * 1.35, 0.0, 1.0);
           float backLit = pow(max(dot(V, -uSunDir), 0.0), 3.0);
           /* 定数項は付けない。付けると太陽と反対を向いた浅場ぜんたいが
-             緑がかって光り、水が氷のように見えてしまう */
-          vec3 sss = uShallow * uSunColor * (hUp * hUp * 0.55)
+             緑がかって光り、水が氷のように見えてしまう。
+             また「透け」は水中で散乱した光なので、光路長に比例させないと
+             水が薄いところ（桟橋の杭や竿のすぐ手前）でも同じだけ光り、
+             暗い物の上に黄色い陽炎が乗ってしまう */
+          float sssPath = 1.0 - exp(-uAbsorb.g * path * 1.6);
+          vec3 sss = uShallow * uSunColor * (hUp * hUp * 0.55) * sssPath
                    * backLit * (1.0 - uNight) * (1.0 - uRain * 0.5);
 
           /* --- 水面で反射する光（空 + 太陽・月のきらめき） --- */
@@ -475,9 +495,9 @@ export class Water {
              不透明度で被せる方式と違い、湖底は「水の色に溶けていく」ので境目が出ない */
           vec3 bodyEnc = encodeOut(body, uExposure, uLinearOut);
           vec3 trans = exp(-uAbsorb * path);
-          vec3 below = mix(bodyEnc, sceneCol, trans)
-                     + encodeOut(sss, uExposure, uLinearOut);
-          vec3 outc = mix(below, encodeOut(surf, uExposure, uLinearOut), fres);
+          vec3 below = mix(bodyEnc, sceneCol, mix(vec3(1.0), trans, uMixAmt.x))
+                     + encodeOut(sss, uExposure, uLinearOut) * uMixAmt.y;
+          vec3 outc = mix(below, encodeOut(surf, uExposure, uLinearOut), fres * uMixAmt.z);
           outc = mix(outc, encodeOut(foamCol, uExposure, uLinearOut), foam * uFoamLace.z);
 
           if (uDebug > 0.5) {
