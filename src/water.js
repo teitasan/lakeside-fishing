@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { COMMON_GLSL } from './shaders.js?v=20260826-uwgfx';
 import { WATER_REGION } from './lakefield.js';
 import { smoothstep, rand, TAU, clamp } from './util.js';
+import { makeTileableHeightField } from './tileableNoise.js?v=20260827-orgnoise4';
 import { reflectCameraMatrixY } from './reflectionMath.js?v=20260827-lkwgfx';
 
 /** 波の定義（dir は正規化して使用） */
@@ -104,14 +105,14 @@ function _calcOblique(proj, clip) {
 function createRippleNormalTexture() {
   const size = 128;
   const data = new Uint8Array(size * size * 4);
-  const height = (x, y) => {
-    const u = (x / size) * TAU;
-    const v = (y / size) * TAU;
-    return Math.sin(u * 3 + v * 2) * 0.52
-      + Math.cos(u * 5 - v * 4) * 0.28
-      + Math.sin(u * 9 + v * 7) * 0.14
-      + Math.cos(u * 13 - v * 11) * 0.06;
-  };
+  const height = makeTileableHeightField(size, 0xa1f0001, {
+    octaves: 4,
+    baseFrequency: 5,
+    secondaryFrequency: 11,
+    secondaryMix: 0.32,
+    gain: 0.52,
+    amplitude: 4.2,
+  });
 
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
@@ -239,7 +240,7 @@ export class Water {
            すべてを fbm で生成するよりも、表情を保ったまま fragment 負荷を
            下げられるハイブリッド構成にする。 */
         vec2 rippleTexSlope(vec2 uv) {
-          return texture2D(uRippleNormal, fract(uv)).xy * 2.0 - 1.0;
+          return texture2D(uRippleNormal, uv).xy * 2.0 - 1.0;
         }
 
         vec2 rippleSlope(vec2 xz, float t) {

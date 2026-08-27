@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { CAUSTICS_GLSL } from './shaders.js?v=20260827-lkwgfx';
 import { UnderwaterPropScatter, addUnderwaterCaustics } from './underwaterProps.js?v=20260827-lkwgfx';
 import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js';
+import { makeTileableHeightField } from './tileableNoise.js?v=20260827-orgnoise4';
 import { WORLD_SIZE, WATER_REGION, MAX_DEPTH, resolveLake } from './lakefield.js';
 
 export { WORLD_SIZE, WATER_REGION, MAX_DEPTH };
@@ -21,14 +22,14 @@ const _dl2 = { al: 0, si: 0 };
 /** 湖底のmicro normal・roughness・色ムラを1枚にまとめたタイルテクスチャ。 */
 function createBedDetailTexture() {
   const size = 128;
-  const height = (x, y) => {
-    const u = (x / size) * TAU;
-    const v = (y / size) * TAU;
-    return Math.sin(u * 3 + v * 2) * 0.42
-      + Math.cos(u * 7 - v * 5) * 0.27
-      + Math.sin(u * 13 + v * 11) * 0.19
-      + Math.cos(u * 19 - v * 17) * 0.12;
-  };
+  const height = makeTileableHeightField(size, 0xbed0421, {
+    octaves: 4,
+    baseFrequency: 9,
+    secondaryFrequency: 15,
+    secondaryMix: 0.4,
+    gain: 0.48,
+    amplitude: 3.6,
+  });
   const data = new Uint8Array(size * size * 4);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
@@ -436,7 +437,7 @@ export class Terrain {
               vec3 mudC  = texture2D(uBedMud,  uv).rgb;
               vec3 sandC = texture2D(uBedSand, uv).rgb;
               vec3 rockC = texture2D(uBedRock, uv).rgb;
-              vec4 detail = texture2D(uBedDetail, fract(vBedWorldPos.xz * uBedDetailScale));
+              vec4 detail = texture2D(uBedDetail, vBedWorldPos.xz * uBedDetailScale);
               float v = vBed;
               float wMud  = 1.0 - smoothstep(0.28, 0.40, v);
               float wRock = smoothstep(0.62, 0.74, v);
@@ -455,7 +456,7 @@ export class Terrain {
           `#include <roughnessmap_fragment>
           {
             float under = smoothstep(0.12, -0.28, vBedWorldPos.y);
-            vec4 detail = texture2D(uBedDetail, fract(vBedWorldPos.xz * uBedDetailScale));
+            vec4 detail = texture2D(uBedDetail, vBedWorldPos.xz * uBedDetailScale);
             float bedRough = mix(0.98, 0.88, smoothstep(0.28, 0.40, vBed));
             bedRough = mix(bedRough, 0.76, smoothstep(0.62, 0.74, vBed));
             bedRough = clamp(bedRough + (detail.a - 0.5) * 0.14, 0.66, 1.0);
@@ -467,7 +468,7 @@ export class Terrain {
           `#include <normal_fragment_maps>
           {
             float under = smoothstep(0.12, -0.28, vBedWorldPos.y);
-            vec2 detailSlope = texture2D(uBedDetail, fract(vBedWorldPos.xz * uBedDetailScale)).xy * 2.0 - 1.0;
+            vec2 detailSlope = texture2D(uBedDetail, vBedWorldPos.xz * uBedDetailScale).xy * 2.0 - 1.0;
             vec3 detailView = mat3(viewMatrix) * vec3(-detailSlope.x, 0.0, -detailSlope.y);
             normal = normalize(normal + detailView * uBedDetailStrength * under);
           }`
