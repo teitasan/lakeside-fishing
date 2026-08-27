@@ -23,6 +23,7 @@ const tests = [
   'scripts/underwater-props-test.mjs',
   'scripts/water-reflection-test.mjs',
   'scripts/repeat-wrapping-detail-test.mjs',
+  'scripts/lake-calm-water-test.mjs',
 ];
 
 for (const rel of tests) {

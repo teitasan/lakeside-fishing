@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { Environment } from './sky.js?v=20260827-lkwgfx';
 import { Terrain, WATER_REGION } from './terrain.js?v=20260827-orgnoise4';
 import { resolveLake } from './lakefield.js';
-import { Water } from './water.js?v=20260827-orgnoise4';
+import { Water } from './water.js?v=20260827-shorefoam1';
 import { FishSchool } from './fish.js?v=20260827-lkwgfx';
 import { preloadFishTextures } from './fishTextures.js';
 import { preloadTerrainIcons } from './terrainIcons.js';
@@ -30,7 +30,7 @@ import {
 } from './i18n.js';
 import { MultiplayerClient, MULTIPLAYER_SEED } from './network/multiplayer.js';
 import { RemotePlayers } from './multiplayer/remotePlayer.js';
-import { PostFX } from './postfx.js?v=20260827-lkwgfx';
+import { PostFX } from './postfx.js?v=20260827-calmlake1';
 import { FrameProfiler } from './performance.js?v=20260827-lkwgfx';
 
 const GRAVITY = 9.8;

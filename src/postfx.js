@@ -61,10 +61,10 @@ float eyeZ(float depth) {
 void mainUv(inout vec2 uv) {
   if (uStrength < 0.001) return;
   vec2 n = vec2(
-    fbm2(uv * 14.0 + vec2(uTime * 0.11, uTime * 0.09)),
-    fbm2(uv * 14.0 + vec2(5.7, 2.3) + vec2(uTime * 0.08, -uTime * 0.10))
+    fbm2(uv * 14.0 + vec2(uTime * 0.06, uTime * 0.05)),
+    fbm2(uv * 14.0 + vec2(5.7, 2.3) + vec2(uTime * 0.05, -uTime * 0.06))
   );
-  uv += (n - 0.5) * 0.0032 * uStrength * (1.0 - uRain * 0.35);
+  uv += (n - 0.5) * 0.0007 * uStrength * (1.0 - uRain * 0.35);
 }
 
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
@@ -80,28 +80,28 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   vec3 col = inputColor.rgb;
 
   /* Beer-Lambert 風の距離減衰（赤→緑→青の順に吸収） */
-  vec3 trans = exp(-uAbsorb * dist * mix(0.55, 1.0, uStrength));
+  vec3 trans = exp(-uAbsorb * dist * mix(0.16, 0.35, uStrength));
   vec3 waterTint = mix(vec3(0.18, 0.52, 0.58), vec3(0.04, 0.14, 0.22), clamp(dist / 42.0, 0.0, 1.0));
   waterTint *= mix(1.0, 0.32, uNight);
-  col = mix(col * trans, waterTint, 0.22 * uStrength);
+  col = mix(col * trans, waterTint, 0.04 * uStrength);
 
   /* 水中ヘイズ（深度に応じた青緑の靄） */
-  float haze = smoothstep(4.0, 38.0, dist) * uStrength;
+  float haze = smoothstep(8.0, 52.0, dist) * uStrength;
   haze *= mix(1.0, 0.45, uNight) * (1.0 - uRain * 0.25);
   vec3 hazeCol = mix(vec3(0.07, 0.22, 0.26), vec3(0.02, 0.08, 0.11), uNight);
-  col = mix(col, hazeCol, haze * 0.62);
+  col = mix(col, hazeCol, haze * 0.14);
 
   /* 水面からの拡散光（太陽方向＋カメラ上方） */
   float waterDepth = max(0.0, uWaterY - uCamPos.y);
   float surfaceLight = exp(-waterDepth * 0.42);
   float sunGate = smoothstep(-0.05, 0.35, uSunDir.y) * (1.0 - uNight * 0.88) * (1.0 - uCloud * 0.55);
-  float caust = fbm2(uv * 18.0 + uTime * 0.25) * fbm2(uv * 24.0 - uTime * 0.19);
+  float caust = fbm2(uv * 18.0 + uTime * 0.18) * fbm2(uv * 24.0 - uTime * 0.14);
   caust = pow(clamp(caust * 1.6, 0.0, 1.0), 2.0);
-  vec3 surfaceGlow = vec3(0.35, 0.72, 0.82) * surfaceLight * sunGate * (0.18 + caust * 0.28) * uStrength;
+  vec3 surfaceGlow = vec3(0.35, 0.72, 0.82) * surfaceLight * sunGate * (0.08 + caust * 0.11) * uStrength;
   col += surfaceGlow * mix(0.35, 1.0, uLinear);
 
   /* コントラストをわずかに落として水中感を出す */
-  col = mix(col, col * col, 0.08 * uStrength);
+  col = mix(col, col * col, 0.015 * uStrength);
 
   outputColor = vec4(col, inputColor.a);
 }
@@ -118,7 +118,7 @@ class UnderwaterEffect extends Effect {
         ['uNight', new THREE.Uniform(0)],
         ['uRain', new THREE.Uniform(0)],
         ['uCloud', new THREE.Uniform(0)],
-        ['uAbsorb', new THREE.Uniform(new THREE.Vector3(0.46, 0.20, 0.13))],
+        ['uAbsorb', new THREE.Uniform(new THREE.Vector3(0.36, 0.15, 0.09))],
         ['uCamPos', new THREE.Uniform(new THREE.Vector3())],
         ['uCamNear', new THREE.Uniform(0.1)],
         ['uCamFar', new THREE.Uniform(3000)],
@@ -212,8 +212,8 @@ export class PostFX {
     u.get('uCamNear').value = ctx.camNear ?? 0.1;
     u.get('uCamFar').value = ctx.camFar ?? 3000;
     u.get('uWaterY').value = ctx.waterY ?? 0;
-    // 水中でもBloomは残すが、浮遊物やcausticsが白く飽和しない程度へ弱める。
-    if (this.bloom) this.bloom.intensity = THREE.MathUtils.lerp(0.55, 0.32, strength);
+    // 水中でもBloomは残すが、視界を白く曇らせないよう大幅に弱める。
+    if (this.bloom) this.bloom.intensity = THREE.MathUtils.lerp(0.55, 0.10, strength);
   }
 
   /** 品質変更 */

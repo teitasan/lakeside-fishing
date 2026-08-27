@@ -11,12 +11,32 @@ import { reflectCameraMatrixY } from './reflectionMath.js?v=20260827-lkwgfx';
 
 /** 波の定義（dir は正規化して使用） */
 export const WAVES = [
-  { dx: 1.00, dz: 0.20, len: 15.0, amp: 0.150, speed: 1.05 },
-  { dx: 0.62, dz: -0.78, len: 8.60, amp: 0.095, speed: 1.30 },
-  { dx: -0.34, dz: 0.94, len: 5.10, amp: 0.058, speed: 1.65 },
-  { dx: 0.88, dz: 0.47, len: 3.05, amp: 0.032, speed: 2.20 },
-  { dx: -0.72, dz: -0.69, len: 1.85, amp: 0.018, speed: 2.95 },
+  { dx: 1.00, dz: 0.20, len: 16.2, amp: 0.118, speed: 0.62 },
+  { dx: 0.62, dz: -0.78, len: 9.40, amp: 0.070, speed: 0.78 },
+  { dx: -0.34, dz: 0.94, len: 5.70, amp: 0.039, speed: 0.98 },
+  { dx: 0.88, dz: 0.47, len: 3.35, amp: 0.020, speed: 1.28 },
+  { dx: -0.72, dz: -0.69, len: 2.10, amp: 0.010, speed: 1.72 },
 ];
+
+/** 大域的な位相ゆらぎ：遠景の規則的な干渉縞を崩す（CPU/GPU 共通） */
+export function wavePhaseOffset(x, z) {
+  return Math.sin(x * 0.031 + z * 0.027) * 0.62
+    + Math.sin(x * 0.017 - z * 0.039) * 0.48
+    + Math.sin(x * 0.043 - z * 0.021) * 0.31;
+}
+
+export function wavePhaseOffsetGrad(x, z) {
+  return {
+    dx: Math.cos(x * 0.031 + z * 0.027) * 0.031 * 0.62
+      + Math.cos(x * 0.017 - z * 0.039) * 0.017 * 0.48
+      + Math.cos(x * 0.043 - z * 0.021) * 0.043 * 0.31,
+    dz: Math.cos(x * 0.031 + z * 0.027) * 0.027 * 0.62
+      + Math.cos(x * 0.017 - z * 0.039) * (-0.039) * 0.48
+      + Math.cos(x * 0.043 - z * 0.021) * (-0.021) * 0.31,
+  };
+}
+
+const PHASE_W = [0.28, 0.42, 0.60, 0.78, 0.96];
 
 const W = WAVES.map((w) => {
   const l = Math.hypot(w.dx, w.dz);
@@ -28,22 +48,26 @@ export const MAX_WAVE_AMP = W.reduce((a, w) => a + w.amp, 0);
 
 /** 波の高さ（wind: 1 で標準） */
 export function waveHeight(x, z, t, wind = 1) {
+  const phase = wavePhaseOffset(x, z);
   let h = 0;
   for (let i = 0; i < W.length; i++) {
     const w = W[i];
-    h += w.amp * Math.sin((w.dx * x + w.dz * z) * w.k - t * w.om);
+    h += w.amp * Math.sin((w.dx * x + w.dz * z) * w.k - t * w.om + phase * PHASE_W[i]);
   }
   return h * wind;
 }
 
 /** 波の法線（解析微分） */
 export function waveNormal(x, z, t, wind = 1, out = new THREE.Vector3()) {
+  const phase = wavePhaseOffset(x, z);
+  const grad = wavePhaseOffsetGrad(x, z);
   let dx = 0, dz = 0;
   for (let i = 0; i < W.length; i++) {
     const w = W[i];
-    const c = Math.cos((w.dx * x + w.dz * z) * w.k - t * w.om) * w.amp * w.k * wind;
-    dx += c * w.dx;
-    dz += c * w.dz;
+    const pw = PHASE_W[i];
+    const c = Math.cos((w.dx * x + w.dz * z) * w.k - t * w.om + phase * pw) * w.amp * wind;
+    dx += c * (w.k * w.dx + pw * grad.dx);
+    dz += c * (w.k * w.dz + pw * grad.dz);
   }
   return out.set(-dx, 1, -dz).normalize();
 }
@@ -52,17 +76,35 @@ export function waveNormal(x, z, t, wind = 1, out = new THREE.Vector3()) {
 function waveGLSL() {
   let sum = '', dsum = '';
   W.forEach((w, i) => {
-    const ph = `((${w.dx.toFixed(5)} * p.x + ${w.dz.toFixed(5)} * p.y) * ${w.k.toFixed(5)} - t * ${w.om.toFixed(5)})`;
+    const ph = `((${w.dx.toFixed(5)} * p.x + ${w.dz.toFixed(5)} * p.y) * ${w.k.toFixed(5)} - t * ${w.om.toFixed(5)} + phase * ${PHASE_W[i].toFixed(5)})`;
     sum += `  h += ${w.amp.toFixed(5)} * sin(${ph});\n`;
-    dsum += `  c = cos(${ph}) * ${(w.amp * w.k).toFixed(6)};\n` +
-      `  d += vec2(${w.dx.toFixed(5)}, ${w.dz.toFixed(5)}) * c;\n`;
+    dsum += `  c = cos(${ph}) * ${w.amp.toFixed(5)};\n` +
+      `  d += vec2(${w.k.toFixed(5)} * ${w.dx.toFixed(5)} + ${PHASE_W[i].toFixed(5)} * pg.x, ${w.k.toFixed(5)} * ${w.dz.toFixed(5)} + ${PHASE_W[i].toFixed(5)} * pg.y) * c;\n`;
   });
   return /* glsl */ `
+float wavePhase(vec2 p) {
+  return sin(p.x * 0.031 + p.y * 0.027) * 0.62
+       + sin(p.x * 0.017 - p.y * 0.039) * 0.48
+       + sin(p.x * 0.043 - p.y * 0.021) * 0.31;
+}
+vec2 wavePhaseGrad(vec2 p) {
+  return vec2(
+    cos(p.x * 0.031 + p.y * 0.027) * 0.031 * 0.62
+      + cos(p.x * 0.017 - p.y * 0.039) * 0.017 * 0.48
+      + cos(p.x * 0.043 - p.y * 0.021) * 0.043 * 0.31,
+    cos(p.x * 0.031 + p.y * 0.027) * 0.027 * 0.62
+      + cos(p.x * 0.017 - p.y * 0.039) * (-0.039) * 0.48
+      + cos(p.x * 0.043 - p.y * 0.021) * (-0.021) * 0.31
+  );
+}
 float waveH(vec2 p, float t) {
+  float phase = wavePhase(p);
   float h = 0.0;
 ${sum}  return h;
 }
 vec2 waveD(vec2 p, float t) {
+  float phase = wavePhase(p);
+  vec2 pg = wavePhaseGrad(p);
   vec2 d = vec2(0.0);
   float c;
 ${dsum}  return d;
@@ -175,7 +217,7 @@ export class Water {
       uCamNear: { value: 0.1 },
       uCamFar: { value: 3000 },
       // 1m あたりの吸収（赤から先に消える）
-      uAbsorb: { value: new THREE.Vector3(0.46, 0.20, 0.13) },
+      uAbsorb: { value: new THREE.Vector3(0.36, 0.15, 0.09) },
       uRippleNormal: { value: this.rippleNormalTex },
       uDebug: { value: 0 },   // 1=シーンテクスチャ 2=水の厚み（開発用）
       uLinearOut: { value: 0 },
@@ -249,17 +291,17 @@ export class Water {
           float n;
           vec2 p;
 
-          p = xz * 0.9 + vec2(0.97, 0.24) * t * 0.55;
+          p = xz * 0.9 + vec2(0.97, 0.24) * t * 0.30;
           n = fbm2(p);
-          d += vec2(n - fbm2(p + vec2(EPS, 0.0)), n - fbm2(p + vec2(0.0, EPS))) * 1.3;
+          d += vec2(n - fbm2(p + vec2(EPS, 0.0)), n - fbm2(p + vec2(0.0, EPS))) * 1.15;
 
-          p = xz * 1.6 + vec2(0.60, -0.80) * t * 0.85;
+          p = xz * 1.6 + vec2(0.60, -0.80) * t * 0.46;
           n = fbm2(p);
-          d += vec2(n - fbm2(p + vec2(EPS, 0.0)), n - fbm2(p + vec2(0.0, EPS))) * 1.0;
+          d += vec2(n - fbm2(p + vec2(EPS, 0.0)), n - fbm2(p + vec2(0.0, EPS))) * 0.88;
 
-          d += rippleTexSlope(xz * 0.72 + vec2(0.29, -0.84) * t * 0.16) * 0.24;
-          d += rippleTexSlope(xz * 1.36 + vec2(-0.77, -0.41) * t * 0.24 + vec2(0.37, 0.81)) * 0.15;
-          d += rippleTexSlope(xz * 2.45 + vec2(0.91, 0.36) * t * 0.34 + vec2(0.73, 0.19)) * 0.08;
+          d += rippleTexSlope(xz * 0.72 + vec2(0.29, -0.84) * t * 0.09) * 0.20;
+          d += rippleTexSlope(xz * 1.36 + vec2(-0.77, -0.41) * t * 0.13 + vec2(0.37, 0.81)) * 0.12;
+          d += rippleTexSlope(xz * 2.45 + vec2(0.91, 0.36) * t * 0.18 + vec2(0.73, 0.19)) * 0.06;
 
           return d;
         }
@@ -284,7 +326,8 @@ export class Water {
 
           // --- 法線（大波 + 細かいリップル） ---
           vec2 rip = rippleSlope(vWorld.xz, uTime);
-          float ripAmt = (0.55 + uRain * 1.5) * smoothstep(0.0, 1.2, vDepth);
+          float farRip = mix(1.0, 0.38, smoothstep(75.0, 220.0, vFogDepth));
+          float ripAmt = (0.34 + uRain * 0.90) * smoothstep(0.0, 1.2, vDepth) * farRip;
           vec3 N = normalize(vec3(-vWaveD.x - rip.x * ripAmt, 1.0, -vWaveD.y - rip.y * ripAmt));
 
           vec3 V = normalize(uCamPos - vWorld);
@@ -341,32 +384,67 @@ export class Water {
           vec3 surf = refl;
           vec3 H = normalize(V + uSunDir);
           float specT = max(dot(N, H), 0.0);
-          float glitter = vnoise(vWorld.xz * 7.5 + uSunDir.xz * 4.0 + uTime * 0.35);
+          float glitter = vnoise(vWorld.xz * 7.5 + uSunDir.xz * 4.0 + uTime * 0.18);
           glitter = smoothstep(0.58, 0.92, glitter);
           float spec = pow(specT, 620.0) * 5.5
                      + pow(specT, 48.0) * 0.35
-                     + pow(specT, 180.0) * glitter * 2.8;
+                     + pow(specT, 180.0) * glitter * 2.2;
           surf += uSunColor * spec * (1.0 - uNight) * (1.0 - uRain * 0.4);
           vec3 MH = normalize(V - uSunDir);
           float mnd = max(dot(N, MH), 0.0);
           surf += vec3(0.72, 0.82, 1.0) * (pow(mnd, 300.0) * 1.5 + pow(mnd, 34.0) * 0.10) * uNight;
 
-          /* --- 泡（渚からの水深で表情を変える） ---
-             渚のすぐそばは面でべったり、沖へ離れるほどノイズのしきい値を
-             上げてまばらな筋になってから消えるようにする。以前は
-             「0.42m より浅いか」で泡の強さがほぼ決め打ち（一律）だったので、
-             連続的に変化するようにした。広げすぎると岸全体が白く
-             うるさく見えるので、届く範囲は控えめにしてある。
-             泡の塊の大きさはノイズの周波数（xz の係数）で調整する */
-          float lap = smoothstep(0.55, 0.0, vDepth + vWaveH * 1.3);
-          float lapN = fbm2(vWorld.xz * 2.0 + vec2(uTime * 0.25, uTime * 0.18));
-          float lapThresh = mix(0.82, -0.12, lap);
-          float shoreFoam = clamp(smoothstep(lapThresh, lapThresh + 0.48, lapN) * lap, 0.0, 1.0);
+          /* --- 泡（渚：深度帯 + 二段ノイズ + 波位相追従） ---
+             浅い渚は coverage/brightness を上げ、やや深い岸沿いは
+             fbm/vnoise の二段でまばらな筋に崩す。foamLag で波高に
+             わずかに遅れて乗り、距離フェードで遠景の白帯を抑える。
+             沖の波頭泡は従来どおり強風・雨のみ。 */
+          float runUp = vWaveH * 1.15;
+          float shoreDepth = max(0.0, vDepth - runUp * 0.72);
+          float shoreBand = smoothstep(0.68, 0.0, shoreDepth);
+          // 幾何境界のギザつきだけ数cmで馴染ませ、浅い領域の泡量は落とさない。
+          float shoreFeather = smoothstep(0.018, 0.075, vDepth)
+                             * (1.0 - smoothstep(0.78, 1.08, shoreDepth));
+
+          vec2 wFlow = normalize(vWaveD * 1.4 + vec2(0.02, 0.01));
+          vec2 fPerp = vec2(-wFlow.y, wFlow.x);
+          vec2 shoreP = vWorld.xz;
+          float foamLag = runUp * 2.1 - uTime * 0.06;
+
+          vec2 coarseP = vec2(dot(shoreP, wFlow), dot(shoreP, fPerp)) * 1.25
+                       + wFlow * foamLag + vec2(uTime * 0.12, uTime * 0.08);
+          float coarseN = fbm2(coarseP);
+          vec2 fineP = shoreP * 3.6 + wFlow * (foamLag * 1.35 + 0.5)
+                     + vec2(-uTime * 0.15, uTime * 0.19);
+          float fineN = vnoise(fineP);
+
+          // 浅いほど閾値を下げて面積を増やす。ただし負値にはせず、
+          // 最浅部にもノイズの穴を残して一枚の白い板になるのを防ぐ。
+          float breakThresh = mix(0.26, 0.74, 1.0 - shoreBand);
+          float coarseMask = smoothstep(breakThresh, breakThresh + 0.24, coarseN);
+          float streakMask = smoothstep(breakThresh + 0.08, breakThresh + 0.36, fineN);
+          float shoreBreakup = coarseMask * mix(0.42, 1.0, streakMask);
+
+          float freshN = vnoise(shoreP * 5.0 + wFlow * foamLag * 2.0
+                              + vec2(uTime * 0.21, -uTime * 0.11));
+          float freshWash = smoothstep(0.58, 0.84, freshN) * shoreBand * 0.38;
+
+          float shoreCover = mix(0.28, 1.0, shoreBand);
+          float shoreFoam = clamp((shoreBreakup * shoreCover + freshWash) * shoreFeather, 0.0, 1.0);
+          shoreFoam *= 1.0 - smoothstep(55.0, 180.0, vFogDepth);
+
           float crest = smoothstep(0.58, 0.92, vWaveH / ${MAX_WAVE_AMP.toFixed(3)} / max(uWind, 0.35));
-          float crestN = vnoise(vWorld.xz * 2.2 + uTime * 0.3);
-          float crestFoam = crest * smoothstep(0.28, 0.72, crestN) * 0.62;
+          float crestN = vnoise(vWorld.xz * 2.2 + uTime * 0.17);
+          // 晴天の湖に白波を常在させず、強風・雨のときだけ波頭を泡立たせる。
+          float crestWeather = smoothstep(1.12, 1.75, uWind) * mix(0.25, 1.0, uRain);
+          float crestFoam = crest * smoothstep(0.34, 0.76, crestN) * 0.42 * crestWeather;
           float foam = clamp(shoreFoam + crestFoam, 0.0, 1.0);
-          vec3 foamCol = mix(vec3(0.72, 0.78, 0.80), vec3(1.0), 0.5) * mix(0.35, 1.0, 1.0 - uNight * 0.7);
+
+          float foamBright = mix(0.42, 0.92, shoreBand) + freshWash * 0.22;
+          float sunFoam = pow(max(dot(N, normalize(V + uSunDir)), 0.0), 3.0) * 0.18 * (1.0 - uNight);
+          vec3 foamTint = mix(uShallow * 1.35, vec3(0.88, 0.94, 0.96), shoreBand);
+          vec3 foamCol = foamTint * foamBright + uSunColor * sunFoam;
+          foamCol *= mix(0.38, 1.0, 1.0 - uNight * 0.72);
 
           // --- 雨粒 ---
           if (uRain > 0.02) {
@@ -878,7 +956,7 @@ export class Water {
     this.time += dt;
     const u = this.uniforms;
     u.uTime.value = this.time;
-    this.wind = 1 + env.rainIntensity * 1.15 + env.cloudiness * 0.18;
+    this.wind = 1 + env.rainIntensity * 0.92 + env.cloudiness * 0.14;
     u.uWind.value = this.wind;
     u.uSunDir.value.copy(env.sunDir);
     u.uSunColor.value.copy(env.sunColor);
