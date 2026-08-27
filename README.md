@@ -9,7 +9,7 @@
 ### ▶ [ブラウザで遊ぶ](https://teitasan.github.io/lakeside-fishing/)
 
 インストール不要・ブラウザだけで完結。音が出ます。PC + マウス推奨。  
-**日本語 / English** 両対応（タイトル画面またはメニューから切替）。タイトルから **みんなで遊ぶ** で同じ湖に入れます（マルチプレイは Cloudflare Worker 経由。Worker URL は非公開で、知っている人だけ参加できます）。
+**日本語 / English** 両対応（タイトル画面またはメニューから切替）。GitHub Pages 版はシングルプレイのみ。マルチプレイは Cloudflare Worker でホストされた版で利用できます（Worker URL は非公開）。
 
 ![Lakeside Fishing](docs/screenshot.png)
 
@@ -102,7 +102,7 @@ npm run dev:mp
 ```
 
 `http://localhost:8787` を開き、タイトルから **みんなで遊ぶ** を選ぶ。
-ローカルでは Worker と同一 origin のため、GitHub Actions シークレット `MP_ORIGIN` の注入なしで接続できます。
+Worker がゲーム本体と `/ws`・`/api/voice/join` を同一 origin で配信します。
 
 ```bash
 node scripts/run-tests.mjs
@@ -115,29 +115,22 @@ node scripts/run-mp-protocol-test.mjs
 
 | 役割 | 配信先 | 内容 |
 | --- | --- | --- |
-| シングルプレイ | [GitHub Pages](https://teitasan.github.io/lakeside-fishing/) | 静的 HTML / JS / アセット |
-| マルチプレイ | Cloudflare Worker | WebSocket `/ws`、ボイス `/api/voice/join` |
+| シングルプレイ | [GitHub Pages](https://teitasan.github.io/lakeside-fishing/) | 静的 HTML / JS / アセット（マルチプレイ UI なし） |
+| マルチプレイ | Cloudflare Worker | ゲーム本体 + `/ws` + `/api/voice/join`（同一 origin） |
 
 `main` への push で GitHub Pages と Worker がそれぞれ自動デプロイされます。
 
-### GitHub Pages（静的サイト）
+### GitHub Pages（シングルプレイ）
 
 - ワークフロー: `.github/workflows/deploy-pages.yml`
 - プロジェクトサイトのベースパス: `/lakeside-fishing/`（相対パス `./` で解決）
-- GitHub Actions **シークレット** **`MP_ORIGIN`** に、既存マルチプレイ Worker のoriginを設定すると、デプロイ時に `index.html` の `<meta name="lakeside-mp-origin">` へ注入されます。**本番 Worker URL をリポジトリ・README・追跡ソースにコミットしないでください。**
-- 未設定の場合は同一 origin フォールバック（ローカル Worker 開発向け）。
+- **みんなで遊ぶ** は表示されず、WebSocket 接続も行いません。
 
-### Cloudflare Worker（マルチプレイ専用）
+### Cloudflare Worker（マルチプレイ）
 
 - ワークフロー: `.github/workflows/deploy-cloudflare.yml`（`wrangler deploy --env production`）
-- 静的アセットは配信しません。`/ws` と `/api/voice/join` のみ。
-- セキュリティは **URL の非公開** によるものです。Worker URL を知っている人は参加できます。Access や JWT 検証は行いません。
-
-本番 Worker に設定する環境変数（`wrangler.jsonc` の `env.production.vars` またはダッシュボード）:
-
-| 変数 | 用途 |
-| --- | --- |
-| `CORS_ORIGINS` | GitHub Pages の origin（例: `https://teitasan.github.io`）。ボイス API のクロスオリジン用 |
+- 静的アセットとマルチプレイ API を同一 Worker から配信します。
+- セキュリティは **URL の非公開** によるものです。Worker URL を知っている人は参加できます。
 
 シークレット: `REALTIMEKIT_API_TOKEN`（既存どおり `wrangler secret put`）。
 
@@ -150,4 +143,3 @@ node scripts/run-mp-protocol-test.mjs
 - 後処理: [postprocessing](https://github.com/pmndrs/postprocessing)（リポジトリ内に同梱）
 
 シングルプレイ → [teitasan.github.io/lakeside-fishing](https://teitasan.github.io/lakeside-fishing/)
-マルチプレイ Worker → GitHub Actions シークレット `MP_ORIGIN` で注入（リポジトリには含めない）

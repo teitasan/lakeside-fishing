@@ -21,6 +21,7 @@ import {
   fishCount,
 } from './i18n.js';
 import { MP_SESSION_KEY, MP_NAME_KEY } from './network/multiplayer.js';
+import { isMultiplayerAvailable } from './config/runtime.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -504,9 +505,13 @@ export class UI {
     $('btn-start').addEventListener('click', () => g.start(false));
     $('btn-continue').addEventListener('click', () => g.start(true));
 
-    /* --- みんなで遊ぶ（オンライン） --- */
+    /* --- みんなで遊ぶ（オンライン） — Worker ホストのみ --- */
     const joinRow = $('multi-join');
     const nameInput = $('multi-name');
+    if (!isMultiplayerAvailable()) {
+      $('btn-multi').classList.add('hidden');
+      joinRow.classList.add('hidden');
+    } else {
     try {
       nameInput.value = localStorage.getItem(MP_NAME_KEY) || '';
     } catch (e) { /* noop */ }
@@ -531,6 +536,7 @@ export class UI {
       if (e.key === 'Enter') joinMultiplayer();
       e.stopPropagation();   // Space/Enter がタイトルの「はじめる」に取られないように
     });
+    }
     $('btn-card-ok').addEventListener('click', () => g.dismissCatch());
     // カード全体・背景クリックでも次へ（Space と同じ）
     this.el.catchCard.addEventListener('click', (e) => {

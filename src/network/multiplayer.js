@@ -1,4 +1,4 @@
-import { multiplayerWsUrl } from '../config/runtime.js';
+import { isMultiplayerAvailable, multiplayerWsUrl } from '../config/runtime.js';
 
 const PROTO = 4, SEND_HZ = 10;
 export const MULTIPLAYER_SEED = 123456789, MP_SESSION_KEY = 'lakeside-fishing-mp-join', MP_NAME_KEY = 'lakeside-fishing-mp-name';
@@ -27,6 +27,7 @@ export class MultiplayerClient {
   }
 
   connect(name) {
+    if (!isMultiplayerAvailable()) return;
     this.name = name || this.name || 'angler';
     this._closedByUser = false;
     this._reconnecting = !!this.id;

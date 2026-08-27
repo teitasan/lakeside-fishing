@@ -9,7 +9,7 @@ They say the *Lord of the Lake* still sleeps in its deepest waters.
 ### ▶ [Play in your browser](https://teitasan.github.io/lakeside-fishing/)
 
 No installation needed — everything runs in the browser. Sound on. Best with a mouse on desktop.  
-Available in **Japanese / English** (switch from the title screen or the in-game menu). Choose **Play Together** on the title screen to share a lake with friends (multiplayer goes through the Cloudflare Worker; the Worker URL is not public—anyone who knows it may join).
+Available in **Japanese / English** (switch from the title screen or the in-game menu). The GitHub Pages build is single-player only. Multiplayer is available on the Cloudflare Worker–hosted build (Worker URL is not public).
 
 ![Lakeside Fishing](docs/screenshot.png)
 
@@ -102,7 +102,7 @@ npm run dev:mp
 ```
 
 Open `http://localhost:8787` and choose **Play Together** on the title screen.
-Locally, the client and Worker share the same origin, so no `MP_ORIGIN` injection is needed.
+The Worker serves the game and `/ws` / `/api/voice/join` on the same origin.
 
 ```bash
 node scripts/run-tests.mjs
@@ -115,29 +115,22 @@ node scripts/run-mp-protocol-test.mjs
 
 | Role | Host | Serves |
 | --- | --- | --- |
-| Single-player | [GitHub Pages](https://teitasan.github.io/lakeside-fishing/) | Static HTML / JS / assets |
-| Multiplayer | Cloudflare Worker | WebSocket `/ws`, voice `/api/voice/join` |
+| Single-player | [GitHub Pages](https://teitasan.github.io/lakeside-fishing/) | Static HTML / JS / assets (no multiplayer UI) |
+| Multiplayer | Cloudflare Worker | Full game + `/ws` + `/api/voice/join` (same origin) |
 
 Pushes to `main` deploy GitHub Pages and the Worker independently.
 
-### GitHub Pages (static site)
+### GitHub Pages (single-player)
 
 - Workflow: `.github/workflows/deploy-pages.yml`
 - Project-site base path: `/lakeside-fishing/` (relative `./` paths resolve correctly)
-- Set GitHub Actions **secret** **`MP_ORIGIN`** to the origin of the existing multiplayer Worker. The deploy step injects it into `<meta name="lakeside-mp-origin">` in `index.html`. **Never commit a real production Worker URL to the repository, README, or tracked source.**
-- When unset, the client falls back to same-origin (local Worker dev).
+- **Play Together** is hidden and no WebSocket connection is attempted.
 
-### Cloudflare Worker (multiplayer only)
+### Cloudflare Worker (multiplayer)
 
 - Workflow: `.github/workflows/deploy-cloudflare.yml` (`wrangler deploy --env production`)
-- Does not serve static assets — only `/ws` and `/api/voice/join`.
-- Security is **URL obscurity**: anyone who knows the Worker URL may join. There is no Cloudflare Access or JWT verification.
-
-Production Worker variables (`env.production.vars` in `wrangler.jsonc` or the dashboard):
-
-| Variable | Purpose |
-| --- | --- |
-| `CORS_ORIGINS` | GitHub Pages origin (e.g. `https://teitasan.github.io`) for cross-origin voice API |
+- Serves static assets and multiplayer APIs from the same Worker.
+- Security is **URL obscurity**: anyone who knows the Worker URL may join.
 
 Secret: `REALTIMEKIT_API_TOKEN` (via `wrangler secret put`, as before).
 
@@ -150,4 +143,3 @@ Secret: `REALTIMEKIT_API_TOKEN` (via `wrangler secret put`, as before).
 - Post-processing: [postprocessing](https://github.com/pmndrs/postprocessing) (bundled in-repo)
 
 Single-player → [teitasan.github.io/lakeside-fishing](https://teitasan.github.io/lakeside-fishing/)
-Multiplayer Worker → injected via GitHub Actions secret `MP_ORIGIN` (not stored in the repo)

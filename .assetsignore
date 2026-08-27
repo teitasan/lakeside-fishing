@@ -1,4 +1,4 @@
-# Workers Static Assets binding is no longer used (GitHub Pages serves the game).
+# Workers Static Assets にアップロードしないもの
 .git
 .gitignore
 .github
@@ -9,6 +9,7 @@
 wrangler.jsonc
 worker
 scripts
+docs
 node_modules
 serve.sh
 README.md
