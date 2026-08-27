@@ -330,7 +330,12 @@ assert.doesNotMatch(postfxSrc, /mix\(0\.16, 0\.35, uStrength\)/,
   'the token underwater absorption must be gone');
 assert.doesNotMatch(postfxSrc, /haze \* 0\.14/, 'the token underwater haze must be gone');
 assert.match(postfxSrc, /0\.0007 \* uStrength/, 'underwater UV wobble should stay subtle');
-assert.match(postfxSrc, /lerp\(0\.55, 0\.10, strength\)/, 'underwater bloom should stay subdued');
+assert.match(postfxSrc, /lerp\(BLOOM_INTENSITY, 0\.08, strength\)/, 'underwater bloom should stay subdued');
+assert.match(postfxSrc, /const BLOOM_INTENSITY = 0\.35;/, 'bloom must stay restrained');
+assert.match(postfxSrc, /luminanceThreshold: 0\.85,/,
+  'a low bloom threshold makes the bright sky and shallows bleed over the rod and the angler '
+  + 'as a yellow haze — only real highlights may bloom');
+assert.doesNotMatch(postfxSrc, /luminanceThreshold: 0\.62,/, 'the old low bloom threshold must be gone');
 
 
 console.log('lake-calm-water-test: ok');

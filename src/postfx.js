@@ -18,6 +18,9 @@ import {
 } from 'postprocessing';
 import * as THREE from 'three';
 
+/* Bloom の基準強度。水中では updateUnderwater がここから下げる */
+const BLOOM_INTENSITY = 0.35;
+
 const UNDERWATER_FRAG = /* glsl */ `
 uniform float uStrength;
 uniform float uTime;
@@ -248,13 +251,19 @@ export class PostFX {
 
     const effects = [];
     if (high) {
+      /* しきい値が低いと空や明るい浅場まで滲み、その滲みが竿や釣り人・
+         桟橋のような細い/暗い物の上へかぶって黄色いモヤに見える
+         （竿は完全に飲まれて消える）。水面を明るくしたぶん画面の大半が
+         0.62 を超えるようになったので、太陽のきらめきだけが滲むところまで
+         しきい値を上げ、半径と強度も絞る */
       this.bloom = new BloomEffect({
-        luminanceThreshold: 0.62,
-        luminanceSmoothing: 0.28,
-        intensity: 0.55,
+        luminanceThreshold: 0.85,
+        luminanceSmoothing: 0.40,
+        intensity: BLOOM_INTENSITY,
         mipmapBlur: true,
-        kernelSize: KernelSize.LARGE,
+        kernelSize: KernelSize.MEDIUM,
       });
+      if (this.bloom.mipmapBlurPass) this.bloom.mipmapBlurPass.radius = 0.55;
       effects.push(this.bloom);
     } else {
       this.bloom = null;
@@ -291,7 +300,7 @@ export class PostFX {
     u.get('uInvProj').value.copy(this.camera.projectionMatrixInverse);
     u.get('uCamWorld').value.copy(this.camera.matrixWorld);
     // 水中でもBloomは残すが、視界を白く曇らせないよう大幅に弱める。
-    if (this.bloom) this.bloom.intensity = THREE.MathUtils.lerp(0.55, 0.10, strength);
+    if (this.bloom) this.bloom.intensity = THREE.MathUtils.lerp(BLOOM_INTENSITY, 0.08, strength);
   }
 
   /** 品質変更 */
