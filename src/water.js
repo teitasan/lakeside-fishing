@@ -3,7 +3,7 @@
    CPU と GPU で同一の波関数を使い、ウキが正しく浮くようにする
    =========================================================== */
 import * as THREE from 'three';
-import { COMMON_GLSL } from './shaders.js?v=20260828-uwgfx10';
+import { COMMON_GLSL } from './shaders.js?v=20260828-uwgfx13';
 import { WATER_REGION } from './lakefield.js';
 import { rand, TAU, clamp, smoothstep } from './util.js';
 import { makeTileableHeightField } from './tileableNoise.js?v=20260827-orgnoise4';
@@ -139,6 +139,11 @@ export class Water {
       // 1m あたりの吸収（赤から先に消える）
       uAbsorb: { value: new THREE.Vector3(0.36, 0.15, 0.09) },
       uRippleNormal: { value: this.rippleNormalTex },
+      /* 渚の泡もランタイムで詰めたいので出しておく
+         x,y = 先端の白線の内外幅 / z,w = 後方の泡帯の内外幅 */
+      uFoamTip: { value: new THREE.Vector4(0.030, 0.004, 0.085, 0.010) },
+      // x = レースの下閾値, y = 上閾値, z = 泡の合成量, w = 古い泡の減衰
+      uFoamLace: { value: new THREE.Vector4(0.54, 0.80, 0.90, 0.90) },
       uDebug: { value: 0 },   // 1=シーンテクスチャ 2=水の厚み（開発用）
       uLinearOut: { value: 0 },
       /* --- 平面反射（planar reflection） ---
@@ -210,6 +215,7 @@ export class Water {
         uniform sampler2D uSceneColor, uSceneDepth, uReflColor, uRippleNormal, uHeightTex;
         uniform mat4 uTexMat;
         uniform float uHasRefl, uReflTexel;
+        uniform vec4 uFoamTip, uFoamLace;
         uniform vec2 uResolution;
         uniform float uDebug;
         uniform float uLinearOut;
@@ -409,8 +415,8 @@ export class Water {
              見えていたので 5〜10 倍細かくした。さらに先端から離れた泡は
              古いものとして薄め、寄せて引く一往復が絵に出るようにする。
              沖の波頭泡は従来どおり強風・雨のときだけ。 */
-          float tip = smoothstep(0.075, 0.008, wet);
-          float band = smoothstep(0.22, 0.02, wet);
+          float tip = smoothstep(uFoamTip.x, uFoamTip.y, wet);
+          float band = smoothstep(uFoamTip.z, uFoamTip.w, wet);
           float shoreFoam = 0.0;
           float foamBright = 0.55;
           if (tip + band > 0.002) {
@@ -428,12 +434,13 @@ export class Water {
             float n1 = fbm2(fa + wFlow * foamLag * 3.4 + vec2(uTime * 0.42, uTime * 0.28));
             float n2 = vnoise(sp * 17.0 + wFlow * (foamLag * 1.5) + vec2(-uTime * 0.31, uTime * 0.24));
             float n3 = vnoise(sp * 38.0 - wFlow * (foamLag * 2.2) + vec2(uTime * 0.44, -uTime * 0.37));
-            float lace = smoothstep(0.42, 0.70, n1)
+            float lace = smoothstep(uFoamLace.x, uFoamLace.y, n1)
                        * mix(0.10, 1.0, mix(0.65, smoothstep(0.34, 0.74, n2), foamLod))
                        * mix(0.35, 1.0, mix(0.7, smoothstep(0.34, 0.80, n3), foamLod));
             // 先端は連続した白線、後方は古くなるほど薄いレース
             float age = smoothstep(0.04, 0.22, wet);
-            shoreFoam = clamp(tip * (0.50 + 0.50 * lace) + band * lace * (1.0 - age * 0.80), 0.0, 1.0);
+            shoreFoam = clamp(tip * (0.50 + 0.50 * lace)
+                            + band * lace * (1.0 - age * uFoamLace.w), 0.0, 1.0);
             shoreFoam *= 1.0 - smoothstep(70.0, 230.0, vFogDepth);
             foamBright = mix(0.60, 1.02, tip) + lace * 0.10;
           }
@@ -471,7 +478,7 @@ export class Water {
           vec3 below = mix(bodyEnc, sceneCol, trans)
                      + encodeOut(sss, uExposure, uLinearOut);
           vec3 outc = mix(below, encodeOut(surf, uExposure, uLinearOut), fres);
-          outc = mix(outc, encodeOut(foamCol, uExposure, uLinearOut), foam * 0.9);
+          outc = mix(outc, encodeOut(foamCol, uExposure, uLinearOut), foam * uFoamLace.z);
 
           if (uDebug > 0.5) {
             if (uDebug < 1.5) { gl_FragColor = vec4(sceneCol, 1.0); return; }

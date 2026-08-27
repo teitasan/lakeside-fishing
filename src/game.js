@@ -2,10 +2,10 @@
    ゲーム本体：状態機械・キャスト・ファイト・進行
    =========================================================== */
 import * as THREE from 'three';
-import { Environment } from './sky.js?v=20260828-uwgfx10';
-import { Terrain, WATER_REGION } from './terrain.js?v=20260828-uwgfx10';
+import { Environment } from './sky.js?v=20260828-uwgfx13';
+import { Terrain, WATER_REGION } from './terrain.js?v=20260828-uwgfx13';
 import { resolveLake } from './lakefield.js';
-import { Water } from './water.js?v=20260828-uwgfx10';
+import { Water } from './water.js?v=20260828-uwgfx13';
 import { FishSchool } from './fish.js?v=20260827-lkwgfx';
 import { preloadFishTextures } from './fishTextures.js';
 import { preloadTerrainIcons } from './terrainIcons.js';
@@ -30,8 +30,8 @@ import {
 } from './i18n.js';
 import { MultiplayerClient, MULTIPLAYER_SEED } from './network/multiplayer.js';
 import { RemotePlayers } from './multiplayer/remotePlayer.js';
-import { PostFX } from './postfx.js?v=20260828-uwgfx10';
-import { createCausticTexture } from './causticTexture.js?v=20260828-caustnet2';
+import { PostFX } from './postfx.js?v=20260828-uwgfx13';
+import { createCausticTexture } from './causticTexture.js?v=20260828-caustnet3';
 import { FrameProfiler } from './performance.js?v=20260827-lkwgfx';
 
 const GRAVITY = 9.8;
@@ -330,7 +330,16 @@ export class Game {
     }
     const causticsUniforms = {
       // ボロノイ境界の明線を焼いたタイルテクスチャ（湖底・魚・水中プロップ共用）
-      uCaustTex: { value: createCausticTexture(256) },
+      uCaustTex: { value: createCausticTexture() },
+      /* 網目の見え方の調整点。ランタイムで詰められるよう uniform で持つ。
+         既定値は実機で見比べて決めたもの（1 タイル 9.5m / 6.0m の 2 枚重ね） */
+      uCaustScale: { value: new THREE.Vector2(0.105, 0.166) },
+      uCaustShape: { value: new THREE.Vector2(1.0, 1.4) },
+      uCaustRange: { value: new THREE.Vector2(1.3, 0.22) },
+      uCaustDepth: { value: new THREE.Vector2(0.07, 0.60) },
+      uCaustDist: { value: new THREE.Vector2(16.0, 46.0) },
+      uCaustWarp: { value: 1.15 },
+      uCaustMixW: { value: new THREE.Vector3(1.0, 0.5, 0.0) },
       uCaustTime: { value: 0 },
       uCaustSunDir: { value: new THREE.Vector3(0, 1, 0) },
       uCaustNight: { value: 0 },

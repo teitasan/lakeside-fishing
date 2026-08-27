@@ -105,6 +105,14 @@ uniform float uCaustRain;
 uniform float uCaustCloud;
 uniform float uCaustStrength;
 uniform sampler2D uCaustTex;
+/* 網目の見え方はランタイムで詰めたいのでパラメータを uniform に出しておく */
+uniform vec2 uCaustScale;    // 2 枚のレイヤの空間スケール（1/m）
+uniform vec2 uCaustShape;    // x = 積のゲイン, y = 立ち上がりの指数
+uniform vec2 uCaustRange;    // x = 明線の上限, y = 最終強度
+uniform vec2 uCaustDepth;    // 水深フェード（開始, 終了）
+uniform vec2 uCaustDist;     // 視距離フェード（開始, 終了）
+uniform float uCaustWarp;    // 波の傾きで歪める量
+uniform vec3 uCaustMixW;     // 2 枚の合成比（A, B, A*B）
 
 ${waveGLSL({ prefix: 'cs', slim: true })}
 
@@ -125,20 +133,23 @@ vec3 causticLight(vec3 worldPos, vec3 viewNormal) {
 
   /* 水面の傾きで網目を歪める＝波と同期して揺れる */
   vec2 slope = csWaveD(surf, uCaustTime);
-  vec2 q = surf + slope * (depth * 1.15 + 0.6);
+  vec2 q = surf + slope * (depth * uCaustWarp + 0.6);
 
   float t = uCaustTime;
-  vec3 a = texture2D(uCaustTex, q * 0.155 + vec2( 0.011, 0.007) * t).rgb;
-  vec3 b = texture2D(uCaustTex, q * 0.245 + vec2(-0.008, 0.012) * t + vec2(0.37, 0.61)).rgb;
-  vec3 net = a * b * 3.6;
-  net = min(net * net, vec3(1.15));    // 太い部分を削って細い明線だけ残す
+  vec3 a = texture2D(uCaustTex, q * uCaustScale.x + vec2( 0.011, 0.007) * t).rgb;
+  vec3 b = texture2D(uCaustTex, q * uCaustScale.y + vec2(-0.008, 0.012) * t + vec2(0.37, 0.61)).rgb;
+  /* 実際のコースティクスは「1 枚の網目が粗細で重なったもの」なので、
+     既定は 2 枚の和。積にすると交点だけが光る点描になってしまう */
+  vec3 net = a * uCaustMixW.x + b * uCaustMixW.y + a * b * uCaustMixW.z;
+  net = pow(max(net * uCaustShape.x, vec3(0.0)), vec3(uCaustShape.y));
+  net = min(net, vec3(uCaustRange.x));   // 太い部分を削って細い明線だけ残す
 
-  /* 2 枚の積を二乗しているので mipmap の平均では帯域が落ちない。
+  /* 2 枚の積を非線形に通すので mipmap の平均では帯域が落ちない。
      遠景をそのまま出すとギラギラした砂目になるため距離で消す
      （実際の水でも 20m 以上先のコースティクスは見えない） */
   float viewDist = length(worldPos - cameraPosition);
-  float fade = (1.0 - smoothstep(16.0, 46.0, viewDist));
-  fade *= smoothstep(0.07, 0.60, depth) * (1.0 - smoothstep(6.0, 26.0, depth));
+  float fade = (1.0 - smoothstep(uCaustDist.x, uCaustDist.y, viewDist));
+  fade *= smoothstep(uCaustDepth.x, uCaustDepth.y, depth) * (1.0 - smoothstep(6.0, 26.0, depth));
   /* 上を向いた面ほど強い。これが無いと水際の岩の側面まで青白く光り、
      低ポリの岩が氷の塊に見えてしまう */
   vec3 upView = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
@@ -149,6 +160,6 @@ vec3 causticLight(vec3 worldPos, vec3 viewNormal) {
   float facing = max(dot(normalize(viewNormal), sunView), 0.0);
   fade *= smoothstep(0.02, 0.38, facing);
   fade *= uCaustStrength;
-  return vec3(0.62, 0.88, 0.95) * net * fade * 0.24;
+  return vec3(0.62, 0.88, 0.95) * net * fade * uCaustRange.y;
 }
 `;

@@ -8,6 +8,7 @@ import {
   WAVES, PHASE_W, W, MAX_WAVE_AMP, WAVE_STEEPNESS, CHOPPINESS, SWASH_GAIN,
   waveHeight, waveSlope, waveDisplace, shoreRunUp, shoalGain, wavePhaseOffset, waveGLSL,
 } from '../src/waveField.js';
+import { makeTileableFoldCaustics } from '../src/tileableNoise.js';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const waterSrc = readFileSync(join(root, 'src/water.js'), 'utf8');
@@ -15,6 +16,7 @@ const postfxSrc = readFileSync(join(root, 'src/postfx.js'), 'utf8');
 const terrainSrc = readFileSync(join(root, 'src/terrain.js'), 'utf8');
 const shadersSrc = readFileSync(join(root, 'src/shaders.js'), 'utf8');
 const gameSrc = readFileSync(join(root, 'src/game.js'), 'utf8');
+const caustTexSrc = readFileSync(join(root, 'src/causticTexture.js'), 'utf8');
 
 /* ---------------- 波そのもの ---------------- */
 assert.ok(WAVES.length >= 4, 'expected multi-octave lake waves');
@@ -165,8 +167,10 @@ assert.match(waterSrc, /reflSize = opts\.quality === 'high' \? 1024 : 512/,
   'reflection render target must be larger than the old 512/320');
 
 // 泡：細かいスケール + 先端の白線 + 時間減衰
-assert.match(waterSrc, /float tip = smoothstep\(0\.075, 0\.008, wet\);/,
+assert.match(waterSrc, /float tip = smoothstep\(uFoamTip\.x, uFoamTip\.y, wet\);/,
   'the swash tip must produce a tight bright line');
+assert.match(waterSrc, /uFoamTip: \{ value: new THREE\.Vector4\(0\.030, 0\.004, 0\.085, 0\.010\) \}/,
+  'the shore foam must stay a narrow line, not a metres-wide white field');
 assert.match(waterSrc, /float age = smoothstep\(0\.04, 0\.22, wet\);/,
   'foam must fade with age behind the tip');
 assert.match(waterSrc, /vnoise\(sp \* 17\.0/, 'foam must carry a fine lace octave');
@@ -203,8 +207,12 @@ assert.match(terrainSrc, /float capillary = 1\.0 - smoothstep\(0\.0, top, max\(g
 assert.match(terrainSrc, /float top = uShoreTop \* \(0\.62 \+ 0\.76 \* shoreNoise/,
   'the damp band must have a ragged top edge, not a dead-straight contour');
 assert.match(terrainSrc, /base \*= mix\(1\.0, 0\.66, sw\.x\);/, 'wet sand must darken');
-assert.match(shadersSrc, /net = min\(net \* net, vec3\(1\.15\)\);/,
+assert.match(shadersSrc, /net = min\(net, vec3\(uCaustRange\.x\)\);/,
   'caustic highlights must be clamped so shallow rocks do not blow out to cyan');
+assert.match(shadersSrc, /uniform vec3 uCaustMixW;/,
+  'caustic layer combination must be tunable');
+assert.match(shadersSrc, /uniform vec2 uCaustScale;/,
+  'caustic shape must be tunable at runtime');
 assert.match(terrainSrc, /roughnessFactor = mix\(roughnessFactor, 0\.28, gShoreWet\.x \* 0\.85\);/,
   'wet sand must go glossy so the sun sheens off it');
 assert.match(terrainSrc, /float wrack = smoothstep\(0\.60, 0\.86, shoreNoise\(wp\.xz \* 2\.7\)\)/,
@@ -226,19 +234,57 @@ assert.match(gameSrc, /this\.terrain\.updateShore\(this\.water\.time, this\.wate
 
 /* ---------------- コースティクス ---------------- */
 assert.match(shadersSrc, /uniform sampler2D uCaustTex;/,
-  'caustics must come from a baked Voronoi-ridge texture, not fragment fbm');
+  'caustics must come from a baked texture, not fragment fbm');
 assert.match(shadersSrc, /vec2 slope = csWaveD\(surf, uCaustTime\);/,
   'caustics must be warped by the real wave slope');
 assert.match(shadersSrc, /float sw = sa \/ 1\.333;/,
   'the caustic projection point must be refracted through Snell');
 assert.doesNotMatch(shadersSrc, /caustFbm2\(/, 'the old blobby fbm caustics must be gone');
+assert.doesNotMatch(shadersSrc, /a \* b \* uCaustShape\.x/,
+  'the two caustic layers must be summed, not multiplied (a product only lights crossings)');
+assert.match(shadersSrc, /vec3 net = a \* uCaustMixW\.x \+ b \* uCaustMixW\.y \+ a \* b \* uCaustMixW\.z;/,
+  'caustic layers must combine through the tunable weights');
+assert.doesNotMatch(caustTexSrc, /makeTileableCausticField/,
+  'the Voronoi cell-edge caustic texture must be gone: its cells read as a hex lattice');
+assert.match(caustTexSrc, /makeTileableFoldCaustics/,
+  'caustics must be baked from the folds of the refraction map');
+assert.match(caustTexSrc, /export const CAUSTIC_TEX_SIZE = 512;/,
+  'a 256 texture makes the caustic filaments sub-texel and they alias into sand glitter');
+
+/* 折り目コースティクスの実値チェック */
+{
+  const size = 128;
+  const a = makeTileableFoldCaustics(size, 0xabc, { frequency: 8, stencil: 2 });
+  const b = makeTileableFoldCaustics(size, 0xabc, { frequency: 8, stencil: 2 });
+  assert.deepEqual(Array.from(a.data.slice(0, 64)), Array.from(b.data.slice(0, 64)),
+    'the caustic bake must be deterministic');
+  assert.equal(a.data.length, size * size * 4, 'bake must fill an RGBA buffer');
+  assert.ok(a.mean > 0.05 && a.mean < 0.40,
+    `caustics must stay sparse bright lines, not a bright wash (mean ${a.mean})`);
+  assert.ok(a.max > 0.6, `caustic filaments must actually peak bright (max ${a.max})`);
+  // RGB がずれている＝色収差が入っている
+  let chromatic = 0;
+  for (let i = 0; i < size * size; i++) {
+    if (Math.abs(a.data[i * 4] - a.data[i * 4 + 2]) > 8) chromatic++;
+  }
+  assert.ok(chromatic > size * size * 0.02,
+    `caustics must carry chromatic dispersion (${chromatic} px differ)`);
+  // タイル可能であること（左右・上下の端が連続）
+  const at = (x, y, c) => a.data[(y * size + x) * 4 + c];
+  let seam = 0, inner = 0;
+  for (let y = 0; y < size; y++) {
+    seam += Math.abs(at(0, y, 1) - at(size - 1, y, 1));
+    inner += Math.abs(at(40, y, 1) - at(39, y, 1));
+  }
+  assert.ok(seam < inner * 2.5, `x seam must not jump (${seam} vs ${inner})`);
+}
 assert.match(shadersSrc, /float viewDist = length\(worldPos - cameraPosition\);/,
   'caustics must fade with view distance or the squared product aliases into glitter');
 assert.match(shadersSrc, /fade \*= smoothstep\(0\.15, 0\.72, dot\(normalize\(viewNormal\), upView\)\);/,
   'caustics must favour upward-facing surfaces so shallow rocks do not turn into ice');
 assert.doesNotMatch(shadersSrc, /pow\(clamp\(c1 \* c2 \* 2\.1, 0\.0, 1\.0\), 2\.4\)/,
   'the old caustic blob formula must be gone');
-assert.match(gameSrc, /uCaustTex: \{ value: createCausticTexture\(256\) \}/,
+assert.match(gameSrc, /uCaustTex: \{ value: createCausticTexture\(\) \}/,
   'the caustic texture must be created once and shared');
 
 /* ---------------- 水中ポストFX ---------------- */

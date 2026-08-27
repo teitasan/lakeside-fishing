@@ -148,78 +148,94 @@ export function makeTileableHeightField(size, seed, {
 }
 
 /**
- * タイル可能なコースティクス網目（0..1）。
+ * タイル可能なコースティクス（0..1 の RGBA を返す）。
  *
- * 水面で屈折した光が集まる線は、実際には波面の曲率が焦点を結ぶ場所で、
- * 見た目は「セル境界に沿った細い明線」になる。ボロノイの F2-F1 を細く
- * 立てるとその網目が素直に出る。fbm の掛け算では「にじみ」しか作れない。
+ * 実際のコースティクスは「屈折写像 p → p + k·∇h の折り目」である。
+ * ヤコビアンの行列式が 0 になる線がそれで、長く伸びた曲線とカスプ（尖点）に
+ * なる。ボロノイの稜線や帯域制限したノイズの等高線を使うと、閉じたセルや
+ * 輪が並んだ「幾何学模様」になってしまい、水中に六角格子が見える。
+ *
+ * 高さ場は単一帯域（+ 弱い第2帯域）にする。多オクターブにするとヘッシアンが
+ * 最高オクターブに支配され、折り目がテクセル大の砂目に潰れる。
+ * ヘッシアンの差分幅（stencil）も 1 テクセルより広く取って高域を抑える。
+ *
+ * RGB には焦点距離 k をわずかにずらした同じ模様を入れてあるので、
+ * そのまま色収差（波長ごとに焦点が違うために出る虹色の縁）になる。
  *
  * @param {number} size texel 数（一辺）
  * @param {number} seed
+ * @returns {{data: Uint8Array, mean: number, max: number}}
  */
-export function makeTileableCausticField(size, seed, {
-  cells = 7,
-  ridge = 0.34,
-  sharpness = 1.5,
-  jitter = 0.92,
-  layers = 2,
+export function makeTileableFoldCaustics(size, seed, {
+  frequency = 14,      // 1 タイルあたりの波の数（＝リップルの波長）
+  second = 0.35,       // 第2帯域の混ぜ量（折り目に有機的なうねりを与える）
+  focus = 0.75,        // 折り目の密度。上げると caustic 線が増える
+  softness = 0.34,     // 明線の太さ（|det| がこの値以内で光る）
+  sharpen = 1.5,       // 明線の立ち上がり
+  dispersion = 0.05,   // RGB 間の焦点差（色収差）
+  modulation = 0.45,   // 線に沿った明るさのむら
+  modFrequency = 2,
+  stencil = 4,         // ヘッシアンの差分幅（texel）
 } = {}) {
   positiveInt(size, 'size');
-  positiveInt(cells, 'cells');
-  positiveInt(layers, 'layers');
-  if (!(ridge > 0)) throw new RangeError('ridge must be positive');
+  positiveInt(Math.round(frequency), 'frequency');
+  if (!(softness > 0)) throw new RangeError('softness must be positive');
 
-  const bands = [];
-  let bandCells = cells;
-  let weight = 1;
-  let norm = 0;
-  for (let l = 0; l < layers; l++) {
-    const n = bandCells;
-    const pts = new Float32Array(n * n * 2);
-    const rng = makeRng(mixSeed(seed >>> 0, 0xc0ffee01, l));
-    for (let i = 0; i < n * n; i++) {
-      pts[i * 2] = 0.5 + (rng() - 0.5) * jitter;
-      pts[i * 2 + 1] = 0.5 + (rng() - 0.5) * jitter;
+  const f1 = Math.max(2, Math.round(frequency));
+  const f2 = Math.max(2, Math.round(frequency * 2.13));
+  const n1 = makeTileableNoise2D(f1, mixSeed(seed >>> 0, 0xf01d, 0)).noise;
+  const n2 = makeTileableNoise2D(f2, mixSeed(seed >>> 0, 0xf01d, 1)).noise;
+
+  const h = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      h[y * size + x] = n1((x / size) * f1, (y / size) * f1)
+        + second * n2((x / size) * f2, (y / size) * f2);
     }
-    bands.push({ n, pts, weight, spin: l * 0.7853981634 });
-    norm += weight;
-    weight *= 0.55;
-    bandCells *= 2;
   }
+  const at = (x, y) => h[(((y % size) + size) % size) * size + (((x % size) + size) % size)];
 
-  const bandValue = (band, x, y) => {
-    const { n, pts } = band;
-    const cx = (x / size) * n;
-    const cy = (y / size) * n;
-    const ix = Math.floor(cx);
-    const iy = Math.floor(cy);
-    let f1 = 1e9, f2 = 1e9;
-    for (let oy = -1; oy <= 1; oy++) {
-      for (let ox = -1; ox <= 1; ox++) {
-        const gx = ix + ox;
-        const gy = iy + oy;
-        const wx = ((gx % n) + n) % n;
-        const wy = ((gy % n) + n) % n;
-        const idx = (wy * n + wx) * 2;
-        const dx = gx + pts[idx] - cx;
-        const dy = gy + pts[idx + 1] - cy;
-        const d = Math.sqrt(dx * dx + dy * dy);
-        if (d < f1) { f2 = f1; f1 = d; } else if (d < f2) { f2 = d; }
+  const st = Math.max(1, Math.round(stencil));
+  const hxx = new Float32Array(size * size);
+  const hzz = new Float32Array(size * size);
+  const hxz = new Float32Array(size * size);
+  let sq = 0;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const i = y * size + x;
+      const c = at(x, y);
+      hxx[i] = at(x + st, y) - 2 * c + at(x - st, y);
+      hzz[i] = at(x, y + st) - 2 * c + at(x, y - st);
+      hxz[i] = (at(x + st, y + st) - at(x + st, y - st)
+        - at(x - st, y + st) + at(x - st, y - st)) * 0.25;
+      sq += hxx[i] * hxx[i] + hzz[i] * hzz[i];
+    }
+  }
+  const rms = Math.sqrt(sq / (2 * size * size));
+  const k0 = focus / Math.max(rms, 1e-12);
+
+  const md = makeTileableNoise2D(
+    Math.max(2, Math.round(modFrequency)),
+    mixSeed(seed >>> 0, 0xf01d, 2)
+  ).noise;
+
+  const data = new Uint8Array(size * size * 4);
+  let sum = 0, max = 0;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const i = y * size + x;
+      const mf = Math.max(2, Math.round(modFrequency));
+      const bright = 1 - modulation * 0.5
+        + modulation * 0.5 * md((x / size) * mf, (y / size) * mf);
+      for (let c = 0; c < 3; c++) {
+        const k = k0 * (1 + (c - 1) * dispersion);
+        const det = (1 + k * hxx[i]) * (1 + k * hzz[i]) - (k * hxz[i]) * (k * hxz[i]);
+        const v = Math.pow(softness / (Math.abs(det) + softness), sharpen) * bright;
+        data[i * 4 + c] = Math.max(0, Math.min(255, Math.round(v * 255)));
+        if (c === 1) { sum += v; max = Math.max(max, v); }
       }
+      data[i * 4 + 3] = 255;
     }
-    // セル境界（F2 ≈ F1）で 1、内部で 0 になる細い明線
-    const edge = 1 - Math.min(1, (f2 - f1) / ridge);
-    return edge > 0 ? Math.pow(edge, sharpness) : 0;
-  };
-
-  return (x, y) => {
-    let s = 0;
-    for (const band of bands) {
-      // 帯ごとに整数トーラス変換で回して、格子の重なりを避ける
-      const rx = band.spin === 0 ? x : x + y + size * 0.283;
-      const ry = band.spin === 0 ? y : -x + y - size * 0.157;
-      s += band.weight * bandValue(band, rx, ry);
-    }
-    return Math.min(1, s / norm);
-  };
+  }
+  return { data, mean: sum / (size * size), max };
 }
