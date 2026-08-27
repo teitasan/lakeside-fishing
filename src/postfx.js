@@ -31,8 +31,9 @@ uniform float uCamNear;
 uniform float uCamFar;
 uniform float uWaterY;
 uniform float uLinear;
-uniform vec2 uSunUv;      // 水面上の太陽を投影した画面座標（光の柱の起点）
-uniform float uSunOn;     // 太陽が画面内・水面上にあるか 0..1
+uniform mat4 uInvProj;    // カメラの projectionMatrixInverse（深度→ワールド復元用）
+uniform mat4 uCamWorld;   // カメラの matrixWorld
+uniform float uShaft;     // 光の柱の強さ（0 で無効）
 uniform float uTurbidity; // 濁り（1 で標準）
 
 float hash21(vec2 p) {
@@ -59,6 +60,41 @@ float fbm2(vec2 p) {
 float eyeZ(float depth) {
   float z = depth * 2.0 - 1.0;
   return (2.0 * uCamNear * uCamFar) / (uCamFar + uCamNear - z * (uCamFar - uCamNear));
+}
+
+/** 深度バッファからワールド座標を復元する */
+vec3 worldAt(vec2 uv, float depth) {
+  vec4 ndc = vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+  vec4 vp = uInvProj * ndc;
+  return (uCamWorld * vec4(vp.xyz / vp.w, 1.0)).xyz;
+}
+
+/**
+ * 水中で「太陽へ向かう」方向。Snell（sinθw = sinθa / 1.333）で屈折するので、
+ * 水中から見た太陽は空気中よりずっと天頂寄りに立つ。
+ * 空気中の方向をそのまま使うと光の柱の向きと出どころがずれる。
+ */
+vec3 sunUnderwater(vec3 sd) {
+  float ca = max(sd.y, 0.05);
+  float sa = sqrt(max(0.0, 1.0 - ca * ca));
+  float sw = sa / 1.333;
+  float cw = sqrt(max(0.0, 1.0 - sw * sw));
+  float hl = length(sd.xz);
+  vec2 hz = hl > 1e-4 ? sd.xz / hl : vec2(0.0, 1.0);
+  return normalize(vec3(hz.x * sw, cw, hz.y * sw));
+}
+
+/**
+ * 光線方向に垂直な平面上のノイズ。光線に沿っては一定なので、
+ * 世界に貼り付いた「平行な筋」になる。
+ * 画面座標の極座標でノイズを引くと、旭日旗のような放射スポークになり、
+ * しかもカメラを振るたび模様が泳いで酔うので使わない。
+ */
+float shaftMask(vec3 p, vec3 U, vec3 V, float t) {
+  vec2 q = vec2(dot(p, U), dot(p, V));
+  float s = fbm2(q * vec2(0.62, 0.24) + vec2(t * 0.021, -t * 0.014));
+  s += fbm2(q * vec2(1.45, 0.55) + vec2(-t * 0.017, t * 0.026)) * 0.5;
+  return smoothstep(0.62, 1.02, s);
 }
 
 void mainUv(inout vec2 uv) {
@@ -100,18 +136,28 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   col = col * trans + inscatter * uStrength;
 
   /* --- 光の柱（薄明光線） ---
-     水面で屈折した平行光が濁りに散乱して筋になる。太陽の画面位置から
-     放射状にノイズを引くだけの近似だが、水中の絵で一番効く要素 */
-  if (uSunOn > 0.001) {
-    vec2 d = uv - uSunUv;
-    float r = length(d);
-    float ang = atan(d.y, d.x);
-    float shaft = fbm2(vec2(ang * 5.2, r * 2.4 - uTime * 0.11));
-    shaft += fbm2(vec2(ang * 11.0 + 3.7, r * 1.3 + uTime * 0.07)) * 0.6;
-    shaft = smoothstep(0.62, 1.05, shaft);
-    float reach = exp(-camDepth * 0.14) * (1.0 - smoothstep(0.05, 0.95, r));
-    vec3 shaftCol = vec3(0.42, 0.78, 0.86);
-    col += shaftCol * shaft * reach * sunGate * uSunOn * uStrength * 0.13
+     水面で屈折した平行光が濁りに散乱して筋になる。屈折後の光線方向に
+     垂直な平面のノイズを、視線に沿って数点サンプルして積む。
+     こうすると筋が世界に貼り付き、カメラを振っても向きが変わらない。
+     深さで指数的に減衰するので、深場では自然に消える */
+  if (uShaft > 0.001 && sunGate > 0.001) {
+    vec3 Lup = sunUnderwater(normalize(uSunDir));
+    vec3 U = normalize(cross(Lup, vec3(0.0, 0.0, 1.0)));
+    vec3 V = cross(Lup, U);
+    vec3 rd = normalize(worldAt(uv, depth) - uCamPos);
+    float march = min(dist, 36.0);
+    float acc = 0.0;
+    for (int i = 0; i < 3; i++) {
+      vec3 p = uCamPos + rd * (march * (float(i) + 0.5) / 3.0);
+      float below = uWaterY - p.y;                      // 水面からの深さ
+      acc += shaftMask(p, U, V, uTime)
+           * smoothstep(0.0, 0.6, below)                // 水面より上には出さない
+           * exp(-max(below, 0.0) * 0.17);              // 深いほど届かない
+    }
+    acc /= 3.0;
+    // 目の前と遠景には乗せない（視界が汚れて「歪んで見える」原因になる）
+    acc *= smoothstep(1.2, 6.0, march) * (1.0 - smoothstep(24.0, 40.0, march));
+    col += vec3(0.42, 0.78, 0.86) * acc * sunGate * uStrength * uShaft
          * (1.0 - uRain * 0.4);
   }
 
@@ -122,7 +168,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
 
   /* 周辺減光：水中は視界が閉じる */
   float vig = 1.0 - smoothstep(0.32, 0.92, length(uv - 0.5) * 1.42);
-  col *= mix(1.0, 0.62 + 0.38 * vig, uStrength);
+  col *= mix(1.0, 0.78 + 0.22 * vig, uStrength);
 
   /* コントラストをわずかに落として水中感を出す */
   col = mix(col, col * col, 0.015 * uStrength);
@@ -148,8 +194,9 @@ class UnderwaterEffect extends Effect {
         ['uCamFar', new THREE.Uniform(3000)],
         ['uWaterY', new THREE.Uniform(0)],
         ['uLinear', new THREE.Uniform(0)],
-        ['uSunUv', new THREE.Uniform(new THREE.Vector2(0.5, 0.9))],
-        ['uSunOn', new THREE.Uniform(0)],
+        ['uInvProj', new THREE.Uniform(new THREE.Matrix4())],
+        ['uCamWorld', new THREE.Uniform(new THREE.Matrix4())],
+        ['uShaft', new THREE.Uniform(0.30)],
         ['uTurbidity', new THREE.Uniform(1)],
       ]),
     });
@@ -239,9 +286,10 @@ export class PostFX {
     u.get('uCamNear').value = ctx.camNear ?? 0.1;
     u.get('uCamFar').value = ctx.camFar ?? 3000;
     u.get('uWaterY').value = ctx.waterY ?? 0;
-    if (ctx.sunUv) u.get('uSunUv').value.copy(ctx.sunUv);
-    u.get('uSunOn').value = ctx.sunOn ?? 0;
     u.get('uTurbidity').value = ctx.turbidity ?? 1;
+    /* 光の柱をワールド空間で作るので、深度→ワールドの復元行列を渡す */
+    u.get('uInvProj').value.copy(this.camera.projectionMatrixInverse);
+    u.get('uCamWorld').value.copy(this.camera.matrixWorld);
     // 水中でもBloomは残すが、視界を白く曇らせないよう大幅に弱める。
     if (this.bloom) this.bloom.intensity = THREE.MathUtils.lerp(0.55, 0.10, strength);
   }

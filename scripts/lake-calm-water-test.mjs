@@ -294,9 +294,24 @@ assert.match(postfxSrc, /vec3 inscatter = scatterCol \* ambient \* \(vec3\(1\.0\
   'the light removed by extinction must come back as in-scattering');
 assert.match(postfxSrc, /float ambient = exp\(-camDepth \* 0\.085\)/,
   'ambient light must fall off exponentially with camera depth');
-assert.match(postfxSrc, /uniform vec2 uSunUv;/, 'god rays need the projected sun position');
-assert.match(postfxSrc, /float shaft = fbm2\(vec2\(ang \* 5\.2, r \* 2\.4 - uTime \* 0\.11\)\);/,
-  'god rays must be radial around the sun, not screen-space noise');
+assert.match(postfxSrc, /\['uShaft', new THREE\.Uniform\(0\.30\)\]/,
+  'shaft strength must stay restrained');
+assert.match(postfxSrc, /vec3 worldAt\(vec2 uv, float depth\)/,
+  'god rays must be built in world space, so a depth->world reconstruction is required');
+assert.match(postfxSrc, /vec3 sunUnderwater\(vec3 sd\)/,
+  'the shafts must follow the refracted sun direction, not the direction in air');
+assert.match(postfxSrc, /float sw = sa \/ 1\.333;/, 'the shaft direction must go through Snell');
+assert.match(postfxSrc, /float shaftMask\(vec3 p, vec3 U, vec3 V, float t\)/,
+  'the shaft pattern must live on the plane perpendicular to the light ray');
+assert.doesNotMatch(postfxSrc, /atan\(d\.y, d\.x\)/,
+  'screen-space polar shafts look like a rising-sun flag and swim with the camera');
+assert.doesNotMatch(postfxSrc, /uSunUv/, 'the screen-space shaft origin must be gone');
+assert.match(postfxSrc, /exp\(-max\(below, 0\.0\) \* 0\.17\)/,
+  'shafts must fade exponentially with depth below the surface');
+assert.match(postfxSrc, /acc \*= smoothstep\(1\.2, 6\.0, march\)/,
+  'shafts must not be painted right in front of the camera');
+assert.match(gameSrc, /_fillUnderwaterOptics\(uwCtx\);/, 'turbidity must still be fed each frame');
+assert.doesNotMatch(gameSrc, /_fillSunScreenPos/, 'the sun screen projection helper must be gone');
 assert.doesNotMatch(postfxSrc, /float caust = fbm2\(uv \* 18\.0/,
   'screen-space caustics must be gone (they swim with the camera)');
 assert.doesNotMatch(postfxSrc, /mix\(0\.16, 0\.35, uStrength\)/,
@@ -304,6 +319,6 @@ assert.doesNotMatch(postfxSrc, /mix\(0\.16, 0\.35, uStrength\)/,
 assert.doesNotMatch(postfxSrc, /haze \* 0\.14/, 'the token underwater haze must be gone');
 assert.match(postfxSrc, /0\.0007 \* uStrength/, 'underwater UV wobble should stay subtle');
 assert.match(postfxSrc, /lerp\(0\.55, 0\.10, strength\)/, 'underwater bloom should stay subdued');
-assert.match(gameSrc, /this\._fillSunScreenPos\(uwCtx\);/, 'the sun screen position must be fed each frame');
+
 
 console.log('lake-calm-water-test: ok');

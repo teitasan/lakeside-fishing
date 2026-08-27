@@ -2,10 +2,10 @@
    ゲーム本体：状態機械・キャスト・ファイト・進行
    =========================================================== */
 import * as THREE from 'three';
-import { Environment } from './sky.js?v=20260828-uwgfx13';
-import { Terrain, WATER_REGION } from './terrain.js?v=20260828-uwgfx13';
+import { Environment } from './sky.js?v=20260828-uwgfx15';
+import { Terrain, WATER_REGION } from './terrain.js?v=20260828-uwgfx15';
 import { resolveLake } from './lakefield.js';
-import { Water } from './water.js?v=20260828-uwgfx13';
+import { Water } from './water.js?v=20260828-uwgfx15';
 import { FishSchool } from './fish.js?v=20260827-lkwgfx';
 import { preloadFishTextures } from './fishTextures.js';
 import { preloadTerrainIcons } from './terrainIcons.js';
@@ -30,7 +30,7 @@ import {
 } from './i18n.js';
 import { MultiplayerClient, MULTIPLAYER_SEED } from './network/multiplayer.js';
 import { RemotePlayers } from './multiplayer/remotePlayer.js';
-import { PostFX } from './postfx.js?v=20260828-uwgfx13';
+import { PostFX } from './postfx.js?v=20260828-uwgfx15';
 import { createCausticTexture } from './causticTexture.js?v=20260828-caustnet3';
 import { FrameProfiler } from './performance.js?v=20260827-lkwgfx';
 
@@ -193,7 +193,6 @@ function castTopSpeed(rangeM) {
 const UP = new THREE.Vector3(0, 1, 0);
 const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
-const _sunUv = new THREE.Vector2();
 const _v3 = new THREE.Vector3();
 const _v4 = new THREE.Vector3();
 const _v5 = new THREE.Vector3();
@@ -1566,7 +1565,7 @@ export class Game {
       this.perf?.endPass('reflection');
       const uwCtx = this.water.getUnderwaterContext(this.camera);
       uwCtx.cloud = this.env.cloudiness;
-      this._fillSunScreenPos(uwCtx);
+      this._fillUnderwaterOptics(uwCtx);
       if (uwPropGroup) uwPropGroup.visible = !!uwPropWasVisible && uwCtx.strength > 0.05;
       this.postfx.updateUnderwater(uwCtx);
       this.perf?.beginPass('composer');
@@ -1802,25 +1801,8 @@ export class Game {
       : t('ui.toast.fpvOff'));
   }
 
-  /**
-   * 水中の光の柱の起点：太陽方向を画面座標へ落とす。
-   * 画面外・水面下の太陽では 0 にして筋を消す。
-   */
-  _fillSunScreenPos(ctx) {
-    const sun = this.env.sunDir;
-    _v1.copy(this.camera.position).addScaledVector(sun, 400);
-    _v1.project(this.camera);
-    const inFront = _v1.z < 1;
-    _sunUv.set(_v1.x * 0.5 + 0.5, _v1.y * 0.5 + 0.5);
-    const edge = Math.max(
-      Math.abs(_sunUv.x - 0.5) - 0.5,
-      Math.abs(_sunUv.y - 0.5) - 0.5,
-    );
-    ctx.sunUv = _sunUv;
-    ctx.sunOn = inFront && sun.y > 0.02
-      ? clamp(1 - edge / 0.6, 0, 1) * clamp(sun.y * 4, 0, 1)
-      : 0;
-    // 雨・くもりで濁りが増す
+  /** 水中の濁り。雨・くもりで増す（光の柱の向きは PostFX が屈折から作る） */
+  _fillUnderwaterOptics(ctx) {
     ctx.turbidity = 1 + this.env.rainIntensity * 0.5 + this.env.cloudiness * 0.12;
   }
 
