@@ -314,7 +314,7 @@ export class Environment {
   }
 
   _updateRain(dt, camera) {
-    const vis = this.rainIntensity > 0.03;
+    const vis = !this.underwater && this.rainIntensity > 0.03;
     this.rain.visible = vis;
     if (!vis || !camera) return;
     const cx = camera.position.x, cy = camera.position.y, cz = camera.position.z;

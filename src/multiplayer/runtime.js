@@ -1,4 +1,4 @@
-import { RemoteFishSchool } from './remoteFish.js';
+import { RemoteFishSchool } from './remoteFish.js?v=20260827-lkwgfx';
 import { MultiplayerFishingSync } from './fishingSync.js';
 import { installFishingSession, isFishingLineState } from '../fishing/session.js';
 import { pickSpecies } from '../fishing/simulation/rules.js';
@@ -60,7 +60,8 @@ export function installMultiplayerRuntime(Game) {
     const r = await build.apply(this, args); if (!this.multiplayer) return r;
     for (const f of this.school.fishes) f.despawn();
     this.school.update = () => {}; this.school.populate = () => {}; this.school.startle = () => {};
-    this.sharedFish = new RemoteFishSchool(this.scene); if (this.remotePlayers) this.remotePlayers.camera = this.camera; return r;
+    this.sharedFish = new RemoteFishSchool(this.scene, this.water?.causticsUniforms);
+    if (this.remotePlayers) this.remotePlayers.camera = this.camera; return r;
   };
   const connect = Game.prototype._connectMultiplayer;
   Game.prototype._connectMultiplayer = function (...args) {

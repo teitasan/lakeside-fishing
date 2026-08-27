@@ -19,6 +19,9 @@ const tests = [
   'scripts/mp-bait-rearm-test.mjs',
   'scripts/mp-chat-test.mjs',
   'scripts/runtime-config-test.mjs',
+  'scripts/performance-test.mjs',
+  'scripts/underwater-props-test.mjs',
+  'scripts/water-reflection-test.mjs',
 ];
 
 for (const rel of tests) {

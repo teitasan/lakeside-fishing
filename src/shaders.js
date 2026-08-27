@@ -117,7 +117,7 @@ uniform float uCaustRain;
 uniform float uCaustCloud;
 uniform float uCaustStrength;
 
-vec3 causticLight(vec3 worldPos) {
+vec3 causticLight(vec3 worldPos, vec3 viewNormal) {
   if (uCaustStrength < 0.001 || worldPos.y > -0.02) return vec3(0.0);
   float depth = -worldPos.y;
   vec2 sunXZ = uCaustSunDir.xz;
@@ -131,6 +131,9 @@ vec3 causticLight(vec3 worldPos) {
   float fade = smoothstep(0.08, 0.55, depth) * (1.0 - smoothstep(3.5, 20.0, depth));
   fade *= (1.0 - uCaustNight * 0.94) * (1.0 - uCaustRain * 0.78) * (1.0 - uCaustCloud * 0.62);
   fade *= smoothstep(-0.08, 0.28, uCaustSunDir.y);
+  vec3 sunView = normalize((viewMatrix * vec4(uCaustSunDir, 0.0)).xyz);
+  float facing = max(dot(normalize(viewNormal), sunView), 0.0);
+  fade *= smoothstep(0.02, 0.38, facing);
   fade *= uCaustStrength;
   return vec3(0.48, 0.78, 0.92) * caust * fade * 0.42;
 }

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Fish, createFishMaterial } from '../fish.js';
+import { Fish, createFishMaterial } from '../fish.js?v=20260827-lkwgfx';
 import { REAL_FISH } from '../data.js';
 import { Vec3Stream, recvTimeSec, INTERP_DELAY_SEC, INTERP_DELAY_5HZ } from './interpolation.js';
 
@@ -7,8 +7,9 @@ const SPECIES = new Map(REAL_FISH.map((sp) => [sp.id, sp]));
 const _dir = new THREE.Vector3();
 
 export class RemoteFishSchool {
-  constructor(scene) {
+  constructor(scene, causticsUniforms = null) {
     this.scene = scene;
+    this.causticsUniforms = causticsUniforms;
     this.geoCache = new Map();
     this.map = new Map();
     this.streams = new Map();
@@ -34,7 +35,7 @@ export class RemoteFishSchool {
   _spawnFish(s, tSec, delaySec) {
     const sp = SPECIES.get(s.speciesId);
     if (!sp || !s.id) return null;
-    const f = new Fish(this.geoCache, () => createFishMaterial(0.4));
+    const f = new Fish(this.geoCache, () => createFishMaterial(0.4, this.causticsUniforms));
     this.scene.add(f.mesh);
     f.spawn(sp, s.length, new THREE.Vector3(s.x, s.y, s.z), { albino: !!s.albino });
     f.networkId = s.id;

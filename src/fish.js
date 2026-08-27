@@ -2,7 +2,7 @@
    魚：プロシージャル生成メッシュ + 遊泳AI
    =========================================================== */
 import * as THREE from 'three';
-import { CAUSTICS_GLSL } from './shaders.js?v=20260826-uwgfx';
+import { CAUSTICS_GLSL } from './shaders.js?v=20260827-lkwgfx';
 import { clamp, clamp01, lerp, rand, smoothstep, TAU, damp } from './util.js';
 import { depthBandAt, colorsOf } from './data.js';
 import { textureTypeFor, fishTexture, FIN_UV } from './fishTextures.js';
@@ -943,7 +943,7 @@ export function createFishMaterial(shiny = 0.35, causticsUniforms = null) {
     uBend: { value: 0 },
   };
   mat.userData.u = u;
-  mat.customProgramCacheKey = () => `fish-wiggle-v3-caustics-${causticsUniforms ? 1 : 0}`;
+  mat.customProgramCacheKey = () => `fish-wiggle-v4-normal-caustics-${causticsUniforms ? 1 : 0}`;
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, u);
     if (causticsUniforms) Object.assign(shader.uniforms, causticsUniforms);
@@ -970,7 +970,7 @@ export function createFishMaterial(shiny = 0.35, causticsUniforms = null) {
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
-        totalEmissiveRadiance += causticLight(vFishWorldPos);`
+        totalEmissiveRadiance += causticLight(vFishWorldPos, normal);`
       );
     }
   };

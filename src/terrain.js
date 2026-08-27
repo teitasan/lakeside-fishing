@@ -2,7 +2,8 @@
    地形・湖底・岸辺の装飾・桟橋
    =========================================================== */
 import * as THREE from 'three';
-import { CAUSTICS_GLSL } from './shaders.js?v=20260826-uwgfx';
+import { CAUSTICS_GLSL } from './shaders.js?v=20260827-lkwgfx';
+import { UnderwaterPropScatter, addUnderwaterCaustics } from './underwaterProps.js?v=20260827-lkwgfx';
 import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js';
 import { WORLD_SIZE, WATER_REGION, MAX_DEPTH, resolveLake } from './lakefield.js';
 
@@ -16,6 +17,40 @@ const tmpSand = new THREE.Color();
 const UP = new THREE.Vector3(0, 1, 0);
 const _dl = { al: 0, si: 0 };
 const _dl2 = { al: 0, si: 0 };
+
+/** 湖底のmicro normal・roughness・色ムラを1枚にまとめたタイルテクスチャ。 */
+function createBedDetailTexture() {
+  const size = 128;
+  const height = (x, y) => {
+    const u = (x / size) * TAU;
+    const v = (y / size) * TAU;
+    return Math.sin(u * 3 + v * 2) * 0.42
+      + Math.cos(u * 7 - v * 5) * 0.27
+      + Math.sin(u * 13 + v * 11) * 0.19
+      + Math.cos(u * 19 - v * 17) * 0.12;
+  };
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const h = height(x, y);
+      const sx = (height(x + 1, y) - height(x - 1, y)) * 0.72;
+      const sz = (height(x, y + 1) - height(x, y - 1)) * 0.72;
+      const i = (y * size + x) * 4;
+      data[i] = Math.round(clamp01(sx * 0.5 + 0.5) * 255);
+      data[i + 1] = Math.round(clamp01(sz * 0.5 + 0.5) * 255);
+      data[i + 2] = Math.round(clamp01(h * 0.42 + 0.5) * 255);
+      data[i + 3] = Math.round(clamp01(0.5 + h * 0.34) * 255);
+    }
+  }
+  const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat, THREE.UnsignedByteType);
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = true;
+  tex.needsUpdate = true;
+  return tex;
+}
 
 /**
  * 植生マテリアルに風揺れを注入する。
@@ -214,11 +249,31 @@ export class Terrain {
     this._obsGrid = new Map();
 
     this._buildHeightTexture();
+    this.bedDetailTexture = createBedDetailTexture();
     this._causticsUniforms = opts.causticsUniforms || null;
     this._buildTerrainMesh(opts.bedTextures || null);
     this._findDock();
     this._buildDock();
     this._buildProps();
+    this.underwaterProps = new UnderwaterPropScatter(this.scene, this, {
+      causticsUniforms: this._causticsUniforms,
+      quality: this.quality,
+    });
+  }
+
+  /** 品質変更（水中プロップの密度のみランタイム反映） */
+  setQuality(q) {
+    this.quality = q;
+    this.underwaterProps?.setQuality(q);
+    const u = this.mesh?.material?.userData?.bedUniforms;
+    if (u?.uBedDetailStrength) {
+      u.uBedDetailStrength.value = q === 'high' ? 0.34 : q === 'low' ? 0.16 : 0.25;
+    }
+  }
+
+  /** 水中プロップ：カメラ・流れ・時刻 */
+  updateUnderwaterProps(time, camera, flowDir, flowStrength) {
+    this.underwaterProps?.update(time, camera, flowDir, flowStrength);
   }
 
   /** 砂地・岩場・泥底のタイルテクスチャを読み込む */
@@ -334,6 +389,9 @@ export class Terrain {
       uBedRock: { value: tex.rock },
       uBedMud: { value: tex.mud },
       uBedScale: { value: 1 / 12 }, // 1 タイル ≈ 12 m
+      uBedDetail: { value: this.bedDetailTexture },
+      uBedDetailScale: { value: 1 / 1.8 },
+      uBedDetailStrength: { value: this.quality === 'high' ? 0.34 : this.quality === 'low' ? 0.16 : 0.25 },
     };
     if (causticsUniforms) Object.assign(uniforms, causticsUniforms);
     mat.userData.bedUniforms = uniforms;
@@ -361,7 +419,10 @@ export class Terrain {
           uniform sampler2D uBedSand;
           uniform sampler2D uBedRock;
           uniform sampler2D uBedMud;
+          uniform sampler2D uBedDetail;
           uniform float uBedScale;
+          uniform float uBedDetailScale;
+          uniform float uBedDetailStrength;
           varying float vBed;
           varying vec3 vBedWorldPos;`
         )
@@ -375,21 +436,49 @@ export class Terrain {
               vec3 mudC  = texture2D(uBedMud,  uv).rgb;
               vec3 sandC = texture2D(uBedSand, uv).rgb;
               vec3 rockC = texture2D(uBedRock, uv).rgb;
+              vec4 detail = texture2D(uBedDetail, fract(vBedWorldPos.xz * uBedDetailScale));
               float v = vBed;
               float wMud  = 1.0 - smoothstep(0.28, 0.40, v);
               float wRock = smoothstep(0.62, 0.74, v);
               float wSand = max(0.0, 1.0 - wMud - wRock);
               float wSum = max(1e-4, wMud + wSand + wRock);
               vec3 bedCol = (mudC * wMud + sandC * wSand + rockC * wRock) / wSum;
+              bedCol *= mix(0.88, 1.10, detail.b);
               float d = clamp(-vBedWorldPos.y / 16.0, 0.0, 1.0);
               bedCol *= mix(1.0, 0.38, d);
-              bedCol += causticLight(vBedWorldPos);
               diffuseColor.rgb = mix(diffuseColor.rgb, bedCol, under);
             }
           }`
+        )
+        .replace(
+          '#include <roughnessmap_fragment>',
+          `#include <roughnessmap_fragment>
+          {
+            float under = smoothstep(0.12, -0.28, vBedWorldPos.y);
+            vec4 detail = texture2D(uBedDetail, fract(vBedWorldPos.xz * uBedDetailScale));
+            float bedRough = mix(0.98, 0.88, smoothstep(0.28, 0.40, vBed));
+            bedRough = mix(bedRough, 0.76, smoothstep(0.62, 0.74, vBed));
+            bedRough = clamp(bedRough + (detail.a - 0.5) * 0.14, 0.66, 1.0);
+          roughnessFactor = mix(roughnessFactor, bedRough, under);
+          }`
+        )
+        .replace(
+          '#include <normal_fragment_maps>',
+          `#include <normal_fragment_maps>
+          {
+            float under = smoothstep(0.12, -0.28, vBedWorldPos.y);
+            vec2 detailSlope = texture2D(uBedDetail, fract(vBedWorldPos.xz * uBedDetailScale)).xy * 2.0 - 1.0;
+            vec3 detailView = mat3(viewMatrix) * vec3(-detailSlope.x, 0.0, -detailSlope.y);
+            normal = normalize(normal + detailView * uBedDetailStrength * under);
+          }`
+        )
+        .replace(
+          '#include <emissivemap_fragment>',
+          `#include <emissivemap_fragment>
+          totalEmissiveRadiance += causticLight(vBedWorldPos, normal);`
         );
     };
-    mat.customProgramCacheKey = () => 'terrain-bed-tex-v3-caustics';
+    mat.customProgramCacheKey = () => 'terrain-bed-tex-v5-detail-normal-caustics';
   }
 
   /** 湖底テクスチャが使えない環境でも、頂点色の湖底へコースティクスを載せる。 */
@@ -419,10 +508,10 @@ export class Terrain {
         .replace(
           '#include <emissivemap_fragment>',
           `#include <emissivemap_fragment>
-          totalEmissiveRadiance += causticLight(vTerrainWorldPos);`
+          totalEmissiveRadiance += causticLight(vTerrainWorldPos, normal);`
         );
     };
-    mat.customProgramCacheKey = () => 'terrain-vcolor-v1-caustics';
+    mat.customProgramCacheKey = () => 'terrain-vcolor-v2-normal-caustics';
   }
 
   _terrainColor(h, slope, x, z, out) {
@@ -482,8 +571,16 @@ export class Terrain {
 
   _buildDock() {
     const g = new THREE.Group();
-    const woodMat = new THREE.MeshStandardMaterial({ color: 0x7a5b3c, roughness: 0.92 });
-    const woodDark = new THREE.MeshStandardMaterial({ color: 0x5a4029, roughness: 0.95 });
+    const woodMat = addUnderwaterCaustics(
+      new THREE.MeshStandardMaterial({ color: 0x7a5b3c, roughness: 0.92 }),
+      this._causticsUniforms,
+      'dock-wood-caustics-v1'
+    );
+    const woodDark = addUnderwaterCaustics(
+      new THREE.MeshStandardMaterial({ color: 0x5a4029, roughness: 0.95 }),
+      this._causticsUniforms,
+      'dock-dark-caustics-v1'
+    );
 
     const a = this.dockStart, b = this.dockEnd;
     const len = a.distanceTo(b);
@@ -595,7 +692,11 @@ export class Terrain {
     const boat = new THREE.Group();
     const hull = new THREE.Mesh(
       new THREE.CapsuleGeometry(0.62, 2.6, 4, 10),
-      new THREE.MeshStandardMaterial({ color: 0x8a6a45, roughness: 0.9 })
+      addUnderwaterCaustics(
+        new THREE.MeshStandardMaterial({ color: 0x8a6a45, roughness: 0.9 }),
+        this._causticsUniforms,
+        'boat-hull-caustics-v1'
+      )
     );
     hull.rotation.z = Math.PI / 2;
     hull.scale.set(1, 1, 0.55);
@@ -840,7 +941,11 @@ export class Terrain {
 
     /* --- 岩 --- */
     const rockGeo = new THREE.IcosahedronGeometry(1, 0);
-    const rockMat = new THREE.MeshStandardMaterial({ color: 0x6b6b66, roughness: 0.95, flatShading: true });
+    const rockMat = addUnderwaterCaustics(
+      new THREE.MeshStandardMaterial({ color: 0x6b6b66, roughness: 0.95, flatShading: true }),
+      this._causticsUniforms,
+      'shore-rock-caustics-v1'
+    );
     const rocks = new THREE.InstancedMesh(rockGeo, rockMat, rockTarget);
     rocks.castShadow = true; rocks.receiveShadow = true;
     let ri = 0; tries = 0;
@@ -869,68 +974,26 @@ export class Terrain {
     rocks.instanceMatrix.needsUpdate = true;
     this.scene.add(rocks);
 
-    /* --- 岩場の転石 ---
-       底質が岩の所に小さめの石をたくさん置いて、見た目で「岩場」と分かるようにする。
-       境目は底質の値でまばらにして、砂地との境が不自然な線にならないようにする */
-    {
-      const bedRockTarget = q === 'low' ? 600 : q === 'high' ? 2400 : 1500;
-      const bedRocks = new THREE.InstancedMesh(
-        rockGeo,
-        new THREE.MeshStandardMaterial({ color: 0x5f635e, roughness: 0.97, flatShading: true }),
-        bedRockTarget
-      );
-      bedRocks.receiveShadow = true;
-      let bri = 0, bt = 0;
-      while (bri < bedRockTarget && bt < bedRockTarget * 30) {
-        bt++;
-        const ang = rng() * TAU;
-        const sr = this.shoreRadius(Math.cos(ang), Math.sin(ang));
-        const rr = sr * (0.05 + Math.pow(rng(), 0.55) * 0.95);
-        const x = Math.cos(ang) * rr, z = Math.sin(ang) * rr;
-        const h = this.heightAt(x, z);
-        const d = -h;
-        if (d < 0.5 || d > 16) continue;                      // 汀線ぎわと深すぎる所は置かない
-        const slope = this.slopeAt(x, z);
-        if (slope > 1.45) continue;                           // 崖には置かない
-        const bed = this.lake.bedAt(x, z, slope);
-        if (bed.v < 0.64) continue;                           // 岩場だけ
-        if (rng() > smoothstep(0.64, 0.92, bed.v)) continue;   // 境目はまばらに
-        // 疎密をつける（一様にばら撒くと人工的に見える）
-        const cluster = this.noise.fbm(x * 0.075 + 17.4, z * 0.075 - 8.9, 2) * 0.5 + 0.5;
-        if (rng() > 0.55 + cluster * 0.6) continue;
-        // ほとんどは拳〜頭くらいの石で、たまに大きめの転石
-        const sc = 0.28 + Math.pow(rng(), 2.2) * 1.0;
-        if (sc * 0.5 > d - 0.3) continue;                     // 水面から出さない
-        qt.setFromEuler(new THREE.Euler(rng() * TAU, rng() * TAU, rng() * TAU));
-        // 斜面ほど深く埋めて、浮いて見えないようにする
-        p.set(x, h + sc * (0.05 - Math.min(0.5, slope) * 0.22), z);
-        s.set(sc * (0.85 + rng() * 0.45), sc * (0.4 + rng() * 0.32), sc * (0.85 + rng() * 0.45));
-        m.compose(p, qt, s);
-        bedRocks.setMatrixAt(bri++, m);
-      }
-      bedRocks.count = bri;
-      bedRocks.instanceMatrix.needsUpdate = true;
-      this.scene.add(bedRocks);
-      this.bedRockCount = bri;
-    }
-
     /* --- 水中のストラクチャー（沈み岩・立ち枯れ） ---
        湖底に置いて、必ず水面より下に収める。糸は水面上を通るので
        キャストの邪魔にはならないが、水中カメラで見えて魚が付く */
     this.structures = [];
     {
-      const sRocks = new THREE.InstancedMesh(
-        rockGeo,
+      const sRockMat = addUnderwaterCaustics(
         new THREE.MeshStandardMaterial({ color: 0x4e5550, roughness: 0.98, flatShading: true }),
-        Math.max(1, this.lake.structures.length * 3)
+        this._causticsUniforms,
+        'sunk-rock-caustics-v1'
+      );
+      const sRocks = new THREE.InstancedMesh(
+        rockGeo, sRockMat, Math.max(1, this.lake.structures.length * 3)
       );
       sRocks.receiveShadow = true;
-      const snagMat = new THREE.MeshStandardMaterial({
+      const snagMat = addUnderwaterCaustics(new THREE.MeshStandardMaterial({
         color: 0x5c4a36, roughness: 1, flatShading: true,
-      });
-      const snagTipMat = new THREE.MeshStandardMaterial({
+      }), this._causticsUniforms, 'snag-wood-caustics-v1');
+      const snagTipMat = addUnderwaterCaustics(new THREE.MeshStandardMaterial({
         color: 0x3d342a, roughness: 1, flatShading: true,
-      });
+      }), this._causticsUniforms, 'snag-tip-caustics-v1');
       const snagRoot = new THREE.Group();
       snagRoot.name = 'snags';
       let si = 0;
@@ -988,31 +1051,6 @@ export class Terrain {
     reeds.instanceMatrix.needsUpdate = true;
     this.scene.add(reeds);
     this.swayMaterials.push(reedMat);
-
-    // 浅い平場（藻場）にも葦を密生させる。平場は複数あるので順に回す
-    const weedGeo = reedGeo.clone();
-    const weeds = new THREE.InstancedMesh(weedGeo, reedMat, 240);
-    const flatList = this.lake.flats;
-    let wi = 0; tries = 0;
-    while (wi < 240 && tries < 4000) {
-      tries++;
-      const F = flatList[tries % flatList.length];
-      const ang = rng() * TAU;
-      const rad = Math.sqrt(rng()) * F.r * 0.9;
-      const x = F.x + Math.cos(ang) * rad;
-      const z = F.z + Math.sin(ang) * rad;
-      const h = this.heightAt(x, z);
-      if (h > -0.1 || h < -2.6) continue;
-      const sc = Math.abs(h) * 0.8 + 0.4;
-      qt.setFromAxisAngle(UP, rng() * TAU);
-      p.set(x, h, z);
-      s.set(1.4, sc, 1.4);
-      m.compose(p, qt, s);
-      weeds.setMatrixAt(wi++, m);
-    }
-    weeds.count = wi;
-    weeds.instanceMatrix.needsUpdate = true;
-    this.scene.add(weeds);
   }
 
   /** 夜間の灯り更新 */

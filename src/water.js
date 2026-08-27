@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { COMMON_GLSL } from './shaders.js?v=20260826-uwgfx';
 import { WATER_REGION } from './lakefield.js';
 import { smoothstep, rand, TAU, clamp } from './util.js';
+import { reflectCameraMatrixY } from './reflectionMath.js?v=20260827-lkwgfx';
 
 /** 波の定義（dir は正規化して使用） */
 export const WAVES = [
@@ -84,7 +85,10 @@ function _calcOblique(proj, clip) {
   const qx = (Math.sign(clip.x) + e[8]) / e[0];
   const qy = (Math.sign(clip.y) + e[9]) / e[5];
   const qz = -1.0;
-  const f = 1.0 / (e[10] + qx * e[8] + qy * e[9] + qz * e[14]);
+  const qw = (1.0 + e[10]) / e[14];
+  const dot = clip.x * qx + clip.y * qy + clip.z * qz + clip.w * qw;
+  if (Math.abs(dot) < 1e-8) return;
+  const f = 2.0 / dot;
   e[2] = clip.x * f;
   e[6] = clip.y * f;
   e[10] = clip.z * f + 1.0;
@@ -303,7 +307,7 @@ export class Water {
             float dist = length(vWorld - uCamPos);
             // 波の傾きに応じて反射点を横へずらす（揺れの主役）
             vec4 rp = uTexMat * vec4(vWorld + Rd * (0.35 + dist * 0.10), 1.0);
-            vec2 ruv = clamp(rp.xy / rp.w, 0.0, 1.0);
+            vec2 ruv = clamp(rp.xy / rp.w * 0.5 + 0.5, 0.0, 1.0);
             vec3 mirror = texture2D(uReflColor, ruv).rgb;
             // 空だけの領域（RT の初期化色）との差が少ない所ほど信頼する
             float mirrorW = smoothstep(0.02, 0.25, fres) * (under ? 0.35 : 1.0);
@@ -444,7 +448,7 @@ export class Water {
       this.reflPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
       this.uniforms.uReflColor.value = this.reflRT.texture;
       this.uniforms.uHasRefl.value = 1;
-      this._reflSkip = 0;
+      this._lastReflAt = -Infinity;
     }
   }
 
@@ -479,6 +483,11 @@ export class Water {
     this._extraHidden = (list || []).filter(Boolean);
   }
 
+  /** 平面反射だけから外すもの。透過capture用リストとは共有しない。 */
+  setReflectionHidden(list) {
+    this._reflectionHidden = (list || []).filter(Boolean);
+  }
+
   /* ---------------- 平面反射 ---------------- */
   /**
    * 主カメラを水面（y=0）で鏡映しにしたミラーカメラを作る。
@@ -489,14 +498,10 @@ export class Water {
     const p = this.reflPlane;
     // 反射は水面の少し上（0.06m）で切る：波の峰が平面を突き抜けて
     // 映り込みが欠けるのを防ぐ。高すぎると岸が切れるので小さく抑える
-    p.constant = 0.06;
-    // 鏡映: M' = S * M（S は y=0 平面での反転）
-    _reflMat4.makeScale(1, -1, 1).multiply(camera.matrixWorld);
-    // 鏡映で利き手が反転するので、three の慣例（カメラは -Z を向く）へ戻す:
-    // z 軸ベクトル（3 列目）と z 行（3 行目）、平行移動の z 成分を反転する
-    const e = _reflMat4.elements;
-    e[2] *= -1; e[6] *= -1; e[10] *= -1; e[14] *= -1;
-    e[8] *= -1; e[9] *= -1;
+    p.constant = -0.06;
+    // y=0でposition/forward/upを鏡映し、local Xだけ反転して右手系へ戻す。
+    // Z位置やforwardを反転すると対岸側の逆向きカメラになるため触らない。
+    reflectCameraMatrixY(camera.matrixWorld.elements, _reflMat4.elements);
     cam.matrixWorld.copy(_reflMat4);
     cam.matrixWorldInverse.copy(cam.matrixWorld).invert();
     // three は render() 内で camera.updateMatrixWorld() を呼び、matrixAutoUpdate
@@ -510,10 +515,6 @@ export class Water {
     _reflClip.set(
       _reflPlaneCam.normal.x, _reflPlaneCam.normal.y, _reflPlaneCam.normal.z, _reflPlaneCam.constant
     );
-    if (_reflClip.w >= 0) {   // 平面がカメラの裏側ならクリップ不要
-      cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
-      return cam;
-    }
     _calcOblique(cam.projectionMatrix, _reflClip);
     cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
     return cam;
@@ -525,9 +526,8 @@ export class Water {
    */
   captureReflection(renderer, scene, camera) {
     if (!this.reflEnabled) return;
-    if (++this._reflSkip < 2 && this._reflOnce) return;   // 30Hz に間引く
-    this._reflSkip = 0;
-    this._reflOnce = true;
+    if (this.time - this._lastReflAt < 1 / 30) return;
+    this._lastReflAt = this.time;
     const cam = this._updateReflCam(camera);
     // ワールド → uv 変換行列をシェーダへ渡す（world→clip→[0,1]）
     _reflVP.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
@@ -536,7 +536,7 @@ export class Water {
     const hidden = [this.mesh, this.splash];
     if (this.plankton) hidden.push(this.plankton);
     for (const r of this.ripples) hidden.push(r.mesh);
-    hidden.push(...(this._extraHidden || []).filter(Boolean));
+    hidden.push(...(this._reflectionHidden || []).filter(Boolean));
     const vis = hidden.map((o) => o.visible);
     for (const o of hidden) o.visible = false;
     const prevTarget = renderer.getRenderTarget();
@@ -729,7 +729,7 @@ export class Water {
       this.reflPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
       this.uniforms.uReflColor.value = this.reflRT.texture;
       this.uniforms.uHasRefl.value = 1;
-      this._reflSkip = 0;
+      this._lastReflAt = -Infinity;
     } else if (q === 'low' && this.reflEnabled) {
       this.reflEnabled = false;
       this.uniforms.uHasRefl.value = 0;
@@ -896,7 +896,9 @@ export class Water {
     cu.uCaustNight.value = env.nightAmount;
     cu.uCaustRain.value = env.rainIntensity;
     cu.uCaustCloud.value = env.cloudiness;
-    cu.uCaustStrength.value = this._underwaterView ? 1 : 0;
+    // 水上から湖底を見るscene captureにもcausticsを焼き込む。品質側で強度を抑え、
+    // 夜・雨・雲・太陽高度による減衰はCAUSTICS_GLSL内で共通処理する。
+    cu.uCaustStrength.value = this.quality === 'high' ? 1.0 : this.quality === 'low' ? 0.32 : 0.72;
 
     this._updatePlankton(dt, camera);
 

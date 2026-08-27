@@ -2,11 +2,11 @@
    ゲーム本体：状態機械・キャスト・ファイト・進行
    =========================================================== */
 import * as THREE from 'three';
-import { Environment } from './sky.js?v=20260826-uwgfx';
-import { Terrain, WATER_REGION } from './terrain.js?v=20260826-waterquality';
+import { Environment } from './sky.js?v=20260827-lkwgfx';
+import { Terrain, WATER_REGION } from './terrain.js?v=20260827-lkwgfx';
 import { resolveLake } from './lakefield.js';
-import { Water } from './water.js?v=20260826-waterquality';
-import { FishSchool } from './fish.js';
+import { Water } from './water.js?v=20260827-lkwgfx';
+import { FishSchool } from './fish.js?v=20260827-lkwgfx';
 import { preloadFishTextures } from './fishTextures.js';
 import { preloadTerrainIcons } from './terrainIcons.js';
 import { Angler } from './angler.js';
@@ -30,7 +30,8 @@ import {
 } from './i18n.js';
 import { MultiplayerClient, MULTIPLAYER_SEED } from './network/multiplayer.js';
 import { RemotePlayers } from './multiplayer/remotePlayer.js';
-import { PostFX } from './postfx.js?v=20260826-uwgfx';
+import { PostFX } from './postfx.js?v=20260827-lkwgfx';
+import { FrameProfiler } from './performance.js?v=20260827-lkwgfx';
 
 const GRAVITY = 9.8;
 const EXPOSURE = 0.78;
@@ -283,13 +284,15 @@ export class Game {
     this.renderer = new THREE.WebGLRenderer({
       canvas: this.canvas, antialias: q !== 'low', powerPreference: 'high-performance',
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, q === 'high' ? 2 : 1.5));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, q === 'high' ? 2 : q === 'low' ? 1 : 1.5));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = EXPOSURE;
     this.renderer.shadowMap.enabled = this.state.settings.shadow;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.perf = new FrameProfiler(this.renderer);
+    this.perf.setQuality(q);
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 3000);
@@ -402,13 +405,20 @@ export class Game {
 
     /* 水越しの絵に写らないもの（空・雨・陸の木と岩）はキャプチャから外す */
     this.water.setCaptureHidden([this.env.sky, this.env.rain, ...(this.terrain.overWaterProps || [])]);
+    // 反射では空・岸木を残す。カメラ追従の雨線だけは鏡像から外す。
+    this.water.setReflectionHidden([this.env.rain, this.terrain.underwaterProps?.group]);
 
     this.school.populate(this.pos, (d) => this.rollSpecies(d));
     if (this.state.settings.debug) this.debug.setEnabled(true);
     if (FPV_ONLY) this.angler.setBodyVisible(false);
     if (FPV_ONLY || this.state.settings.fpv) this._setFirstPerson(true, true);
     this._updateCamera(0.016, true);
+    const compileT0 = performance.now();
     this.renderer.compile(this.scene, this.camera);
+    this.perf?.setCompileStats(
+      performance.now() - compileT0,
+      this.renderer.info.programs?.length || 0
+    );
     await onProgress(t('ui.loadingReady'));
   }
 
@@ -771,6 +781,8 @@ export class Game {
     this.env.setQuality(q);
     this.postfx?.setQuality(q);
     this.water?.setQuality(q);
+    this.terrain?.setQuality(q);
+    this.perf?.setQuality(q);
     if (this.postfx) {
       const s = new THREE.Vector2();
       this.renderer.getSize(s);
@@ -778,6 +790,12 @@ export class Game {
     }
     this.school.setCount(q === 'low' ? 14 : q === 'high' ? 30 : 22);
     this.scene.traverse((o) => { if (o.material) o.material.needsUpdate = true; });
+    const compileT0 = performance.now();
+    this.renderer.compile(this.scene, this.camera);
+    this.perf?.setCompileStats(
+      performance.now() - compileT0,
+      this.renderer.info.programs?.length || 0
+    );
   }
 
   /* =========================================================
@@ -1410,6 +1428,8 @@ export class Game {
      ========================================================= */
   update(dt) {
     dt = Math.min(dt, 0.1); // 極端に重い環境でも破綻しない範囲でスロー化を抑える
+    const frameT0 = performance.now();
+    this.perf?.beginFrame(frameT0);
 
     // メニュー（ポーズ・ショップ・図鑑）を開いている間は世界を止める。
     // 止めないと、ため中にメニューを開いてもキャストが進み、
@@ -1448,6 +1468,8 @@ export class Game {
     this.terrain.updateWind(this.time, windPow);
     this.terrain.updateLamp(this.env.nightAmount, sdt);
     this.water.update(sdt, this.camera, this.env);
+    const flowStrength = 0.035 + this.water.wind * 0.018;
+    this.terrain.updateUnderwaterProps(this.time, this.camera, this.terrain.dockDir, flowStrength);
 
     this.audio.setRain(this.env.rainIntensity);
     this.audio.setNight(this.env.nightAmount);
@@ -1511,14 +1533,36 @@ export class Game {
     });
 
     this.ui.updateHUD(this);
-    // 水越しの絵のために、水面を隠したシーンを 1 枚描いておく
-    this.water.capture(this.renderer, this.scene, this.camera);
-    // 水面の映り込み（30Hz に間引き）
-    this.water.captureReflection(this.renderer, this.scene, this.camera);
-    const uwCtx = this.water.getUnderwaterContext(this.camera);
-    uwCtx.cloud = this.env.cloudiness;
-    this.postfx.updateUnderwater(uwCtx);
-    this.postfx.render(sdt);
+    const updateEnd = performance.now();
+    this.perf?.markUpdate(updateEnd - frameT0);
+    const uwPropGroup = this.terrain.underwaterProps?.group;
+    const uwPropWasVisible = uwPropGroup?.visible;
+    try {
+      this.perf?.beginRender(updateEnd);
+      // 水越しの絵のために、水面を隠したシーンを 1 枚描いておく
+      this.perf?.beginPass('capture');
+      this.water.capture(this.renderer, this.scene, this.camera);
+      this.perf?.endPass('capture');
+      // 水上mainではWaterがcapture結果を合成するため、同じ水中propを二重描画しない。
+      if (uwPropGroup) uwPropGroup.visible = false;
+      // 水面の映り込み（30Hz に間引き）
+      this.perf?.beginPass('reflection');
+      this.water.captureReflection(this.renderer, this.scene, this.camera);
+      this.perf?.endPass('reflection');
+      const uwCtx = this.water.getUnderwaterContext(this.camera);
+      uwCtx.cloud = this.env.cloudiness;
+      if (uwPropGroup) uwPropGroup.visible = !!uwPropWasVisible && uwCtx.strength > 0.05;
+      this.postfx.updateUnderwater(uwCtx);
+      this.perf?.beginPass('composer');
+      this.postfx.render(sdt);
+      this.perf?.endPass('composer');
+      this.perf?.endFrame(performance.now());
+    } catch (error) {
+      this.perf?.abortFrame();
+      throw error;
+    } finally {
+      if (uwPropGroup) uwPropGroup.visible = uwPropWasVisible;
+    }
     this.debug.update(dt);
   }
 

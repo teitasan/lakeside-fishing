@@ -25,9 +25,6 @@ export class Debug {
     this.sounds = new Map();      // name -> { count, last, dur }
     this.recent = [];             // 直近のイベント（新しい順）
     this._acc = 0;
-    this._fps = 0;
-    this._frames = 0;
-    this._fpsAcc = 0;
     this._buildPanel();
     this._wrapAudio();
   }
@@ -301,6 +298,8 @@ export class Debug {
     const g = this.game;
     g.state.settings.debug = this.enabled;
     g.saveState();
+    // 3D helperとDOM overlayの有無が変わるので、同一bucketへ混在させない。
+    g.perf?.resetCurrent(12);
     // OFF 時に水中に残ると通常操作で動けなくなるので桟橋へ戻す
     if (!this.enabled) {
       const h = g.terrain.heightAt(g.pos.x, g.pos.z);
@@ -327,14 +326,6 @@ export class Debug {
 
   /* ---------------- 毎フレーム ---------------- */
   update(dt) {
-    // FPS は常に計測（表示は ON のときだけ）
-    this._frames++;
-    this._fpsAcc += dt;
-    if (this._fpsAcc >= 0.5) {
-      this._fps = this._frames / this._fpsAcc;
-      this._frames = 0;
-      this._fpsAcc = 0;
-    }
     if (!this.enabled) return;
 
     const g = this.game;
@@ -392,15 +383,48 @@ export class Debug {
 
   _renderPanel() {
     const g = this.game;
-    const r = g.renderer.info.render;
+    const perf = g.perf?.getSnapshot(g);
+    const r = perf?.total || g.renderer.info.render;
     const mem = g.renderer.info.memory;
     const B = this.boxes;
 
+    const fmtMs = (v) => (v == null ? '—' : `${v.toFixed(1)} ms`);
+    const fmtGpu = (v, ok) => (!ok || v == null ? '—' : `${v.toFixed(2)} ms`);
+    const fmtN = (v) => (v == null ? '—' : Math.round(v).toLocaleString());
+    const passLine = (p) => p
+      ? `${fmtN(p.calls)} dc / ${fmtN(p.triangles)} tri`
+      : '—';
+    const rtMb = perf ? (perf.rtBytes / (1024 * 1024)).toFixed(1) : '—';
+    const qSum = (q) => {
+      const s = perf?.summaries?.[q];
+      if (!s || !s.frames) return '—';
+      const gpu = s.gpuMs.supported
+        ? ` · gpu ${s.gpuMs.avg.toFixed(1)}/${s.gpuMs.p95.toFixed(1)}` : '';
+      return `${s.frameMs.avg.toFixed(1)}/${s.frameMs.p95.toFixed(1)} ms${gpu} · ${s.calls.avg.toFixed(0)} dc`;
+    };
+
     B.perf.innerHTML = `<b>PERF</b>
-${kv('fps', this._fps.toFixed(1))}${kv('frame', (1000 / Math.max(1, this._fps)).toFixed(1) + ' ms')}
+${kv('fps', perf ? perf.fps.toFixed(1) : '—')}${kv('frame', fmtMs(perf?.frameMs))}
+${kv('game cpu', fmtMs(perf?.cpuMs))}${kv('cpu upd', fmtMs(perf?.updateMs))}
+${kv('cpu rend', fmtMs(perf?.renderMs))}${kv('gpu', fmtGpu(perf?.gpuMs, perf?.gpuSupported))}
+${kv('gpu age', Number.isFinite(perf?.gpuSampleAgeMs) ? `${perf.gpuSampleAgeMs.toFixed(0)} ms` : '—')}${kv('warmup', perf?.warmupRemaining || '—')}
+${kv('scene compile', perf?.compile ? `${perf.compile.ms.toFixed(1)} ms` : '—')}${kv('programs', perf?.compile?.programs ?? '—')}
+${kv('quality', g.state.settings.quality)}${kv('buffer', (() => {
+      const v = new THREE.Vector2();
+      g.renderer.getDrawingBufferSize(v);
+      return `${v.x.toFixed(0)}×${v.y.toFixed(0)}`;
+    })())}
 ${kv('draw calls', r.calls)}${kv('triangles', r.triangles.toLocaleString())}
 ${kv('geometries', mem.geometries)}${kv('textures', mem.textures)}
-${kv('pixelRatio', g.renderer.getPixelRatio().toFixed(2))}${kv('quality', g.state.settings.quality)}`;
+${kv('RT est', `${rtMb} MB`)}${kv('pixelRatio', g.renderer.getPixelRatio().toFixed(2))}
+<hr>${kv('pass capture', passLine(perf?.passes?.capture))}${kv('pass refl', passLine(perf?.passes?.reflection))}
+${kv('pass composer', passLine(perf?.passes?.composer))}${kv('uw props', (() => {
+	      const c = g.terrain.underwaterProps?.activeCounts;
+      return c ? `w${c.weeds} p${c.pebbles} d${c.debris}` : '—';
+    })())}
+<div style="font-size:9px;opacity:.65;margin-top:4px"><b>by quality/session</b> avg/p95 frame · gpu · avg dc</div>
+${kv('low', qSum('low'))}${kv('mid', qSum('mid'))}
+${kv('high', qSum('high'))}${kv('gpu ok', perf?.gpuSupported ? 'yes' : 'no / n/a')}`;
 
     const t = g.terrain;
     const gh = t.heightAt(g.pos.x, g.pos.z);

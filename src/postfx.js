@@ -200,7 +200,8 @@ export class PostFX {
   updateUnderwater(ctx) {
     if (!ctx || !this.underwater) return;
     const u = this.underwater.uniforms;
-    u.get('uStrength').value = ctx.strength ?? 0;
+    const strength = ctx.strength ?? 0;
+    u.get('uStrength').value = strength;
     u.get('uTime').value = ctx.time ?? 0;
     u.get('uSunDir').value.copy(ctx.sunDir);
     u.get('uNight').value = ctx.night ?? 0;
@@ -211,6 +212,8 @@ export class PostFX {
     u.get('uCamNear').value = ctx.camNear ?? 0.1;
     u.get('uCamFar').value = ctx.camFar ?? 3000;
     u.get('uWaterY').value = ctx.waterY ?? 0;
+    // 水中でもBloomは残すが、浮遊物やcausticsが白く飽和しない程度へ弱める。
+    if (this.bloom) this.bloom.intensity = THREE.MathUtils.lerp(0.55, 0.32, strength);
   }
 
   /** 品質変更 */
