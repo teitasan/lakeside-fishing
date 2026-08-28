@@ -4,12 +4,13 @@
 import * as THREE from 'three';
 import { CAUSTICS_GLSL } from './shaders.js?v=20260828-snellwin2';
 import { waveGLSL } from './waveField.js?v=20260828-lakescale1';
-import { UnderwaterPropScatter, addUnderwaterCaustics, patchUwMaterial } from './underwaterProps.js?v=20260828-leaflight2';
-import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260828-leaflight2';
+import { UnderwaterPropScatter, addUnderwaterCaustics, patchUwMaterial } from './underwaterProps.js?v=20260828-rocks6';
+import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260828-rocks6';
+import { RockSet, makeSingleRock } from './rocks.js?v=20260828-rocks6';
 import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js';
 import { makeTileableHeightField } from './tileableNoise.js?v=20260827-orgnoise4';
-import { TreeSet, VARIANTS as TREE_VARIANTS } from './trees.js?v=20260828-leaflight2';
-import { SPECIES_IDS } from './treeSkeleton.js?v=20260828-leaflight2';
+import { TreeSet, VARIANTS as TREE_VARIANTS } from './trees.js?v=20260828-rocks6';
+import { SPECIES_IDS } from './treeSkeleton.js?v=20260828-rocks6';
 import { WORLD_SIZE, WATER_REGION, MAX_DEPTH, resolveLake } from './lakefield.js';
 
 export { WORLD_SIZE, WATER_REGION, MAX_DEPTH };
@@ -1142,7 +1143,17 @@ export class Terrain {
     /* 遠景がインポスター 4 ポリなので、本数は近景の面積だけで決まる。
        900 本だと 20m 間隔の疎林で「植えた公園」に見えるため増やす */
     const treeTarget = q === 'low' ? 700 : q === 'high' ? 2000 : 1400;
-    const rockTarget = q === 'low' ? 120 : 260;
+    /* 岩は大きさで作りを分ける。
+         大岩 水面をまたぐのでシルエットが景観に効く。3D + LOD
+         中石 低ポリ 3D を InstancedMesh で撒く
+         小石 近距離だけ 3D。遠くは地面テクスチャに任せる
+       «全部テクスチャ» でも «全部ポリゴン» でもなく、大きさで分ける */
+    const rockScale = q === 'low' ? 0.45 : q === 'high' ? 1 : 0.7;
+    const ROCK = {
+      boulder: Math.round(220 * rockScale),
+      cobble: Math.round(900 * rockScale),
+      pebble: Math.round(2600 * rockScale),
+    };
     /* 水辺〜水中の植物。
        生育可能面積を実測すると ヨシ 5982 / マコモ 2780 / クロモ 10539 m2 で、
        1500 / 700 / 1900 株では 0.2 株/m2 ＝ 現実の 1/10 の疎さだった
@@ -1216,53 +1227,85 @@ export class Terrain {
     // reedMat は後段（葦）で生成するので、ここでは葉だけ入れて後で追加する
     this.swayMaterials = this.treeSet.swayMaterials.slice();
 
-    /* --- 岩 --- */
-    const rockGeo = new THREE.IcosahedronGeometry(1, 0);
-    const rockMat = addUnderwaterCaustics(
-      new THREE.MeshStandardMaterial({ color: 0x6b6b66, roughness: 0.95, flatShading: true }),
-      this._causticsUniforms,
-      'shore-rock-caustics-v1'
-    );
-    const rocks = new THREE.InstancedMesh(rockGeo, rockMat, rockTarget);
-    rocks.castShadow = true; rocks.receiveShadow = true;
-    let ri = 0; tries = 0;
-    while (ri < rockTarget && tries < rockTarget * 40) {
-      tries++;
-      const ang = rng() * TAU;
-      const rr = this.shoreRadius(Math.cos(ang) * 150, Math.sin(ang) * 150);
-      const dist = rr + (rng() * 2 - 1) * 26;
-      const x = Math.cos(ang) * dist, z = Math.sin(ang) * dist;
-      const h = this.heightAt(x, z);
-      if (h < -2.5 || h > 14) continue;
-      if (this.distToDock(x, z) < 3.4) continue;
-      const sc = 0.5 + Math.pow(rng(), 2) * 3.4;
-      const rsx = sc * (0.7 + rng() * 0.6), rsy = sc * (0.5 + rng() * 0.5), rsz = sc * (0.7 + rng() * 0.6);
-      qt.setFromEuler(new THREE.Euler(rng() * TAU, rng() * TAU, rng() * TAU));
-      p.set(x, h + sc * 0.15, z);
-      s.set(rsx, rsy, rsz);
-      m.compose(p, qt, s);
-      rocks.setMatrixAt(ri++, m);
-      // 岩の当たり判定（水中の小石は無視／上端は岩の高さ）
-      if (h > -0.9 && sc > 0.65) {
-        this.addObstacle(x, z, Math.max(rsx, rsz) * 0.72, h + sc * 0.15 + rsy * 0.82);
+    /* --- 岩（大岩・中石・小石） ---
+       正二十面体 1 個をランダムスケールで撒くのをやめ、
+       ノイズ変形 → 角の欠け → 熱侵食 → 窪み AO を通した形を
+       種類ぶん焼いて置く（rocks.js / rockShape.js）。
+       貼りは triplanar。岩に UV を張るとどこかで必ず伸びる */
+    this.rockSet = new RockSet(this.scene, {
+      quality: q,
+      seed: this.seed ^ 0x40c7,
+      causticsUniforms: this._causticsUniforms,
+      addUnderwaterCaustics,
+      capacity: {
+        boulder: [90, 220, 420].map((n) => Math.ceil(n * rockScale)),
+        cobble: [200, 900].map((n) => Math.ceil(n * rockScale)),
+        pebble: [700].map((n) => Math.ceil(n * rockScale)),
+      },
+    });
+
+    /* 階層ごとの置き方。
+       band  汀線からどこまで内外に散らすか（m）
+       h     地面の高さの帯
+       size  岩の高さ（m）
+       水際に寄せるのは意図的。水面と交差する石は形そのものが効くので、
+       ここに立体を集めると岸辺が «平坦» に見えなくなる */
+    const ROCK_BANDS = [
+      {
+        tier: 'boulder', n: ROCK.boulder, inward: 26, outward: 12,
+        // size は «岩のいちばん長い辺(m)»
+        hMin: -2.6, hMax: 13, size: [1.1, 4.6], obstacle: true,
+      },
+      {
+        tier: 'cobble', n: ROCK.cobble, inward: 18, outward: 9,
+        hMin: -1.8, hMax: 6, size: [0.30, 1.05], obstacle: false,
+      },
+      {
+        tier: 'pebble', n: ROCK.pebble, inward: 12, outward: 5,
+        hMin: -1.1, hMax: 2.2, size: [0.08, 0.26], obstacle: false,
+      },
+    ];
+
+    this.rockCounts = {};
+    for (const b of ROCK_BANDS) {
+      let placed = 0; tries = 0;
+      while (placed < b.n && tries < b.n * 40) {
+        tries++;
+        const ang = rng() * TAU;
+        const rr = this.shoreRadius(Math.cos(ang) * 150, Math.sin(ang) * 150);
+        const dist = rr + b.outward - rng() * (b.inward + b.outward);
+        const x = Math.cos(ang) * dist, z = Math.sin(ang) * dist;
+        const h = this.heightAt(x, z);
+        if (h < b.hMin || h > b.hMax) continue;
+        if (this.distToDock(x, z) < 3.4) continue;
+        // 小さい石ほど数が多く、大きい石は稀（べき乗で偏らせる）
+        const size = lerp(b.size[0], b.size[1], Math.pow(rng(), 2.2));
+        /* 少し埋める。地面にぴったり載せると «置いた» ように見えるが、
+           埋めすぎると水際で石が消える */
+        const sink = size * (0.10 + rng() * 0.16);
+        const spread = { sx: 0.8 + rng() * 0.7, sz: 0.8 + rng() * 0.7 };
+        this.rockSet.add(b.tier, x, h - sink, z, size, spread,
+          (rng() * 5) | 0, rng() * TAU);
+        if (b.obstacle && h > -0.9 && size > 1.4) {
+          this.addObstacle(x, z, size * Math.max(spread.sx, spread.sz) * 0.42,
+            h - sink + size * 0.70);
+        }
+        placed++;
       }
+      this.rockCounts[b.tier] = placed;
     }
-    rocks.count = ri;
-    rocks.instanceMatrix.needsUpdate = true;
-    this.scene.add(rocks);
 
     /* --- 水中のストラクチャー（沈み岩・立ち枯れ） ---
        湖底に置いて、必ず水面より下に収める。糸は水面上を通るので
        キャストの邪魔にはならないが、水中カメラで見えて魚が付く */
     this.structures = [];
     {
-      const sRockMat = addUnderwaterCaustics(
-        new THREE.MeshStandardMaterial({ color: 0x4e5550, roughness: 0.98, flatShading: true }),
-        this._causticsUniforms,
-        'sunk-rock-caustics-v1'
-      );
+      /* 沈み岩も岸の岩と同じ作り（triplanar / 窪み AO / 濡れ）にする。
+         水面下なので «濡れ» は常に 1、苔は水面より上の条件で出ない */
+      const sRockGeo = makeSingleRock('boulder', this.seed ^ 0x9a17, 2);
+      const sRockMat = this.rockSet.mats.boulder;
       const sRocks = new THREE.InstancedMesh(
-        rockGeo, sRockMat, Math.max(1, this.lake.structures.length * 3)
+        sRockGeo, sRockMat, Math.max(1, this.lake.structures.length * 3)
       );
       sRocks.receiveShadow = true;
       const snagMat = addUnderwaterCaustics(new THREE.MeshStandardMaterial({
@@ -1282,9 +1325,12 @@ export class Terrain {
             const ox = (k === 0 ? 0 : (k === 1 ? 1 : -1)) * t.r * 0.75;
             const oz = (k === 0 ? 0 : (k === 1 ? -1 : 1)) * t.r * 0.55;
             const sc = t.r * (k === 0 ? 1 : 0.62) * (0.85 + t.v * 0.3);
-            qt.setFromEuler(new THREE.Euler(t.rot + k, t.rot * 1.7, t.v * 3));
-            p.set(t.x + ox, bedY + sc * 0.35, t.z + oz);
-            s.set(sc, sc * (0.55 + t.v * 0.35), sc);
+            /* 岩の原点は底面中央なので、湖底の高さへそのまま置く
+               （中心原点の頃は sc*0.35 だけ持ち上げていた）。
+               Y 軸まわりだけ回す。倒すと底面が浮いて «宙に浮いた岩» になる */
+            qt.setFromAxisAngle(UP, t.rot * 2.3 + k);
+            p.set(t.x + ox, bedY - sc * 0.10, t.z + oz);
+            s.set(sc * 1.35, sc * (0.75 + t.v * 0.4), sc * 1.35);
             m.compose(p, qt, s);
             if (si < sRocks.count) sRocks.setMatrixAt(si++, m);
           }
@@ -1366,9 +1412,10 @@ export class Terrain {
     if (this.swayMaterials) tickVegetationWind(this.swayMaterials, time * 1.0, windPow);
   }
 
-  /** 木・水辺の植物の LOD をカメラ距離で振り直す（変化時だけ行列を作り直す） */
+  /** 木・水辺の植物・岩の LOD をカメラ距離で振り直す（変化時だけ作り直す） */
   updateTrees(dt, cameraPos) {
     this.treeSet?.update(dt, cameraPos);
     this.waterPlants?.update(dt, cameraPos);
+    this.rockSet?.update(dt, cameraPos);
   }
 }

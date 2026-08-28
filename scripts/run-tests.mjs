@@ -26,6 +26,7 @@ const tests = [
   'scripts/lake-calm-water-test.mjs',
   'scripts/tree-test.mjs',
   'scripts/water-plant-test.mjs',
+  'scripts/rock-test.mjs',
 ];
 
 for (const rel of tests) {

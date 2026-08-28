@@ -15,11 +15,17 @@
 export function applyPatches(mat, patches) {
   const fns = [];
   const keys = [];
-  for (const patch of patches) {
-    if (!patch) continue;
-    patch(mat);
-    if (mat.onBeforeCompile) fns.push(mat.onBeforeCompile);
-    keys.push(mat.customProgramCacheKey ? mat.customProgramCacheKey() : '');
+  for (const fn of patches) {
+    if (!fn) continue;
+    /* 何もしないパッチ（条件が揃わず素通しするもの）を渡されたとき、
+       «いまの onBeforeCompile» を無条件に積むと直前のパッチを 2 回積む。
+       同じ注入が 2 回走って GLSL が redefinition で落ちるので、
+       変化したときだけ積む */
+    const before = mat.onBeforeCompile;
+    fn(mat);
+    if (mat.onBeforeCompile && mat.onBeforeCompile !== before) fns.push(mat.onBeforeCompile);
+    const key = mat.customProgramCacheKey ? mat.customProgramCacheKey() : '';
+    if (key && !keys.includes(key)) keys.push(key);
   }
   mat.onBeforeCompile = (shader, renderer) => {
     for (const f of fns) f(shader, renderer);

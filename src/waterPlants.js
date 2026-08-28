@@ -15,9 +15,9 @@
    穂とクロモの輪生葉だけは形が細かすぎるのでカード + テクスチャ。
    =========================================================== */
 import * as THREE from 'three';
-import { LodInstances, tintAt } from './lodInstances.js?v=20260828-leaflight2';
+import { LodInstances, tintAt } from './lodInstances.js?v=20260828-rocks6';
 import { makeRng, TAU, clamp01, lerp } from './util.js';
-import { applyPatches } from './materialPatch.js?v=20260828-leaflight2';
+import { applyPatches } from './materialPatch.js?v=20260828-rocks6';
 
 /**
  * 抽水植物（ヨシ・マコモ）の LOD しきい値。
