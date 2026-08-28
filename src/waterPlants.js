@@ -15,7 +15,7 @@
    穂とクロモの輪生葉だけは形が細かすぎるのでカード + テクスチャ。
    =========================================================== */
 import * as THREE from 'three';
-import { LodInstances, tintAt } from './lodInstances.js?v=20260828-waterplants6';
+import { LodInstances, tintAt } from './lodInstances.js?v=20260828-waterplants7';
 import { makeRng, TAU, clamp01, lerp } from './util.js';
 
 /** 抽水植物（ヨシ・マコモ）の LOD しきい値。3 段目は描かない */
@@ -238,7 +238,7 @@ function leafGreen(v, warm) {
  *
  * @param {'reed'|'manomo'|'tuft'} kind
  */
-export function makeBladeTexture(kind, W = 320) {
+export function makeBladeTexture(kind, W = 384) {
   const cfg = {
     reed: {
       layout: 'axis', h: 1.85, blades: 30,
@@ -247,8 +247,11 @@ export function makeBladeTexture(kind, W = 320) {
       v: [150, 208], warm: [0.02, 0.42],
     },
     manomo: {
-      layout: 'fan', h: 0.72, blades: 26,
-      len: [0.64, 1.08], width: [0.022, 0.042],
+      /* マコモの葉身は幅 2〜3cm × 長さ 1.5m ＝ 50:1 前後。
+         幅を取りすぎると «肉厚» に見えてマコモではなくオリヅルランになる。
+         細くしたぶん枚数で密度を稼ぐ */
+      layout: 'fan', h: 0.72, blades: 34,
+      len: [0.66, 1.10], width: [0.011, 0.021],
       tilt: [0.35, 1.30], bend: [0.35, 0.85], from: 0.13,
       v: [158, 218], warm: [0.08, 0.52],
     },

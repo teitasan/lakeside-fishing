@@ -82,7 +82,9 @@ assert.match(wp, /side: THREE\.FrontSide, alphaTest: 0\.26/, '葉群カードは
   }
   const cfg = wp.slice(wp.indexOf('export function makeBladeTexture('));
   for (const kind of ['reed', 'manomo', 'tuft']) {
-    const hm = cfg.match(new RegExp(`${kind}: \\{[\\s\\S]{0,120}?h: ([\\d.]+)`));
+    // 種のブロック（次の }, まで）の中から h を拾う。コメントが入っても壊れないように
+    const blk = cfg.match(new RegExp(`${kind}: \\{([\\s\\S]*?)\\n {4}\\},`));
+    const hm = blk && blk[1].match(/h: ([\d.]+)/);
     assert.ok(hm, `${kind} の h が読めない`);
     const want = 1 / parseFloat(hm[1]);
     assert.ok(Math.abs(aspects[kind] - want) < 1e-9,
