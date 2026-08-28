@@ -113,7 +113,7 @@ uniform vec2 uCaustDepth;    // 水深フェード（開始, 終了）
 uniform vec2 uCaustDist;     // 視距離フェード（開始, 終了）
 uniform vec2 uCaustFar;      // 深すぎる所で消すフェード（開始, 終了）
 uniform vec2 uCaustWarp;     // x = 波の傾きで歪める量, y = 有効深度の上限(m)
-uniform float uCaustMag;     // 深さ 1m あたり網目が何倍に広がるか
+uniform float uCaustMag;     // 深さ 1m あたり網目をどれだけぼかすか（LOD）
 uniform vec3 uCaustMixW;     // 2 枚の合成比（A, B, A*B）
 
 ${waveGLSL({ prefix: 'cs', slim: true })}
@@ -139,14 +139,17 @@ vec3 causticLight(vec3 worldPos, vec3 viewNormal) {
   vec2 slope = csWaveD(surf, uCaustTime);
   vec2 q = surf + slope * (min(depth, uCaustWarp.y) * uCaustWarp.x + 0.6);
 
-  /* 屈折した光束は進むほど広がるので、深い湖底に写る網目ほど大きくなる。
-     世界固定スケールのままだと深場でも数十cmの細かい網目が底一面を覆い、
-     上の横ずれと相まって「底が揺れている」ように見えてしまう */
-  float mag = 1.0 / (1.0 + depth * uCaustMag);
+  /* 深いほど波面の焦点はぼけるので、mip を意図的に落として網目を溶かす。
+     ここで「座標そのもの」に深度依存の倍率を掛けてはいけない。
+     q はワールド座標（岸は原点から 100m 超）なので、場所ごとに変わる倍率を
+     掛けると d(uv)/ds = scale*(mag + q*dmag/ds) の第 2 項が支配し、
+     斜面方向にだけ 4〜17 倍に引き伸ばされた「細長い」網目になる。
+     LOD バイアスなら座標は世界固定のまま、深さに応じてぼけるだけで済む */
+  float lod = log2(1.0 + depth * uCaustMag);
 
   float t = uCaustTime;
-  vec3 a = texture2D(uCaustTex, (q * uCaustScale.x + vec2( 0.011, 0.007) * t) * mag).rgb;
-  vec3 b = texture2D(uCaustTex, (q * uCaustScale.y + vec2(-0.008, 0.012) * t) * mag + vec2(0.37, 0.61)).rgb;
+  vec3 a = texture2D(uCaustTex, q * uCaustScale.x + vec2( 0.011, 0.007) * t, lod).rgb;
+  vec3 b = texture2D(uCaustTex, q * uCaustScale.y + vec2(-0.008, 0.012) * t + vec2(0.37, 0.61), lod).rgb;
   /* 実際のコースティクスは「1 枚の網目が粗細で重なったもの」なので、
      既定は 2 枚の和。積にすると交点だけが光る点描になってしまう */
   vec3 net = a * uCaustMixW.x + b * uCaustMixW.y + a * b * uCaustMixW.z;

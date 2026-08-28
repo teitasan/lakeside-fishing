@@ -272,8 +272,14 @@ assert.match(shadersSrc, /vec2 slope = csWaveD\(surf, uCaustTime\);/,
    網目が数セルぶん滑って「底面全体が揺れている」ように見える */
 assert.match(shadersSrc, /vec2 q = surf \+ slope \* \(min\(depth, uCaustWarp\.y\) \* uCaustWarp\.x \+ 0\.6\);/,
   'the caustic warp must cap the depth it scales with, or the deep bed sloshes');
-assert.match(shadersSrc, /float mag = 1\.0 \/ \(1\.0 \+ depth \* uCaustMag\);/,
-  'the caustic net must magnify with depth: a fixed world scale puts a fine mesh over the whole deep floor');
+assert.match(shadersSrc, /float lod = log2\(1\.0 \+ depth \* uCaustMag\);/,
+  'depth must soften the net through a mip bias, not by scaling the coordinate');
+/* 座標に深度依存の倍率を掛けると、q がワールド座標（岸は原点から 100m 超）
+   なので斜面方向にだけ何倍にも引き伸ばされた「細長い」網目になる */
+assert.doesNotMatch(shadersSrc, /\(q \* uCaustScale\.[xy][^)]*\) \* mag/,
+  'the caustic UV must stay world-anchored: scaling it by a depth-varying factor shears the net');
+assert.doesNotMatch(shadersSrc, /float mag = 1\.0 \/ \(1\.0 \+ depth \* uCaustMag\);/,
+  'the coordinate magnification must be gone');
 assert.match(shadersSrc, /\* \(1\.0 - smoothstep\(uCaustFar\.x, uCaustFar\.y, depth\)\);/,
   'caustics must fade out with depth through a tunable range');
 assert.doesNotMatch(shadersSrc, /1\.0 - smoothstep\(6\.0, 26\.0, depth\)/,
