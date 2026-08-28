@@ -12,7 +12,7 @@
    森全体がチラチラした砂目に見えるため。
    =========================================================== */
 import * as THREE from 'three';
-import { growTree, SPECIES, lodFor, LOD_DIST } from './treeSkeleton.js?v=20260828-vegetation1';
+import { growTree, SPECIES, lodFor, LOD_DIST } from './treeSkeleton.js?v=20260828-vegetation2';
 import { makeRng, TAU, lerp, clamp01 } from './util.js';
 
 export { LOD_DIST, lodFor };
@@ -321,7 +321,7 @@ export function buildBranches(skel, { radial = [8, 5, 4, 3], levelMax = 99, vSca
 const CELL = 1 / LEAF_ATLAS;
 
 export function buildLeaves(skel, { stride = 1, sizeScale = 1, cross = true } = {}) {
-  const pos = [], nor = [], uv = [], col = [], idx = [];
+  const pos = [], nor = [], uv = [], col = [], flt = [], idx = [];
   const f = new THREE.Vector3(), u = new THREE.Vector3(), w = new THREE.Vector3();
   const outward = new THREE.Vector3(), nrm = new THREE.Vector3(), card = new THREE.Vector3();
   const ref = new THREE.Vector3();
@@ -358,6 +358,8 @@ export function buildLeaves(skel, { stride = 1, sizeScale = 1, cross = true } = 
     const sz = l.size * sizeScale;
     /* アトラスのどのセルを引くか。roll から決めるので seed が同じなら同じ絵になる */
     const cellIdx = Math.floor(l.roll / TAU * (LEAF_ATLAS * LEAF_ATLAS)) % (LEAF_ATLAS * LEAF_ATLAS);
+    // 房ごとの震えの位相。位置と roll から決めるので seed が同じなら再現する
+    const phase = l.roll * 3.3 + (l.x * 4.7 + l.y * 2.9 + l.z * 3.7);
     const cu = cellIdx % LEAF_ATLAS, cv = (cellIdx / LEAF_ATLAS) | 0;
     const planes = cross ? [u, w] : [u];
     for (let pi = 0; pi < planes.length; pi++) {
@@ -378,6 +380,8 @@ export function buildLeaves(skel, { stride = 1, sizeScale = 1, cross = true } = 
         nor.push(nrm.x, nrm.y, nrm.z);
         uv.push((cu + (k === 0 || k === 3 ? 0 : 1)) * CELL, (cv + (k < 2 ? 0 : 1)) * CELL);
         col.push(ao, ao, ao);
+        // 房の 4 頂点すべてに同じ位相を入れる（頂点ごとに変えるとカードが歪む）
+        flt.push(phase);
       }
       idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
     }
@@ -388,6 +392,7 @@ export function buildLeaves(skel, { stride = 1, sizeScale = 1, cross = true } = 
   geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geo.setAttribute('aFlutter', new THREE.Float32BufferAttribute(flt, 1));
   geo.setIndex(idx);
   return geo;
 }
@@ -520,20 +525,34 @@ export class TreeSet {
       const sp = SPECIES[k];
       /* color は白のまま。テクスチャ側がすでに樹皮色・葉色を持っているので、
          ここで種の色を掛けると 2 回掛かって幹も葉も真っ黒に沈む */
-      const barkMat = new THREE.MeshStandardMaterial({
-        map: this.textures[k].bark, roughness: 0.95, metalness: 0,
-      });
+      const barkBase = { map: this.textures[k].bark, roughness: 0.95, metalness: 0 };
       const leafBase = {
         map: this.textures[k].leaf,
         roughness: 0.86, metalness: 0,
         alphaTest: 0.42, transparent: false,
         side: THREE.DoubleSide, vertexColors: true,
       };
-      const leafMat = opts.addWindSway
-        ? opts.addWindSway(new THREE.MeshStandardMaterial(leafBase),
-          { strength: q === 'low' ? 0.030 : 0.045, freq: 1.25, gustiness: 0.55 })
-        : new THREE.MeshStandardMaterial(leafBase);
-      if (opts.addWindSway) this.swayMaterials.push(leafMat);
+
+      /* 風は LOD ごとに段を落とす。
+         近景：幹・枝と葉が「同じ bend」で一緒に曲がり、葉だけさらに震える。
+               葉だけ動かすと、近くで見たとき葉が枝から剥がれて浮いて見える。
+         中景：bend だけを葉に掛ける。34m 以遠では幹と葉の数十cm のずれは
+               1px 未満なので、幹の頂点を毎フレーム動かす価値がない。
+         遠景：板なので動かさない。 */
+      const bend = {
+        strength: q === 'low' ? 0.024 : 0.034,
+        freq: 1.05, gustiness: 0.55,
+        // 幹は根元が硬い。高さに比例させると幹全体が弓なりになって不自然
+        bendPow: 1.7,
+      };
+      const sway = opts.addWindSway || ((m) => m);
+      const barkNear = sway(new THREE.MeshStandardMaterial(barkBase), bend);
+      const barkMid = new THREE.MeshStandardMaterial(barkBase);
+      const leafNear = sway(new THREE.MeshStandardMaterial(leafBase), {
+        ...bend, flutter: q === 'low' ? 0 : 0.010, flutterFreq: 2.9,
+      });
+      const leafMid = sway(new THREE.MeshStandardMaterial(leafBase), bend);
+      if (opts.addWindSway) this.swayMaterials.push(barkNear, leafNear, leafMid);
 
       for (let va = 0; va < VARIANTS; va++) {
         const skel = growTree(k, makeRng(seed ^ (0x9e37 * (this.kinds.indexOf(k) + 1)) ^ (va * 0x51ed)));
@@ -543,18 +562,21 @@ export class TreeSet {
         // --- LOD0：近景 ---
         const b0 = buildBranches(skel, { radial: radial0 });
         const l0 = buildLeaves(skel, { stride: leafStride, sizeScale: 1, cross: true });
-        // --- LOD1：中景。枝は最終段を落とし、葉は 1/4 の枚数を 1.9 倍で ---
+        /* --- LOD1：中景。枝は最終段を落とし、葉は 1/5 の枚数を 2.1 倍の大きさで ---
+           板 1 枚にすると真横から見たカードが消えて樹冠に穴があき、
+           近景から切り替わった瞬間に «葉が減った» と分かる。
+           枚数を半分にしてでも十字のままにしたほうが安定する */
         const b1 = buildBranches(skel, { radial: [4, 3, 3, 3], levelMax: sp.levels.length - 2 });
-        const l1 = buildLeaves(skel, { stride: 3, sizeScale: 1.75, cross: false });
+        const l1 = buildLeaves(skel, { stride: 5, sizeScale: 2.1, cross: true });
         for (const g of [b0, l0, b1, l1]) g.scale(norm, norm, norm);
 
         this._addLevel(k, va, 0, [
-          { geo: b0, mat: barkMat, shadow: true },
-          { geo: l0, mat: leafMat, shadow: true },
+          { geo: b0, mat: barkNear, shadow: true },
+          { geo: l0, mat: leafNear, shadow: true },
         ], cap);
         this._addLevel(k, va, 1, [
-          { geo: b1, mat: barkMat, shadow: false },
-          { geo: l1, mat: leafMat, shadow: false },
+          { geo: b1, mat: barkMid, shadow: false },
+          { geo: l1, mat: leafMid, shadow: false },
         ], cap);
 
         /* --- LOD2：遠景インポスター ---
@@ -562,7 +584,7 @@ export class TreeSet {
            バックグラウンドで 0×0 のことがあるので、まず中景で代用しておき、
            サイズが付いたフレームで焼き直す（_tryBake）。
            ここで無条件に render すると 0×0 のコンテキストで固まる */
-        this._addLevel(k, va, 2, [{ geo: l1, mat: leafMat, shadow: false }], cap);
+        this._addLevel(k, va, 2, [{ geo: l1, mat: leafMid, shadow: false }], cap);
         if (opts.renderer) {
           this._pendingBake.push({
             key: `${k}|${va}|2`, kind: k, branchGeo: b0, leafGeo: l0,

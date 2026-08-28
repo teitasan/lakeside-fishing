@@ -123,6 +123,36 @@ assert.match(treesSrc, /N\.copy\(prevN\)\.addScaledVector\(T, -prevN\.dot\(T\)\)
 // 葉の法線は樹冠中心からの外向きが主（面法線のままだと板の集合に見える）
 assert.match(treesSrc, /nrm\.copy\(outward\)\.multiplyScalar\(0\.78\)/,
   'leaf normals must be dominated by the outward canopy direction');
+/* 風：近景は幹・枝と葉が同じ bend で動く。葉だけ動かすと、近くで見たとき
+   葉が枝から剥がれて浮いて見える（実際にそう見えたので直した） */
+assert.match(treesSrc, /const barkNear = sway\(new THREE\.MeshStandardMaterial\(barkBase\), bend\);/,
+  'the trunk and branches must bend with the same wind term as the leaves');
+assert.match(treesSrc, /const leafNear = sway\(new THREE\.MeshStandardMaterial\(leafBase\), \{\s*\.\.\.bend,/,
+  'near foliage must reuse the very same bend options as the bark');
+assert.match(treesSrc, /const barkMid = new THREE\.MeshStandardMaterial\(barkBase\);/,
+  'mid-range bark must be static: moving those vertices buys nothing past 34m');
+assert.match(treesSrc, /\{ geo: b0, mat: barkNear, shadow: true \}/);
+assert.match(treesSrc, /\{ geo: b1, mat: barkMid, shadow: false \}/);
+// 揺れの時刻を進める対象に中景の幹が混ざっていないこと
+assert.match(treesSrc, /this\.swayMaterials\.push\(barkNear, leafNear, leafMid\);/,
+  'only the swaying materials may be ticked');
+// 房の 4 頂点は同じ位相（頂点ごとに変えるとカードが引き伸ばされる）
+assert.match(treesSrc, /flt\.push\(phase\);/,
+  'all four corners of a foliage card must share one flutter phase');
+assert.match(treesSrc, /geo\.setAttribute\('aFlutter'/,
+  'the flutter phase must reach the shader as an attribute');
+
+const terrainWind = read('src/terrain.js');
+assert.match(terrainWind, /flutter = 0,/, 'addWindSway must expose an opt-in flutter band');
+assert.match(terrainWind, /bendPow = 1,/, 'addWindSway must expose a bend exponent so trunks stay stiff');
+assert.match(terrainWind, /attribute float aFlutter;/,
+  'the flutter band must read the per-cluster phase attribute');
+assert.match(terrainWind, /if \(u\.uWindFlutter\) u\.uWindFlutter\.value = m\.userData\._flutterBase \* windPow;/,
+  'the flutter amplitude must follow the weather like the bend does');
+
+// 中景の葉も十字のまま（1 枚板は真横から消えて樹冠に穴があく）
+assert.match(treesSrc, /const l1 = buildLeaves\(skel, \{ stride: 5, sizeScale: 2\.1, cross: true \}\);/,
+  'mid-range foliage must stay crossed or cards vanish edge-on');
 // 木ごとの色ムラ（同じ緑が 900 本並ぶのを避ける）
 assert.match(treesSrc, /im\.setColorAt\(n, col\);/,
   'each tree must get its own tint through instanceColor');

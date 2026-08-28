@@ -81,8 +81,8 @@ export const SPECIES = {
     crownRatio: 0.36,        // 樹冠半径 / 樹高（当たり判定と LOD 用の目安）
     barkColor: 0xa9a79c,     // 灰白。地衣類の斑は trees.js のテクスチャ側で足す
     leafColor: 0x6f9440,
-    leafSize: 0.80,          // 葉 1 枚ではなく「小枝ひと房」を 1 カードで表す
-    leafPerTip: 22,
+    leafSize: 0.76,          // 葉 1 枚ではなく「小枝ひと房」を 1 カードで表す
+    leafPerTip: 34,
     leafLevels: 2,           // 最終段だけだと樹冠の内側が抜ける
     levels: [
       { segments: 8, taper: 0.34, gnarliness: 0.055, gravity: 0.05 },
@@ -119,8 +119,8 @@ export const SPECIES = {
     crownRatio: 0.20,
     barkColor: 0x6d4a37,     // 赤褐色の縦裂
     leafColor: 0x33512f,
-    leafSize: 0.95,          // 房を大きく取って枚数を増やさずに密度を出す
-    leafPerTip: 8,
+    leafSize: 0.88,
+    leafPerTip: 15,
     leafLevels: 2,
     levels: [
       // 主幹はほとんど曲がらない

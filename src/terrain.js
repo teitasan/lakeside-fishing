@@ -7,8 +7,8 @@ import { waveGLSL } from './waveField.js?v=20260828-lakescale1';
 import { UnderwaterPropScatter, addUnderwaterCaustics } from './underwaterProps.js?v=20260828-uwgfx18';
 import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js';
 import { makeTileableHeightField } from './tileableNoise.js?v=20260827-orgnoise4';
-import { TreeSet, VARIANTS as TREE_VARIANTS } from './trees.js?v=20260828-vegetation1';
-import { SPECIES_IDS } from './treeSkeleton.js?v=20260828-vegetation1';
+import { TreeSet, VARIANTS as TREE_VARIANTS } from './trees.js?v=20260828-vegetation2';
+import { SPECIES_IDS } from './treeSkeleton.js?v=20260828-vegetation2';
 import { WORLD_SIZE, WATER_REGION, MAX_DEPTH, resolveLake } from './lakefield.js';
 
 export { WORLD_SIZE, WATER_REGION, MAX_DEPTH };
@@ -228,34 +228,54 @@ function createBedDetailTexture() {
 
 /**
  * 植生マテリアルに風揺れを注入する。
- * 頂点ごとに「根元は動かない・先端ほど揺れる」重み（高さ比例）をかけ、
- * 複数周波数のサイン波 + ノイズ的な位相ずれで、木ごと・草ごとに
- * 揺れのタイミングをずらす。インスタンス座標を位相源にするので
- * 追加ジオメトリや CPU 更新は不要。
+ *
+ * 揺れは 2 帯域に分ける。
+ *   bend    株ごとに位相が決まる大きなしなり。根元は動かず先端ほど曲がる。
+ *           幹・枝と葉に「同じ式」を掛けるのが肝で、葉だけ動かすと
+ *           近くで見たとき葉が枝から剥がれて浮いているように見える。
+ *   flutter 葉カードごとに位相が違う細かい震え（aFlutter 属性が要る）。
+ *           こちらは葉だけに掛ける。
+ *
+ * インスタンス座標を bend の位相源にするので、追加ジオメトリも CPU 更新も要らない。
+ *
+ * @param {THREE.Material} mat
+ * @param {{strength?: number, freq?: number, gustiness?: number,
+ *          bendPow?: number, flutter?: number, flutterFreq?: number}} opts
+ *   bendPow  1 で高さに比例（草・葦）。木の幹は根元が硬いので 1.6 前後にすると
+ *            «下は動かず梢だけ大きく揺れる» 曲がり方になる
+ *   flutter  0 で無効。>0 なら aFlutter 属性を位相にした細かい震えを足す
  */
 function addWindSway(mat, {
-  strength = 0.06,     // 先端の最大振れ幅（m 相当）
+  strength = 0.06,     // 先端の最大振れ幅（ローカル単位）
   freq = 1.6,          // 基本の揺れ速さ
   gustiness = 0.5,     // 突風の強さ（0 で一定風）
+  bendPow = 1,         // 高さ方向の効き。>1 で根元が硬くなる
+  flutter = 0,         // 葉のこまかい震え
+  flutterFreq = 3.1,
 } = {}) {
+  const useFlutter = flutter > 0;
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uWindTime = { value: 0 };
     shader.uniforms.uWindStrength = { value: strength };
     shader.uniforms.uWindGust = { value: gustiness };
+    shader.uniforms.uWindFlutter = { value: flutter };
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
         `#include <common>
         uniform float uWindTime;
         uniform float uWindStrength;
-        uniform float uWindGust;`
+        uniform float uWindGust;
+        uniform float uWindFlutter;
+        ${useFlutter ? 'attribute float aFlutter;' : ''}`
       )
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
         {
           // ローカルの高さ（幹・葉とも原点が根元なので y のみで良い）
-          float swayW = clamp(transformed.y, 0.0, 8.0);
+          float swayH = clamp(transformed.y, 0.0, 8.0);
+          float swayW = ${bendPow === 1 ? 'swayH' : `pow(swayH, ${bendPow.toFixed(2)})`};
           // インスタンス位置で位相をずらす（隣の木が同じタイミングで揺れない）
           vec3 ipos = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
           float phase = dot(ipos.xz, vec2(0.71, 0.53));
@@ -265,12 +285,23 @@ function addWindSway(mat, {
           float w2 = sin(uWindTime * ${(freq * 2.37).toFixed(2)} + phase * 1.7 + 1.3);
           transformed.x += (w1 * 0.7 + w2 * 0.3) * g * uWindStrength * swayW;
           transformed.z += (w2 * 0.7 - w1 * 0.3) * g * uWindStrength * swayW * 0.62;
+${useFlutter ? `          /* 葉カードごとの震え。位相は房ごとに固定なので、
+             1 枚のカードが引き延ばされずに丸ごと動く */
+          float fa = aFlutter;
+          float f1 = sin(uWindTime * ${flutterFreq.toFixed(2)} + fa);
+          float f2 = sin(uWindTime * ${(flutterFreq * 1.73).toFixed(2)} + fa * 2.3);
+          float fw = uWindFlutter * g * mix(0.35, 1.0, swayH);
+          transformed.x += (f1 * 0.7 + f2 * 0.3) * fw;
+          transformed.y += sin(uWindTime * ${(flutterFreq * 0.81).toFixed(2)} + fa * 1.9) * fw * 0.55;
+          transformed.z += (f2 * 0.7 - f1 * 0.3) * fw;` : ''}
         }`
       );
     mat.userData.windUniforms = shader.uniforms;
   };
-  mat.customProgramCacheKey = () => `wind-sway-${strength}-${freq}-${gustiness}`;
+  mat.customProgramCacheKey = () =>
+    `wind-sway-${strength}-${freq}-${gustiness}-${bendPow}-${flutter}-${flutterFreq}`;
   mat.userData._windBase = strength;
+  mat.userData._flutterBase = flutter;
   return mat;
 }
 
@@ -281,6 +312,7 @@ export function tickVegetationWind(list, t, windPow = 1) {
     if (!u || !u.uWindTime) continue;   // 初回コンパイル前
     u.uWindTime.value = t;
     if (u.uWindStrength) u.uWindStrength.value = m.userData._windBase * windPow;
+    if (u.uWindFlutter) u.uWindFlutter.value = m.userData._flutterBase * windPow;
   }
 }
 
