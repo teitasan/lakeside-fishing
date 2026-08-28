@@ -12,10 +12,11 @@
    森全体がチラチラした砂目に見えるため。
    =========================================================== */
 import * as THREE from 'three';
-import { growTree, SPECIES, lodFor, LOD_DIST } from './treeSkeleton.js?v=20260828-rocks6';
+import { growTree, SPECIES, lodFor, LOD_DIST } from './treeSkeleton.js?v=20260828-lodwide2';
+import { lodForList } from './util.js';
 import { makeRng, TAU, lerp, clamp01 } from './util.js';
 import { applyPatches, keepAuthoredNormals, foliageTranslucency }
-  from './materialPatch.js?v=20260828-rocks6';
+  from './materialPatch.js?v=20260828-lodwide2';
 
 export { LOD_DIST, lodFor };
 
@@ -502,6 +503,9 @@ export class TreeSet {
     const seed = (opts.seed ?? 1) >>> 0;
     const cap = opts.capacity ?? 520;
 
+    /* しきい値はインスタンスが持つ。実機で負荷を見ながら振りたいので、
+       モジュール定数を直接読まずコピーを持たせる（terrain.setLodScale） */
+    this.lodDist = [...LOD_DIST];
     this.kinds = Object.keys(SPECIES);
     this.trees = [];
     this.meshes = [];          // すべての InstancedMesh（描画順の都合で保持）
@@ -687,7 +691,7 @@ export class TreeSet {
     let changed = this._dirty;
     for (const t of this.trees) {
       const d = Math.hypot(t.x - cameraPos.x, t.y - cameraPos.y, t.z - cameraPos.z);
-      const l = lodFor(d, t.lod);
+      const l = lodForList(d, this.lodDist, t.lod, 8);
       if (l !== t.lod) { t.lod = l; changed = true; }
     }
     if (!changed) return;
@@ -729,9 +733,12 @@ export class TreeSet {
     }
   }
 
+  /** 段の数が増減しても counts の長さが合うように */
+  get tiers() { return this.lodDist.length + 1; }
+
   /** デバッグ／テスト用：LOD ごとの本数 */
   lodCounts() {
-    const out = [0, 0, 0];
+    const out = new Array(this.tiers).fill(0);
     for (const t of this.trees) if (t.lod >= 0) out[t.lod]++;
     return out;
   }

@@ -15,18 +15,18 @@
    穂とクロモの輪生葉だけは形が細かすぎるのでカード + テクスチャ。
    =========================================================== */
 import * as THREE from 'three';
-import { LodInstances, tintAt } from './lodInstances.js?v=20260828-rocks6';
+import { LodInstances, tintAt } from './lodInstances.js?v=20260828-lodwide2';
 import { makeRng, TAU, clamp01, lerp } from './util.js';
-import { applyPatches } from './materialPatch.js?v=20260828-rocks6';
+import { applyPatches } from './materialPatch.js?v=20260828-lodwide2';
 
 /**
  * 抽水植物（ヨシ・マコモ）の LOD しきい値。
  * 全部カードなので 1 株 4〜12 三角しかない。近景を絞って株数を稼ぎ、
  * 遠景はカード 1 枚だけにして «岸の縁» を 130m まで残す。
  */
-export const EMERGENT_LOD = [16, 46, 130];
+export const EMERGENT_LOD = [32, 88, 190];
 /** 沈水植物（クロモ）。水の吸収で 55m 先はもう見えない */
-export const SUBMERGED_LOD = [18, 55];
+export const SUBMERGED_LOD = [34, 78];
 
 /** LOD ごとのカード枚数。1 枚だと真横から消えるので遠景でも 1 枚は残す */
 const CARDS_PER_LOD = [3, 2, 1];

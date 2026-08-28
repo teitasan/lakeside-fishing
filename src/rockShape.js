@@ -182,12 +182,54 @@ export const ROCK_KINDS = Object.keys(ROCK_PRESETS);
 
 /* ---------------- 生成 ---------------- */
 
+/** LOD をどの分割から切り出すか。ここより細かい段は作らない */
+export const BASE_DETAIL = 3;
+
+/** detail 段の頂点数。icosphere は分割で «元の頂点を保ったまま» 中点を足す */
+export const vertCountFor = (detail) => 10 * 4 ** detail + 2;
+
 /**
- * 岩を 1 つ作る。
+ * 岩を 1 つ作る。LOD の各段を «同じ頂点集合の部分» として返す。
+ *
+ * icosphere の分割は元の頂点を保って中点を追記していくので、
+ * detail=1 の 42 頂点は detail=3 の 642 頂点の «先頭 42 個» と一致する。
+ * だから工程は最高分割で 1 回だけ回し、粗い段はその頂点を切り出して
+ * 粗い面で張り直せばよい。
+ *
+ * 段ごとに工程を回し直すと、角の欠けも熱侵食も «近傍» を見るので
+ * 結果が変わり、正規化の基準も変わる。すると LOD が切り替わった瞬間に
+ * 岩の形そのものが動いて «近づくといきなり形が変わる» ように見える。
  *
  * @param {string} kind ROCK_PRESETS のキー
- * @param {number} seed 形を決める種。同じ seed / 違う detail なら
- *   «同じ岩の粗い版» になる（LOD をまたいでシルエットが変わらない）
+ * @param {number} seed 形を決める種
+ * @param {{details?: number[]}} opts 欲しい段（降順でなくてよい）
+ * @returns {Array<{position, normal, cavity, index, tris}>} details と同順
+ */
+export function makeRockLods(kind, seed, { details = [3, 2, 1] } = {}) {
+  const full = makeRockShape(kind, seed, { detail: BASE_DETAIL });
+  return details.map((d) => {
+    if (d >= BASE_DETAIL) return full;
+    const n = vertCountFor(d);
+    const faces = icosphere(d).faces;
+    const position = full.position.slice(0, n * 3);
+    const cavity = full.cavity.slice(0, n);
+    // 法線は «粗い面» から取り直す。細かい面の法線を残すと平らな面が歪んで光る
+    const normal = vertexNormals(position, faces, n);
+    const index = new (n > 65535 ? Uint32Array : Uint16Array)(faces.length * 3);
+    for (let i = 0; i < faces.length; i++) {
+      index[i * 3] = faces[i][0];
+      index[i * 3 + 1] = faces[i][1];
+      index[i * 3 + 2] = faces[i][2];
+    }
+    return { position, normal, cavity, index, tris: faces.length };
+  });
+}
+
+/**
+ * 岩を 1 つ作る（単段）。LOD を並べるときは makeRockLods を使うこと。
+ *
+ * @param {string} kind ROCK_PRESETS のキー
+ * @param {number} seed 形を決める種
  * @param {{detail?: number}} opts
  * @returns {{position: Float32Array, normal: Float32Array, cavity: Float32Array,
  *            index: Uint16Array|Uint32Array, tris: number}}

@@ -13,19 +13,19 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const read = (rel) => readFileSync(join(root, rel), 'utf8');
 
 /* ---------------- LOD 判定（植生共通） ---------------- */
-const D = [28, 78];
+const D = [32, 88];
 assert.strictEqual(lodForList(5, D, -1), 0);
-assert.strictEqual(lodForList(50, D, -1), 1);
+assert.strictEqual(lodForList(60, D, -1), 1);
 assert.strictEqual(lodForList(200, D, -1), 2, '最後のしきい値より遠いと最終段');
 // ヒステリシス：境界を往復しても段が張り付く
-assert.strictEqual(lodForList(32, D, 0, 8), 0, '境界 +4m ではまだ近景');
-assert.strictEqual(lodForList(38, D, 0, 8), 1, '境界 +10m で中景へ落ちる');
-assert.strictEqual(lodForList(24, D, 1, 8), 1, '戻るには内側の境界まで近づく');
-assert.strictEqual(lodForList(18, D, 1, 8), 0);
+assert.strictEqual(lodForList(36, D, 0, 8), 0, '境界 +4m ではまだ近景');
+assert.strictEqual(lodForList(42, D, 0, 8), 1, '境界 +10m で中景へ落ちる');
+assert.strictEqual(lodForList(28, D, 1, 8), 1, '戻るには内側の境界まで近づく');
+assert.strictEqual(lodForList(22, D, 1, 8), 0);
 {
   let cur = 0, flips = 0;
   for (let pass = 0; pass < 6; pass++) {
-    const seq = pass % 2 ? [36, 34, 32, 30, 28] : [28, 30, 32, 34, 36];
+    const seq = pass % 2 ? [40, 38, 36, 34, 32] : [32, 34, 36, 38, 40];
     for (const d of seq) {
       const l = lodForList(d, D, cur, 8);
       if (l !== cur) flips++;

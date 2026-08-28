@@ -15,9 +15,9 @@
    半透明も細い枝も無いので、超低ポリのメッシュのままで十分。
    =========================================================== */
 import * as THREE from 'three';
-import { makeRockShape, ROCK_KINDS } from './rockShape.js?v=20260828-rocks6';
-import { LodInstances, tintAt } from './lodInstances.js?v=20260828-rocks6';
-import { applyPatches } from './materialPatch.js?v=20260828-rocks6';
+import { makeRockShape, makeRockLods, ROCK_KINDS } from './rockShape.js?v=20260828-lodwide2';
+import { LodInstances, tintAt } from './lodInstances.js?v=20260828-lodwide2';
+import { applyPatches } from './materialPatch.js?v=20260828-lodwide2';
 import { makeRng, TAU, lerp } from './util.js';
 
 /**
@@ -27,9 +27,9 @@ import { makeRng, TAU, lerp } from './util.js';
  *   pebble  小石： 80 のみ。近くにしか出さない
  */
 export const ROCK_TIERS = {
-  boulder: { lodDist: [22, 70, 190], detail: [3, 2, 1] },
-  cobble: { lodDist: [16, 48], detail: [2, 1] },
-  pebble: { lodDist: [14], detail: [1] },
+  boulder: { lodDist: [60, 140, 320], detail: [3, 2, 1] },
+  cobble: { lodDist: [40, 100], detail: [2, 1] },
+  pebble: { lodDist: [34], detail: [1] },
 };
 
 /** 形のバリエーション数（階層ごと） */
@@ -377,14 +377,16 @@ export class RockSet {
       const caps = (opts.capacity || {})[tier] || cfg.lodDist.map(() => 400);
       for (let va = 0; va < ROCK_VARIANTS; va++) {
         const kind = ROCK_KINDS[va % ROCK_KINDS.length];
+        /* 全段をまとめて作る。工程は最高分割で 1 回だけ回し、粗い段は
+           その «頂点の部分集合» を粗い面で張り直したもの。
+           段ごとに作り直すと角の欠けも侵食も結果が変わり、切り替わった
+           瞬間に岩の形そのものが動いて見える */
+        const lods = makeRockLods(kind, seed ^ (0x9e37 * (va + 1)) ^ (tier.length * 0x51ed), {
+          details: cfg.detail,
+        });
         for (let lod = 0; lod < cfg.lodDist.length; lod++) {
-          /* 同じ seed で detail だけ落とす。頂点は少なくなるが同じ
-             ノイズ場を見るのでシルエットが変わらない */
-          const shape = makeRockShape(kind, seed ^ (0x9e37 * (va + 1)) ^ (tier.length * 0x51ed), {
-            detail: cfg.detail[lod],
-          });
           set.register(`${tier}|${va}`, lod, [{
-            geo: rockGeometry(shape), mat, shadow: tier === 'boulder',
+            geo: rockGeometry(lods[lod]), mat, shadow: tier === 'boulder',
           }], caps[lod] ?? 400);
         }
       }

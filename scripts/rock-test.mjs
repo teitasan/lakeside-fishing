@@ -162,6 +162,27 @@ for (const kind of ROCK_KINDS) {
     'slab は侵食が進んで上面が座っていること');
 }
 
+/* LOD の各段は «同じ頂点集合の部分». 段ごとに工程を回し直すと角の欠けも
+   熱侵食も結果が変わり、切り替わった瞬間に岩の形そのものが動く
+   （実測で正規化後 0.026〜0.072 ＝ 4.6m の岩で 12〜33cm 動いていた） */
+{
+  const { makeRockLods } = await import('../src/rockShape.js');
+  for (const kind of ROCK_KINDS) {
+    const [fine, mid, coarse] = makeRockLods(kind, 0x77, { details: [3, 2, 1] });
+    for (const lo of [mid, coarse]) {
+      for (let i = 0; i < lo.position.length; i++) {
+        assert.strictEqual(lo.position[i], fine.position[i],
+          `${kind}: 粗い段の頂点が細かい段と一致しない（LOD の切り替わりで形が動く）`);
+      }
+      for (let i = 0; i < lo.cavity.length; i++) {
+        assert.strictEqual(lo.cavity[i], fine.cavity[i], `${kind}: 窪みも引き継ぐこと`);
+      }
+    }
+    assert.strictEqual(coarse.tris, 80);
+    assert.strictEqual(mid.tris, 320);
+  }
+}
+
 /* ---------------- 実装の不変条件 ---------------- */
 const rocks = read('src/rocks.js');
 const shape = read('src/rockShape.js');
@@ -187,6 +208,8 @@ assert.doesNotMatch(rocks, /setAttribute\('uv'/, 'ジオメトリにも UV を�
 
 /* 法線は逆転置で運ぶ。異方スケールのインスタンスで素の行列を掛けると
    斜面の陰影がずれ、triplanar の混合比も狂う */
+assert.match(rocks, /const lods = makeRockLods\(kind, seed/,
+  'LOD はまとめて作る（段ごとに工程を回し直さない）');
 assert.match(rocks, /vec3 rn = objectNormal \/ max\(sc \* sc, vec3\(1e-6\)\);/,
   'instance normals must use the inverse transpose approximation');
 
@@ -197,9 +220,9 @@ assert.match(rocks, /roughnessFactor = mix\(roughnessFactor, 0\.30, wet \* 0\.85
   '濡れた岩はつるつるになる');
 
 /* 大きさで作りを分ける（全部テクスチャでも全部ポリゴンでもない） */
-assert.match(rocks, /boulder: \{ lodDist: \[22, 70, 190\], detail: \[3, 2, 1\] \}/);
-assert.match(rocks, /cobble: \{ lodDist: \[16, 48\], detail: \[2, 1\] \}/);
-assert.match(rocks, /pebble: \{ lodDist: \[14\], detail: \[1\] \}/,
+assert.match(rocks, /boulder: \{ lodDist: \[60, 140, 320\], detail: \[3, 2, 1\] \}/);
+assert.match(rocks, /cobble: \{ lodDist: \[40, 100\], detail: \[2, 1\] \}/);
+assert.match(rocks, /pebble: \{ lodDist: \[34\], detail: \[1\] \}/,
   '小石は近距離だけ。遠くは地面テクスチャに任せる');
 // 岩は板にしない（動かず、シルエットが単純で、半透明も細い枝も無い）
 assert.doesNotMatch(rocks, /impostor|billboard/i, '岩はインポスターにしない');

@@ -4,13 +4,13 @@
 import * as THREE from 'three';
 import { CAUSTICS_GLSL } from './shaders.js?v=20260828-snellwin2';
 import { waveGLSL } from './waveField.js?v=20260828-lakescale1';
-import { UnderwaterPropScatter, addUnderwaterCaustics, patchUwMaterial } from './underwaterProps.js?v=20260828-rocks6';
-import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260828-rocks6';
-import { RockSet, makeSingleRock } from './rocks.js?v=20260828-rocks6';
+import { UnderwaterPropScatter, addUnderwaterCaustics, patchUwMaterial } from './underwaterProps.js?v=20260828-lodwide2';
+import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260828-lodwide2';
+import { RockSet, makeSingleRock } from './rocks.js?v=20260828-lodwide2';
 import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js';
 import { makeTileableHeightField } from './tileableNoise.js?v=20260827-orgnoise4';
-import { TreeSet, VARIANTS as TREE_VARIANTS } from './trees.js?v=20260828-rocks6';
-import { SPECIES_IDS } from './treeSkeleton.js?v=20260828-rocks6';
+import { TreeSet, VARIANTS as TREE_VARIANTS } from './trees.js?v=20260828-lodwide2';
+import { SPECIES_IDS } from './treeSkeleton.js?v=20260828-lodwide2';
 import { WORLD_SIZE, WATER_REGION, MAX_DEPTH, resolveLake } from './lakefield.js';
 
 export { WORLD_SIZE, WATER_REGION, MAX_DEPTH };
@@ -1237,10 +1237,12 @@ export class Terrain {
       seed: this.seed ^ 0x40c7,
       causticsUniforms: this._causticsUniforms,
       addUnderwaterCaustics,
+      /* 段ごとの枠。近景を広げたので、どの段にも «その階層の全数» が
+         入りうる。溢れると黙って描かれなくなるので余裕を取る */
       capacity: {
-        boulder: [90, 220, 420].map((n) => Math.ceil(n * rockScale)),
-        cobble: [200, 900].map((n) => Math.ceil(n * rockScale)),
-        pebble: [700].map((n) => Math.ceil(n * rockScale)),
+        boulder: [150, 150, 150].map((n) => Math.ceil(n * rockScale)),
+        cobble: [440, 440].map((n) => Math.ceil(n * rockScale)),
+        pebble: [1200].map((n) => Math.ceil(n * rockScale)),
       },
     });
 
@@ -1410,6 +1412,35 @@ export class Terrain {
   /** 風揺れの時刻を進める（windPow: 雨天ほど強く） */
   updateWind(time, windPow = 1) {
     if (this.swayMaterials) tickVegetationWind(this.swayMaterials, time * 1.0, windPow);
+  }
+
+  /**
+   * 近景の範囲を一括で伸縮する（負荷の確認用）。
+   *
+   * すべての LOD しきい値に scale を掛ける。1 が既定、2 で «近景の半径 2 倍
+   * ＝ 面積 4 倍»。段の枠（capacity）は既定値のまま増えないので、
+   * 大きくしすぎると溢れたぶんは黙って描かれなくなる。
+   *
+   *   __game.terrain.setLodScale(1.5)
+   *   __game.perf.getSnapshot(__game)   // fps / frameMs / cpuMs / gpuMs
+   *
+   * @param {number} scale
+   */
+  setLodScale(scale = 1) {
+    const k = Math.max(0.1, Math.min(4, scale));
+    const sets = [];
+    if (this.treeSet) sets.push(this.treeSet);
+    for (const s of [this.waterPlants?.emergent, this.waterPlants?.submerged]) {
+      if (s) sets.push(s);
+    }
+    for (const s of Object.values(this.rockSet?.sets || {})) sets.push(s);
+    for (const set of sets) {
+      if (!set._lodBase) set._lodBase = [...set.lodDist];
+      for (let i = 0; i < set.lodDist.length; i++) set.lodDist[i] = set._lodBase[i] * k;
+      set._dirty = true;
+    }
+    this.lodScale = k;
+    return k;
   }
 
   /** 木・水辺の植物・岩の LOD をカメラ距離で振り直す（変化時だけ作り直す） */

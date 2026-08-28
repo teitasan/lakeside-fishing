@@ -88,22 +88,22 @@ assert.ok(stats.beech.minR > 0 && stats.cedar.minR > 0, '枝の半径は必ず�
 }
 
 /* ---------------- LOD ---------------- */
-assert.deepStrictEqual(LOD_DIST, [48, 105], '近景 / 中景 / 遠景のしきい値');
+assert.deepStrictEqual(LOD_DIST, [85, 180], '近景 / 中景 / 遠景のしきい値');
 // 初回（cur = -1）は外側の境界で判定される
 assert.strictEqual(lodFor(10, -1), 0);
-assert.strictEqual(lodFor(80, -1), 1);
+assert.strictEqual(lodFor(140, -1), 1);
 assert.strictEqual(lodFor(300, -1), 2);
 /* ヒステリシス：境界上を往復しても LOD が張り付き、
    毎フレーム行列を作り直す羽目にならないこと */
-assert.strictEqual(lodFor(52, 0), 0, '境界 +4m ではまだ近景に留まる');
-assert.strictEqual(lodFor(58, 0), 1, '境界 +10m で中景へ落ちる');
-assert.strictEqual(lodFor(44, 1), 1, '中景から近景へ戻るには内側の境界まで近づく必要がある');
-assert.strictEqual(lodFor(38, 1), 0);
+assert.strictEqual(lodFor(89, 0), 0, '境界 +4m ではまだ近景に留まる');
+assert.strictEqual(lodFor(95, 0), 1, '境界 +10m で中景へ落ちる');
+assert.strictEqual(lodFor(81, 1), 1, '中景から近景へ戻るには内側の境界まで近づく必要がある');
+assert.strictEqual(lodFor(75, 1), 0);
 {
   // 境界のすぐ外を 1m 刻みで往復させて、切り替わりが 1 回ずつしか起きないこと
   let cur = 0, flips = 0;
   for (let pass = 0; pass < 6; pass++) {
-    const seq = pass % 2 ? [56, 54, 52, 50, 48] : [48, 50, 52, 54, 56];
+    const seq = pass % 2 ? [93, 91, 89, 87, 85] : [85, 87, 89, 91, 93];
     for (const d of seq) {
       const l = lodFor(d, cur);
       if (l !== cur) flips++;
@@ -177,6 +177,19 @@ assert.match(terrainWind, /if \(u\.uWindFlutter\) u\.uWindFlutter\.value = m\.us
 // 中景の葉も十字のまま（1 枚板は真横から消えて樹冠に穴があく）
 assert.match(treesSrc, /const l1 = buildLeaves\(skel, \{ stride: 7, sizeScale: 2\.5, cross: true \}\);/,
   'mid-range foliage must stay crossed or cards vanish edge-on');
+/* しきい値はインスタンスが持つ（実機で負荷を見ながら振れるように）。
+   モジュール定数を直接読むと terrain.setLodScale が効かない */
+assert.match(treesSrc, /this\.lodDist = \[\.\.\.LOD_DIST\];/,
+  'the tree LOD thresholds must be per-instance so they can be swept at runtime');
+assert.match(treesSrc, /lodForList\(d, this\.lodDist, t\.lod, 8\)/,
+  '木も共通の LOD 判定を使う');
+{
+  const terr = read('src/terrain.js');
+  assert.match(terr, /setLodScale\(scale = 1\) \{/, '近景の範囲を一括で振るノブ');
+  assert.match(terr, /if \(!set\._lodBase\) set\._lodBase = \[\.\.\.set\.lodDist\];/,
+    '基準値を保持して掛け直す（掛け続けて発散しないこと）');
+}
+
 // 木ごとの色ムラ（同じ緑が 900 本並ぶのを避ける）
 assert.match(treesSrc, /im\.setColorAt\(n, col\);/,
   'each tree must get its own tint through instanceColor');
