@@ -219,10 +219,26 @@ assert.match(rocks, /wet = max\(wet, step\(vRockWorldPos\.y, 0\.0\)\);/,
 assert.match(rocks, /roughnessFactor = mix\(roughnessFactor, 0\.30, wet \* 0\.85\);/,
   '濡れた岩はつるつるになる');
 
+/* 階層ごとに形の種をずらすこと。tier.length を種にしていたときは
+   cobble も pebble も 6 文字なので、中石と小石が同じ 5 形状になっていた */
+{
+  const salts = [...rocks.matchAll(/salt: (0x[0-9a-f]+)/g)].map((m) => m[1]);
+  assert.strictEqual(salts.length, 3, '階層ごとに salt を持つこと');
+  assert.strictEqual(new Set(salts).size, 3, `salt が重複している: ${salts.join(', ')}`);
+  assert.doesNotMatch(rocks, /tier\.length \* 0x51ed/,
+    'tier.length を種にしてはいけない（cobble と pebble が同じ長さ）');
+  assert.match(rocks, /makeRockLods\(kind, seed \^ \(0x9e37 \* \(va \+ 1\)\) \^ cfg\.salt,/);
+}
+
+/* 生成は «起動時に固定回数だけ»。インスタンスごとに作り直していないこと */
+assert.match(rocks, /for \(let va = 0; va < ROCK_VARIANTS; va\+\+\) \{/);
+assert.doesNotMatch(rocks, /add\([\s\S]{0,400}makeRock/,
+  'add() の中で形を作ってはいけない（InstancedMesh で共有する）');
+
 /* 大きさで作りを分ける（全部テクスチャでも全部ポリゴンでもない） */
-assert.match(rocks, /boulder: \{ lodDist: \[60, 140, 320\], detail: \[3, 2, 1\] \}/);
-assert.match(rocks, /cobble: \{ lodDist: \[40, 100\], detail: \[2, 1\] \}/);
-assert.match(rocks, /pebble: \{ lodDist: \[34\], detail: \[1\] \}/,
+assert.match(rocks, /boulder: \{ lodDist: \[60, 140, 320\], detail: \[3, 2, 1\], salt: 0x[0-9a-f]+ \}/);
+assert.match(rocks, /cobble: \{ lodDist: \[40, 100\], detail: \[2, 1\], salt: 0x[0-9a-f]+ \}/);
+assert.match(rocks, /pebble: \{ lodDist: \[34\], detail: \[1\], salt: 0x[0-9a-f]+ \}/,
   '小石は近距離だけ。遠くは地面テクスチャに任せる');
 // 岩は板にしない（動かず、シルエットが単純で、半透明も細い枝も無い）
 assert.doesNotMatch(rocks, /impostor|billboard/i, '岩はインポスターにしない');

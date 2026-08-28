@@ -15,9 +15,9 @@
    半透明も細い枝も無いので、超低ポリのメッシュのままで十分。
    =========================================================== */
 import * as THREE from 'three';
-import { makeRockShape, makeRockLods, ROCK_KINDS } from './rockShape.js?v=20260828-lodwide2';
-import { LodInstances, tintAt } from './lodInstances.js?v=20260828-lodwide2';
-import { applyPatches } from './materialPatch.js?v=20260828-lodwide2';
+import { makeRockShape, makeRockLods, ROCK_KINDS } from './rockShape.js?v=20260828-lodwide3';
+import { LodInstances, tintAt } from './lodInstances.js?v=20260828-lodwide3';
+import { applyPatches } from './materialPatch.js?v=20260828-lodwide3';
 import { makeRng, TAU, lerp } from './util.js';
 
 /**
@@ -27,9 +27,12 @@ import { makeRng, TAU, lerp } from './util.js';
  *   pebble  小石： 80 のみ。近くにしか出さない
  */
 export const ROCK_TIERS = {
-  boulder: { lodDist: [60, 140, 320], detail: [3, 2, 1] },
-  cobble: { lodDist: [40, 100], detail: [2, 1] },
-  pebble: { lodDist: [34], detail: [1] },
+  /* salt は形の種を階層ごとにずらすためのもの。
+     以前は tier.length を使っていたが cobble も pebble も 6 文字なので、
+     中石と小石がまったく同じ 5 形状になっていた（生成も 5 回ぶん無駄） */
+  boulder: { lodDist: [60, 140, 320], detail: [3, 2, 1], salt: 0x1f35 },
+  cobble: { lodDist: [40, 100], detail: [2, 1], salt: 0x7c02 },
+  pebble: { lodDist: [34], detail: [1], salt: 0xa4d9 },
 };
 
 /** 形のバリエーション数（階層ごと） */
@@ -381,7 +384,7 @@ export class RockSet {
            その «頂点の部分集合» を粗い面で張り直したもの。
            段ごとに作り直すと角の欠けも侵食も結果が変わり、切り替わった
            瞬間に岩の形そのものが動いて見える */
-        const lods = makeRockLods(kind, seed ^ (0x9e37 * (va + 1)) ^ (tier.length * 0x51ed), {
+        const lods = makeRockLods(kind, seed ^ (0x9e37 * (va + 1)) ^ cfg.salt, {
           details: cfg.detail,
         });
         for (let lod = 0; lod < cfg.lodDist.length; lod++) {
