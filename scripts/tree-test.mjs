@@ -125,10 +125,34 @@ assert.match(treesSrc, /nrm\.copy\(outward\)\.multiplyScalar\(0\.78\)/,
   'leaf normals must be dominated by the outward canopy direction');
 /* 風：近景は幹・枝と葉が同じ bend で動く。葉だけ動かすと、近くで見たとき
    葉が枝から剥がれて浮いて見える（実際にそう見えたので直した） */
-assert.match(treesSrc, /const barkNear = sway\(new THREE\.MeshStandardMaterial\(barkBase\), bend\);/,
+assert.match(treesSrc, /const barkNear = applyPatches\(new THREE\.MeshStandardMaterial\(barkBase\), \[sway\(bend\)\]\);/,
   'the trunk and branches must bend with the same wind term as the leaves');
-assert.match(treesSrc, /const leafNear = sway\(new THREE\.MeshStandardMaterial\(leafBase\), \{\s*\.\.\.bend,/,
+assert.match(treesSrc, /sway\(\{ \.\.\.bend, flutter:/,
   'near foliage must reuse the very same bend options as the bark');
+/* 葉の法線は «樹冠中心からの外向き» を自分で入れてある。DoubleSide の
+   法線反転は表裏で決まるので、放っておくと樹冠の奥側の葉が手前と同じだけ
+   太陽を向き、暗い側が消えて葉群ぜんたいが白っぽく飛ぶ */
+assert.match(treesSrc, /keepAuthoredNormals, translucency,/,
+  'foliage normals must not be flipped by which side is facing the camera');
+assert.match(treesSrc, /\[keepAuthoredNormals, \(m\) => foliageTranslucency\(m, 0\.10\)\]\);/,
+  'the far impostor billboard has authored normals too');
+/* 反転を止めると樹冠に暗い側が戻るが、フィルが半球光だけだと日陰側が
+   ほぼ黒に落ちる。実際の葉は薄いので裏から光が抜ける */
+assert.match(treesSrc, /const translucency = \(m\) => foliageTranslucency\(m, 0\.14\);/,
+  'shaded foliage must get the light that passes through a leaf');
+{
+  const mp = read('src/materialPatch.js');
+  assert.match(mp, /totalEmissiveRadiance \+= diffuseColor\.rgb \*/,
+    'translucency is added as an albedo-proportional term');
+}
+{
+  const mp = read('src/materialPatch.js');
+  assert.match(mp, /normal = normalize\( vNormal \);/,
+    'the flip must be undone right after normal_fragment_begin');
+}
+// 木ごとの色ムラは 1 を超えない（アルベド 1.2 は日向で白く飛ぶ）
+assert.match(treesSrc, /const val = 0\.74 \+ a \* 0\.26;/,
+  'the per-tree tint must not push albedo above 1');
 assert.match(treesSrc, /const barkMid = new THREE\.MeshStandardMaterial\(barkBase\);/,
   'mid-range bark must be static: moving those vertices buys nothing past 34m');
 assert.match(treesSrc, /\{ geo: b0, mat: barkNear, shadow: true \}/);

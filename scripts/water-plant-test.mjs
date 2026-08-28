@@ -113,8 +113,12 @@ assert.match(wp, /this\.mats\.hydrilla = uw\(new THREE\.MeshStandardMaterial\([\
   'クロモは水中マテリアル（流れの揺れ・caustics・距離間引き）で、揺れは大きく取る');
 
 /* 抽水植物は水面をまたぐので «風で揺れる» と «水面下だけ caustics» の両方 */
-assert.match(wp, /function applyPatches\(mat, patches\) \{/,
+// パッチの合成は materialPatch.js に共通化した（木と水草で同じ問題）
+const mpatch = read('src/materialPatch.js');
+assert.match(mpatch, /export function applyPatches\(mat, patches\) \{/,
   'onBeforeCompile を上書きし合わないよう合成すること');
+assert.match(wp, /import \{ applyPatches \} from '\.\/materialPatch\.js/,
+  '水草も共通の合成を使う');
 assert.match(wp, /bladeBase\(this\.bladeTex\.reed\)\), \[wind\(reedWind\), caust\]\)/,
   'ヨシは風と caustics の両方');
 assert.match(wp, /bladeBase\(this\.bladeTex\.manomo\)\), \[wind\(manomoWind\), caust\]\)/,

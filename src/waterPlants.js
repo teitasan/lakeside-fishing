@@ -15,8 +15,9 @@
    穂とクロモの輪生葉だけは形が細かすぎるのでカード + テクスチャ。
    =========================================================== */
 import * as THREE from 'three';
-import { LodInstances, tintAt } from './lodInstances.js?v=20260828-waterplants11';
+import { LodInstances, tintAt } from './lodInstances.js?v=20260828-leaflight2';
 import { makeRng, TAU, clamp01, lerp } from './util.js';
+import { applyPatches } from './materialPatch.js?v=20260828-leaflight2';
 
 /**
  * 抽水植物（ヨシ・マコモ）の LOD しきい値。
@@ -411,30 +412,6 @@ export function buildSubmergedTuft(seed = 1) {
 }
 
 /* ---------------- 群落の管理 ---------------- */
-
-/**
- * マテリアルへのパッチを重ねて当てる。
- * addWindSway と addUnderwaterCaustics はどちらも onBeforeCompile を
- * 上書きするので、素直に両方呼ぶと後から当てたほうだけが効く。
- * 置換の目印（#include <common> など）は置換後も残るので、
- * コンパイル時に順番に呼べば両方が効く。
- */
-function applyPatches(mat, patches) {
-  const fns = [];
-  const keys = [];
-  for (const patch of patches) {
-    if (!patch) continue;
-    patch(mat);
-    if (mat.onBeforeCompile) fns.push(mat.onBeforeCompile);
-    keys.push(mat.customProgramCacheKey ? mat.customProgramCacheKey() : '');
-  }
-  mat.onBeforeCompile = (shader, renderer) => {
-    for (const f of fns) f(shader, renderer);
-  };
-  const key = keys.join('|');
-  mat.customProgramCacheKey = () => key;
-  return mat;
-}
 
 /**
  * ヨシ・マコモ・クロモの群落。

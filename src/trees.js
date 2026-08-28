@@ -12,8 +12,10 @@
    森全体がチラチラした砂目に見えるため。
    =========================================================== */
 import * as THREE from 'three';
-import { growTree, SPECIES, lodFor, LOD_DIST } from './treeSkeleton.js?v=20260828-vegetation3';
+import { growTree, SPECIES, lodFor, LOD_DIST } from './treeSkeleton.js?v=20260828-leaflight2';
 import { makeRng, TAU, lerp, clamp01 } from './util.js';
+import { applyPatches, keepAuthoredNormals, foliageTranslucency }
+  from './materialPatch.js?v=20260828-leaflight2';
 
 export { LOD_DIST, lodFor };
 
@@ -545,13 +547,19 @@ export class TreeSet {
         // 幹は根元が硬い。高さに比例させると幹全体が弓なりになって不自然
         bendPow: 1.7,
       };
-      const sway = opts.addWindSway || ((m) => m);
-      const barkNear = sway(new THREE.MeshStandardMaterial(barkBase), bend);
+      const sway = opts.addWindSway ? (o) => (m) => opts.addWindSway(m, o) : () => null;
+      const barkNear = applyPatches(new THREE.MeshStandardMaterial(barkBase), [sway(bend)]);
       const barkMid = new THREE.MeshStandardMaterial(barkBase);
-      const leafNear = sway(new THREE.MeshStandardMaterial(leafBase), {
-        ...bend, flutter: q === 'low' ? 0 : 0.010, flutterFreq: 2.9,
-      });
-      const leafMid = sway(new THREE.MeshStandardMaterial(leafBase), bend);
+      /* 葉の法線は «樹冠中心からの外向き» を自分で入れてある。
+         DoubleSide の反転は表裏で決まるので、放っておくと樹冠の奥側の葉が
+         手前と同じだけ太陽を向き、暗い側が消えて葉群が白っぽく飛ぶ */
+      const translucency = (m) => foliageTranslucency(m, 0.14);
+      const leafNear = applyPatches(new THREE.MeshStandardMaterial(leafBase), [
+        sway({ ...bend, flutter: q === 'low' ? 0 : 0.010, flutterFreq: 2.9 }),
+        keepAuthoredNormals, translucency,
+      ]);
+      const leafMid = applyPatches(new THREE.MeshStandardMaterial(leafBase),
+        [sway(bend), keepAuthoredNormals, translucency]);
       if (opts.addWindSway) this.swayMaterials.push(barkNear, leafNear, leafMid);
 
       for (let va = 0; va < VARIANTS; va++) {
@@ -623,8 +631,11 @@ export class TreeSet {
     const hp = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
     const hb = Math.sin(x * 39.3468 - z * 11.135) * 24634.6345;
     const a = hp - Math.floor(hp), b = hb - Math.floor(hb);
-    const val = 0.84 + a * 0.30;            // 明るさ
-    const warm = (b - 0.5) * 0.16;          // + で黄寄り、- で青寄り
+    /* 明るさは 1 を超えさせない。テクスチャのアルベドに 1.2 を掛けると
+       物理的にありえない反射率になり、日向でトーンマップに飛ばされて
+       葉が白っぽく抜ける */
+    const val = 0.74 + a * 0.26;            // 明るさ 0.74〜1.00
+    const warm = (b - 0.5) * 0.14;          // + で黄寄り、- で青寄り
     this.trees.push({
       x, y, z, h: height, sp: kind, va: variant, ry, lod: -1,
       cr: val * (1 + warm), cg: val, cb: val * (1 - warm),
@@ -650,12 +661,12 @@ export class TreeSet {
           map: tex.leaf, alphaTest: 0.42, side: THREE.DoubleSide, vertexColors: true,
         })),
       ], { clearColor: sp.leafColor });
-      const mat = new THREE.MeshStandardMaterial({
+      const mat = applyPatches(new THREE.MeshStandardMaterial({
         map: imp.texture, roughness: 1, metalness: 0,
         /* mipmap を落とすと二値アルファは痩せる。しきい値を下げて
            遠景の樹冠がスカスカにならないようにする */
         alphaTest: 0.22, transparent: false, side: THREE.DoubleSide,
-      });
+      }), [keepAuthoredNormals, (m) => foliageTranslucency(m, 0.10)]);
       const geo = impostorGeometry(imp.width, imp.height, imp.baseY);
       for (const im of this.buckets.get(job.key)) {
         im.geometry = geo;
