@@ -24,6 +24,7 @@ const tests = [
   'scripts/water-reflection-test.mjs',
   'scripts/repeat-wrapping-detail-test.mjs',
   'scripts/lake-calm-water-test.mjs',
+  'scripts/tree-test.mjs',
 ];
 
 for (const rel of tests) {

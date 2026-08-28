@@ -3,7 +3,7 @@
    =========================================================== */
 import * as THREE from 'three';
 import { Environment } from './sky.js?v=20260828-uwgfx18';
-import { Terrain, WATER_REGION } from './terrain.js?v=20260827-docktex1';
+import { Terrain, WATER_REGION } from './terrain.js?v=20260828-vegetation1';
 import { resolveLake } from './lakefield.js';
 import { Water } from './water.js?v=20260828-snellwin2';
 import { FishSchool } from './fish.js?v=20260827-lkwgfx';
@@ -355,6 +355,8 @@ export class Game {
     };
     this.terrain = new Terrain(this.scene, {
       quality: q, lake: resolved.lake, bedTextures, dockTextures, causticsUniforms,
+      // 遠景の木のインポスターを起動時に焼くのに使う
+      renderer: this.renderer,
     });
     this._initMap();
 
@@ -1485,6 +1487,7 @@ export class Game {
     // 風揺れ（雨・くもりほど強く）
     const windPow = 1 + this.env.rainIntensity * 0.9 + this.env.cloudiness * 0.2;
     this.terrain.updateWind(this.time, windPow);
+    this.terrain.updateTrees(dt, this.camera.position);
     this.terrain.updateLamp(this.env.nightAmount, sdt);
     this.water.update(sdt, this.camera, this.env);
     const flowStrength = 0.035 + this.water.wind * 0.018;

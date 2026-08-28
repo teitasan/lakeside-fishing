@@ -1,0 +1,713 @@
+/* ===========================================================
+   樹木：骨格 → ジオメトリ化と LOD 付き InstancedMesh 管理
+
+   treeSkeleton.js が作った折れ線の骨格を
+     - 枝：平行移動フレームで捻れないチューブ
+     - 葉：ひと房ぶんのカード（近景は十字 2 枚、中景は 1 枚）
+   に変換する。遠景は起動時に 1 本だけオフスクリーンで焼いた
+   インポスター（アルベドのみ）を十字 2 枚に貼る。
+
+   遠景をインポスターにするのはポリゴン数のためだけではない。
+   100m 先の細い枝をそのまま描くと 1 ピクセル未満の線が明滅して、
+   森全体がチラチラした砂目に見えるため。
+   =========================================================== */
+import * as THREE from 'three';
+import { growTree, SPECIES, lodFor, LOD_DIST } from './treeSkeleton.js?v=20260828-vegetation1';
+import { makeRng, TAU, lerp, clamp01 } from './util.js';
+
+export { LOD_DIST, lodFor };
+
+/** 種ごとの見た目のバリエーション数（LOD をまたいでも同じ骨格を使う） */
+export const VARIANTS = 2;
+
+/* ---------------- 樹皮テクスチャ ---------------- */
+
+/** 横方向（幹のまわり）に継ぎ目が出ないよう、端をまたぐ図形は反対側にも描く */
+function wrapDraw(ctx, size, x, fn) {
+  fn(x);
+  if (x < size * 0.25) fn(x + size);
+  else if (x > size * 0.75) fn(x - size);
+}
+
+/**
+ * 樹皮。
+ * ブナ：灰白色でなめらか。地衣類の斑と横向きの皮目が特徴。
+ * スギ：赤褐色で縦に裂ける繊維状。
+ */
+export function makeBarkTexture(kind, size = 256) {
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const g = c.getContext('2d');
+  const rng = makeRng(kind === 'beech' ? 0x8e3c11 : 0x2f77a3);
+
+  if (kind === 'beech') {
+    g.fillStyle = '#a9a79c';
+    g.fillRect(0, 0, size, size);
+    // うっすらした縦の濃淡（丸みの陰影ではなく地の斑）
+    for (let i = 0; i < 90; i++) {
+      const x = rng() * size, w = 2 + rng() * 14;
+      g.fillStyle = `rgba(${rng() < 0.5 ? '120,118,110' : '198,196,186'},${0.05 + rng() * 0.09})`;
+      wrapDraw(g, size, x, (xx) => g.fillRect(xx, 0, w, size));
+    }
+    // 地衣類：緑がかった不定形の斑
+    for (let i = 0; i < 46; i++) {
+      const x = rng() * size, y = rng() * size, r = 6 + rng() * 26;
+      wrapDraw(g, size, x, (xx) => {
+        const grd = g.createRadialGradient(xx, y, 0, xx, y, r);
+        const a = 0.10 + rng() * 0.16;
+        grd.addColorStop(0, `rgba(176,183,158,${a})`);
+        grd.addColorStop(1, 'rgba(176,183,158,0)');
+        g.fillStyle = grd;
+        g.beginPath(); g.arc(xx, y, r, 0, TAU); g.fill();
+      });
+    }
+    // 皮目（横向きの短い線）
+    for (let i = 0; i < 130; i++) {
+      const x = rng() * size, y = rng() * size, w = 3 + rng() * 9;
+      g.fillStyle = `rgba(88,84,76,${0.12 + rng() * 0.2})`;
+      wrapDraw(g, size, x, (xx) => g.fillRect(xx, y, w, 1));
+    }
+  } else {
+    g.fillStyle = '#6d4a37';
+    g.fillRect(0, 0, size, size);
+    // 縦裂：幅と濃さの違う縦縞を重ねる。太い溝ほど暗い
+    for (let i = 0; i < 220; i++) {
+      const x = rng() * size, w = 1 + rng() * 7;
+      const dark = rng() < 0.55;
+      const a = 0.08 + rng() * 0.26;
+      g.fillStyle = dark ? `rgba(48,30,22,${a})` : `rgba(150,104,76,${a * 0.8})`;
+      wrapDraw(g, size, x, (xx) => {
+        // 縞は真っ直ぐではなく少し蛇行させる（定規で引いた縞に見せない）
+        let cx = xx;
+        for (let y = 0; y < size; y += 8) {
+          cx += (rng() - 0.5) * 1.6;
+          g.fillRect(cx, y, w, 9);
+        }
+      });
+    }
+    // 剥がれかけの繊維
+    for (let i = 0; i < 40; i++) {
+      const x = rng() * size, y = rng() * size, h = 14 + rng() * 46;
+      g.fillStyle = `rgba(196,150,116,${0.10 + rng() * 0.16})`;
+      wrapDraw(g, size, x, (xx) => g.fillRect(xx, y, 1 + rng() * 2, h));
+    }
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+/* ---------------- 葉テクスチャ ---------------- */
+
+/** 縁が波打った卵形の葉（ブナ）を 1 枚描く */
+function drawBeechLeaf(g, cx, cy, L, W, ang, fill, vein) {
+  g.save();
+  g.translate(cx, cy);
+  g.rotate(ang);
+  /* 右側を根元→先端、左側を先端→根元で引いて閉じる。
+     幅は sin で膨らませ、さらに細かい波を乗せる（ブナの縁は鋸歯ではなく波状） */
+  const half = (t) => W * 0.5 * Math.pow(Math.sin(t * Math.PI), 0.72)
+    * (1 + Math.sin(t * Math.PI * 7) * 0.075);
+  g.beginPath();
+  for (let i = 0; i <= 14; i++) {
+    const t = i / 14, y = -L * 0.5 + L * t;
+    if (i === 0) g.moveTo(0, y); else g.lineTo(half(t), y);
+  }
+  for (let i = 14; i >= 0; i--) {
+    const t = i / 14, y = -L * 0.5 + L * t;
+    g.lineTo(-half(t), y);
+  }
+  g.closePath();
+  g.fillStyle = fill;
+  g.fill();
+  // 主脈と側脈
+  g.strokeStyle = vein;
+  g.lineWidth = Math.max(0.6, L * 0.022);
+  g.beginPath(); g.moveTo(0, -L * 0.46); g.lineTo(0, L * 0.46); g.stroke();
+  g.lineWidth = Math.max(0.4, L * 0.014);
+  for (let i = 1; i <= 5; i++) {
+    const t = i / 6, y = -L * 0.4 + L * 0.8 * t;
+    const w = W * 0.42 * Math.pow(Math.sin(t * Math.PI), 0.7);
+    g.beginPath(); g.moveTo(0, y); g.lineTo(w, y + L * 0.07); g.stroke();
+    g.beginPath(); g.moveTo(0, y); g.lineTo(-w, y + L * 0.07); g.stroke();
+  }
+  g.restore();
+}
+
+/** 針状葉の房（スギ）を 1 本描く */
+function drawCedarSpray(g, cx, cy, L, ang, rng, fill) {
+  g.save();
+  g.translate(cx, cy);
+  g.rotate(ang);
+  g.strokeStyle = fill;
+  g.lineCap = 'round';
+  // 中軸
+  g.lineWidth = Math.max(1, L * 0.035);
+  g.beginPath(); g.moveTo(0, L * 0.5); g.lineTo(0, -L * 0.5); g.stroke();
+  // 螺旋状に付く鎌形の葉
+  const n = Math.round(L * 0.22);
+  for (let i = 0; i < n; i++) {
+    const t = i / n;
+    const y = L * 0.5 - L * t;
+    const side = i % 2 ? 1 : -1;
+    const nl = L * 0.20 * (0.55 + 0.45 * Math.sin(t * Math.PI)) * (0.7 + rng() * 0.6);
+    g.lineWidth = Math.max(0.9, L * 0.028);
+    g.beginPath();
+    g.moveTo(0, y);
+    // 先が内側へ反る（スギの葉は鎌状）
+    g.quadraticCurveTo(side * nl * 0.7, y - nl * 0.35, side * nl * 0.75, y - nl * 0.85);
+    g.stroke();
+  }
+  g.restore();
+}
+
+/** 葉テクスチャのアトラス割り（2×2）。房ごとに違うセルを引いて反復感を消す */
+export const LEAF_ATLAS = 2;
+
+/** 1 セルぶんのブナの房を描く（中心 cx,cy、1 辺 S） */
+function drawBeechCluster(g, cx, cy, S, rng) {
+  const M = S * 0.5 * 0.86;          // 縁に触れないよう内側に収める
+  const twigs = 3 + (rng() < 0.5 ? 0 : 1);
+  for (let w = 0; w < twigs; w++) {
+    const a = -Math.PI / 2 + (w - (twigs - 1) / 2) * (0.52 + rng() * 0.18);
+    const tl = M * (0.78 + rng() * 0.28);
+    const ex = cx + Math.cos(a) * tl, ey = cy + M * 0.86 + Math.sin(a) * tl;
+    g.strokeStyle = '#6b5b3e';
+    g.lineWidth = S * 0.010;
+    g.beginPath(); g.moveTo(cx, cy + M * 0.9); g.lineTo(ex, ey); g.stroke();
+
+    const n = 5 + Math.round(rng() * 3);
+    for (let i = 0; i < n; i++) {
+      const t = 0.18 + 0.82 * ((i + rng() * 0.6) / n);
+      const px = cx + (ex - cx) * t, py = cy + M * 0.9 + (ey - (cy + M * 0.9)) * t;
+      const side = i % 2 ? 1 : -1;
+      const L = S * (0.26 - t * 0.09) * (0.82 + rng() * 0.4);
+      const W = L * (0.60 + rng() * 0.16);
+      const g0 = 112 + Math.round(rng() * 48);
+      drawBeechLeaf(
+        g, px + side * L * 0.34, py, L, W,
+        a + Math.PI / 2 + side * (0.55 + rng() * 0.55),
+        `rgb(${Math.round(g0 * 0.60)},${g0 + 30},${Math.round(g0 * 0.44)})`,
+        'rgba(220,234,172,0.5)'
+      );
+    }
+  }
+}
+
+/** 1 セルぶんのスギの房を描く */
+function drawCedarCluster(g, cx, cy, S, rng) {
+  const M = S * 0.5 * 0.86;
+  const n = 5;
+  for (let i = 0; i < n; i++) {
+    const t = n === 1 ? 0.5 : i / (n - 1);
+    const a = (t - 0.5) * 1.55 + (rng() - 0.5) * 0.22;
+    const L = M * (1.5 - Math.abs(t - 0.5) * 1.0) * (0.85 + rng() * 0.3);
+    const px = cx + Math.sin(a) * M * 0.42;
+    const py = cy + M * 0.72 - Math.cos(a) * L * 0.5;
+    // スギは青みの強い濃緑。黄緑に振ると広葉樹と区別がつかなくなる
+    const gr = 84 + Math.round(rng() * 40);
+    drawCedarSpray(g, px, py, L, a, rng,
+      `rgb(${Math.round(gr * 0.50)},${gr + 6},${Math.round(gr * 0.72)})`);
+  }
+}
+
+/**
+ * 葉テクスチャ。1 枚が「葉」ではなく「小枝ひと房」に相当する。
+ * 背景は完全透過。アルファテストで抜くので半透明の縁は作らない。
+ *
+ * 2×2 のアトラスにして房を 4 種類描く。1 種類だと、どの向きから見ても
+ * 同じ形が並んで「同じ板を貼った」ことが一目で分かってしまう。
+ * どの房も縁に触れないよう内側に収める。テクスチャが縁で切れると
+ * アルファテストの境界がカードの矩形そのものになり、葉ではなく板に見える。
+ */
+export function makeLeafTexture(kind, cell = 256) {
+  const size = cell * LEAF_ATLAS;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const g = c.getContext('2d');
+  const rng = makeRng(kind === 'beech' ? 0x41b207 : 0x7d1e64);
+
+  for (let j = 0; j < LEAF_ATLAS; j++) {
+    for (let i = 0; i < LEAF_ATLAS; i++) {
+      const cx = (i + 0.5) * cell, cy = (j + 0.5) * cell;
+      if (kind === 'beech') drawBeechCluster(g, cx, cy, cell, rng);
+      else drawCedarCluster(g, cx, cy, cell, rng);
+    }
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+/* ---------------- ジオメトリ ---------------- */
+
+/**
+ * 枝をチューブ化する。
+ * フレームは平行移動（parallel transport）で運ぶ。各点で法線を作り直すと
+ * 曲がった枝が軸まわりに捻れ、樹皮の縞が螺旋に見えてしまう。
+ */
+export function buildBranches(skel, { radial = [8, 5, 4, 3], levelMax = 99, vScale = 0.45 } = {}) {
+  const pos = [], nor = [], uv = [], idx = [];
+  const up = new THREE.Vector3(0, 1, 0);
+  const T = new THREE.Vector3(), N = new THREE.Vector3(), B = new THREE.Vector3();
+  const prevN = new THREE.Vector3(), tmp = new THREE.Vector3();
+
+  for (const br of skel.branches) {
+    if (br.level > levelMax) continue;
+    const rad = Math.max(3, radial[Math.min(br.level, radial.length - 1)]);
+    const pts = br.points;
+    const base = pos.length / 3;
+    let vAcc = 0;
+
+    // 最初のフレーム
+    T.set(pts[1].x - pts[0].x, pts[1].y - pts[0].y, pts[1].z - pts[0].z).normalize();
+    prevN.copy(Math.abs(T.y) > 0.92 ? new THREE.Vector3(1, 0, 0) : up).cross(T).normalize();
+
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[Math.max(i - 1, 0)], b = pts[Math.min(i + 1, pts.length - 1)];
+      T.set(b.x - a.x, b.y - a.y, b.z - a.z).normalize();
+      // 直前の法線から接線成分を抜いて運ぶ＝捻れないフレーム
+      N.copy(prevN).addScaledVector(T, -prevN.dot(T));
+      if (N.lengthSq() < 1e-8) N.copy(Math.abs(T.y) > 0.92 ? new THREE.Vector3(1, 0, 0) : up).cross(T);
+      N.normalize();
+      prevN.copy(N);
+      B.crossVectors(T, N);
+
+      if (i > 0) {
+        const p = pts[i - 1];
+        vAcc += Math.hypot(pts[i].x - p.x, pts[i].y - p.y, pts[i].z - p.z);
+      }
+      const r = pts[i].r;
+      for (let j = 0; j <= rad; j++) {
+        const ang = (j / rad) * TAU;
+        const cx = Math.cos(ang), sy = Math.sin(ang);
+        tmp.set(N.x * cx + B.x * sy, N.y * cx + B.y * sy, N.z * cx + B.z * sy);
+        pos.push(pts[i].x + tmp.x * r, pts[i].y + tmp.y * r, pts[i].z + tmp.z * r);
+        nor.push(tmp.x, tmp.y, tmp.z);
+        // u は幹の太さに合わせて巻き数を変える（細い枝で樹皮が拡大されない）
+        uv.push((j / rad) * Math.max(1, r * 5), vAcc * vScale);
+      }
+    }
+    const ring = rad + 1;
+    for (let i = 0; i < pts.length - 1; i++) {
+      for (let j = 0; j < rad; j++) {
+        const a = base + i * ring + j, b = a + ring;
+        idx.push(a, b, a + 1, a + 1, b, b + 1);
+      }
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  return geo;
+}
+
+/**
+ * 葉カード。
+ * stride で間引き、sizeScale で 1 枚を大きくすることで、
+ * 同じ骨格からシルエットを保ったまま枚数だけ落とせる（＝LOD）。
+ *
+ * 法線はカードの面法線ではなく樹冠中心からの外向きを主にする。
+ * 面法線のままだと 1 枚ごとに明暗が割れて、葉が板の集合に見える。
+ */
+const CELL = 1 / LEAF_ATLAS;
+
+export function buildLeaves(skel, { stride = 1, sizeScale = 1, cross = true } = {}) {
+  const pos = [], nor = [], uv = [], col = [], idx = [];
+  const f = new THREE.Vector3(), u = new THREE.Vector3(), w = new THREE.Vector3();
+  const outward = new THREE.Vector3(), nrm = new THREE.Vector3(), card = new THREE.Vector3();
+  const ref = new THREE.Vector3();
+
+  // 樹冠の中心（葉の重心）と広がり
+  let cx = 0, cy = 0, cz = 0;
+  for (const l of skel.leaves) { cx += l.x; cy += l.y; cz += l.z; }
+  const n0 = Math.max(1, skel.leaves.length);
+  cx /= n0; cy /= n0; cz /= n0;
+  let spread = 0.001;
+  for (const l of skel.leaves) spread = Math.max(spread, Math.hypot(l.x - cx, l.y - cy, l.z - cz));
+
+  for (let i = 0; i < skel.leaves.length; i += stride) {
+    const l = skel.leaves[i];
+    f.set(l.dx, l.dy, l.dz).normalize();
+    ref.set(0, 1, 0);
+    if (Math.abs(f.y) > 0.92) ref.set(1, 0, 0);
+    u.crossVectors(f, ref).normalize();
+    // roll でカードを軸まわりに回す（房ごとに向きが揃わないように）
+    const c = Math.cos(l.roll), s = Math.sin(l.roll);
+    w.crossVectors(f, u);
+    const ux = u.x * c + w.x * s, uy = u.y * c + w.y * s, uz = u.z * c + w.z * s;
+    u.set(ux, uy, uz);
+    w.crossVectors(f, u).normalize();
+
+    outward.set(l.x - cx, l.y - cy, l.z - cz);
+    if (outward.lengthSq() < 1e-6) outward.set(0, 1, 0);
+    const depth = clamp01(outward.length() / spread);
+    outward.normalize();
+    // 内側の房を暗くする（葉の重なりによる遮蔽の近似）。
+    // これが無いと樹冠が均一に光って綿菓子に見える
+    const ao = lerp(0.62, 1.0, depth * depth);
+
+    const sz = l.size * sizeScale;
+    /* アトラスのどのセルを引くか。roll から決めるので seed が同じなら同じ絵になる */
+    const cellIdx = Math.floor(l.roll / TAU * (LEAF_ATLAS * LEAF_ATLAS)) % (LEAF_ATLAS * LEAF_ATLAS);
+    const cu = cellIdx % LEAF_ATLAS, cv = (cellIdx / LEAF_ATLAS) | 0;
+    const planes = cross ? [u, w] : [u];
+    for (let pi = 0; pi < planes.length; pi++) {
+      const A = planes[pi];
+      // このカードの面法線。外向きに少しだけ混ぜて平板感を崩す
+      card.crossVectors(f, A).normalize();
+      const base = pos.length / 3;
+      // カードは f を長手方向、A を幅方向に取る
+      for (let k = 0; k < 4; k++) {
+        const sx = (k === 0 || k === 3) ? -0.5 : 0.5;
+        const sy = (k < 2) ? -0.5 : 0.5;
+        pos.push(
+          l.x + A.x * sx * sz + f.x * sy * sz,
+          l.y + A.y * sx * sz + f.y * sy * sz,
+          l.z + A.z * sx * sz + f.z * sy * sz
+        );
+        nrm.copy(outward).multiplyScalar(0.78).addScaledVector(card, 0.22).normalize();
+        nor.push(nrm.x, nrm.y, nrm.z);
+        uv.push((cu + (k === 0 || k === 3 ? 0 : 1)) * CELL, (cv + (k < 2 ? 0 : 1)) * CELL);
+        col.push(ao, ao, ao);
+      }
+      idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geo.setIndex(idx);
+  return geo;
+}
+
+/* ---------------- 遠景インポスター ---------------- */
+
+/**
+ * 1 本を正射影で焼いて、遠景用の板に貼るテクスチャを作る。
+ * 陰影は焼かずアルベドだけにする（焼き込むと夕方でも遠景の森だけ
+ * 真昼の色のまま残る）。板側は通常のマテリアルなので空の色を拾う。
+ */
+export function bakeImpostor(renderer, parts, { width = 256, height = 384, clearColor = 0x6f9440 } = {}) {
+  const scene = new THREE.Scene();
+  const box = new THREE.Box3();
+  for (const m of parts) {
+    scene.add(m);
+    m.geometry.computeBoundingBox();
+    box.union(m.geometry.boundingBox);
+  }
+  const w = Math.max(box.max.x - box.min.x, box.max.z - box.min.z) * 1.06;
+  const h = (box.max.y - box.min.y) * 1.04;
+  const cyy = (box.max.y + box.min.y) * 0.5;
+
+  const cam = new THREE.OrthographicCamera(-w / 2, w / 2, h / 2, -h / 2, 0.1, 400);
+  cam.position.set(0, cyy, 120);
+  cam.lookAt(0, cyy, 0);
+
+  const rt = new THREE.WebGLRenderTarget(width, height, {
+    format: THREE.RGBAFormat,
+    type: THREE.UnsignedByteType,
+    depthBuffer: true,
+    samples: 0,               // MSAA を切って二値アルファにする（縁の黒フリンジ対策）
+    generateMipmaps: true,
+    minFilter: THREE.LinearMipmapLinearFilter,
+    magFilter: THREE.LinearFilter,
+  });
+  rt.texture.colorSpace = THREE.SRGBColorSpace;
+
+  const prevTarget = renderer.getRenderTarget();
+  const prevClear = new THREE.Color();
+  renderer.getClearColor(prevClear);
+  const prevAlpha = renderer.getClearAlpha();
+  /* 焼くのはアルベドなのでトーンマップは掛けない。
+     掛けると板を描くときにもう一度掛かって遠景の森だけ白ちゃける */
+  const prevTone = renderer.toneMapping;
+  renderer.toneMapping = THREE.NoToneMapping;
+  renderer.setRenderTarget(rt);
+  /* 透明部分の RGB を黒ではなく葉の色で埋める。黒のままだと mipmap で
+     葉の縁が黒と混ざり、遠景の森だけ煤けた輪郭になる（アルファブリード） */
+  renderer.setClearColor(clearColor, 0);
+  renderer.clear(true, true, false);
+  renderer.render(scene, cam);
+  renderer.setRenderTarget(prevTarget);
+  renderer.setClearColor(prevClear, prevAlpha);
+  renderer.toneMapping = prevTone;
+
+  for (const m of parts) scene.remove(m);
+  return { texture: rt.texture, target: rt, width: w, height: h, baseY: box.min.y };
+}
+
+/** インポスターを貼る十字 2 枚。原点は根元 */
+function impostorGeometry(w, h, baseY) {
+  const geo = new THREE.BufferGeometry();
+  const pos = [], nor = [], uv = [], idx = [];
+  for (let p = 0; p < 2; p++) {
+    const ax = p === 0 ? 1 : 0, az = p === 0 ? 0 : 1;
+    const base = pos.length / 3;
+    for (let k = 0; k < 4; k++) {
+      const sx = (k === 0 || k === 3) ? -0.5 : 0.5;
+      const sy = (k < 2) ? 0 : 1;
+      pos.push(ax * sx * w, baseY + sy * h, az * sx * w);
+      // 板の法線は面ではなく上向き寄りにする。真横向きだと
+      // 太陽が回ったとき遠景の森が一斉に暗転して帯に見える
+      nor.push(az * 0.45, 0.86, -ax * 0.45);
+      uv.push(k === 0 || k === 3 ? 0 : 1, sy);
+    }
+    idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  return geo;
+}
+
+/* ---------------- LOD 付きインスタンス管理 ---------------- */
+
+/**
+ * 種 × バリエーション × LOD ごとに InstancedMesh を持ち、
+ * カメラ距離で木を各 LOD へ振り分ける。
+ *
+ * 木の 1 本 1 本は {x,y,z,ry,scale,sp,va,lod} だけを持ち、
+ * LOD が変わった木があったときだけ行列を作り直して再アップロードする。
+ */
+export class TreeSet {
+  /**
+   * @param {THREE.Scene} scene
+   * @param {{quality?: string, renderer?: THREE.WebGLRenderer, seed?: number,
+   *          addWindSway?: Function, capacity?: number}} opts
+   */
+  constructor(scene, opts = {}) {
+    this.scene = scene;
+    this.quality = opts.quality || 'mid';
+    const q = this.quality;
+    const seed = (opts.seed ?? 1) >>> 0;
+    const cap = opts.capacity ?? 520;
+
+    this.kinds = Object.keys(SPECIES);
+    this.trees = [];
+    this.meshes = [];          // すべての InstancedMesh（描画順の都合で保持）
+    this.swayMaterials = [];
+    this.buckets = new Map();  // `${sp}|${va}|${lod}` -> InstancedMesh 群
+    /* 樹高 1 に正規化したあとの根元半径。当たり判定はこれ × 樹高 */
+    this.trunkR = {};
+    this.renderer = opts.renderer || null;
+    this._pendingBake = [];
+    this._dirty = true;
+    this._timer = 0;
+
+    /* 近景の枝の細かさ。low では 1 段落として辺の数を減らす */
+    const radial0 = q === 'low' ? [6, 4, 3, 3] : q === 'high' ? [9, 6, 4, 3] : [8, 5, 4, 3];
+    const leafStride = q === 'low' ? 2 : 1;
+
+    this.textures = {};
+    for (const k of this.kinds) {
+      this.textures[k] = { bark: makeBarkTexture(k), leaf: makeLeafTexture(k) };
+    }
+
+    for (const k of this.kinds) {
+      const sp = SPECIES[k];
+      /* color は白のまま。テクスチャ側がすでに樹皮色・葉色を持っているので、
+         ここで種の色を掛けると 2 回掛かって幹も葉も真っ黒に沈む */
+      const barkMat = new THREE.MeshStandardMaterial({
+        map: this.textures[k].bark, roughness: 0.95, metalness: 0,
+      });
+      const leafBase = {
+        map: this.textures[k].leaf,
+        roughness: 0.86, metalness: 0,
+        alphaTest: 0.42, transparent: false,
+        side: THREE.DoubleSide, vertexColors: true,
+      };
+      const leafMat = opts.addWindSway
+        ? opts.addWindSway(new THREE.MeshStandardMaterial(leafBase),
+          { strength: q === 'low' ? 0.030 : 0.045, freq: 1.25, gustiness: 0.55 })
+        : new THREE.MeshStandardMaterial(leafBase);
+      if (opts.addWindSway) this.swayMaterials.push(leafMat);
+
+      for (let va = 0; va < VARIANTS; va++) {
+        const skel = growTree(k, makeRng(seed ^ (0x9e37 * (this.kinds.indexOf(k) + 1)) ^ (va * 0x51ed)));
+        const norm = 1 / Math.max(skel.height, 0.001);   // 樹高 1 に正規化して置く
+        this.trunkR[k] = Math.max(this.trunkR[k] || 0, sp.trunkRadius * norm);
+
+        // --- LOD0：近景 ---
+        const b0 = buildBranches(skel, { radial: radial0 });
+        const l0 = buildLeaves(skel, { stride: leafStride, sizeScale: 1, cross: true });
+        // --- LOD1：中景。枝は最終段を落とし、葉は 1/4 の枚数を 1.9 倍で ---
+        const b1 = buildBranches(skel, { radial: [4, 3, 3, 3], levelMax: sp.levels.length - 2 });
+        const l1 = buildLeaves(skel, { stride: 3, sizeScale: 1.75, cross: false });
+        for (const g of [b0, l0, b1, l1]) g.scale(norm, norm, norm);
+
+        this._addLevel(k, va, 0, [
+          { geo: b0, mat: barkMat, shadow: true },
+          { geo: l0, mat: leafMat, shadow: true },
+        ], cap);
+        this._addLevel(k, va, 1, [
+          { geo: b1, mat: barkMat, shadow: false },
+          { geo: l1, mat: leafMat, shadow: false },
+        ], cap);
+
+        /* --- LOD2：遠景インポスター ---
+           焼くには実サイズのある描画バッファが要る。読み込み中のタブが
+           バックグラウンドで 0×0 のことがあるので、まず中景で代用しておき、
+           サイズが付いたフレームで焼き直す（_tryBake）。
+           ここで無条件に render すると 0×0 のコンテキストで固まる */
+        this._addLevel(k, va, 2, [{ geo: l1, mat: leafMat, shadow: false }], cap);
+        if (opts.renderer) {
+          this._pendingBake.push({
+            key: `${k}|${va}|2`, kind: k, branchGeo: b0, leafGeo: l0,
+          });
+        }
+      }
+    }
+  }
+
+  _addLevel(kind, va, lod, parts, cap) {
+    const list = [];
+    for (const p of parts) {
+      const im = new THREE.InstancedMesh(p.geo, p.mat, cap);
+      im.count = 0;
+      im.castShadow = p.shadow;
+      im.receiveShadow = false;
+      im.frustumCulled = false;   // 木は湖の全周に散るので個別カリングに任せる
+      im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      this.scene.add(im);
+      this.meshes.push(im);
+      list.push(im);
+    }
+    this.buckets.set(`${kind}|${va}|${lod}`, list);
+  }
+
+  /**
+   * 木を 1 本足す。scale は「樹高（m）」で指定する。
+   * ジオメトリは樹高 1 に正規化してあるので、そのまま倍率になる。
+   */
+  add(x, y, z, height, kind, variant, ry) {
+    /* 木ごとの色ムラ。900 本が同一の緑だと、形をいくら作り込んでも
+       「同じ木を並べた」ことが一目で分かる。位置から決めるので
+       seed が同じならワールドは再現できる */
+    const hp = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
+    const hb = Math.sin(x * 39.3468 - z * 11.135) * 24634.6345;
+    const a = hp - Math.floor(hp), b = hb - Math.floor(hb);
+    const val = 0.84 + a * 0.30;            // 明るさ
+    const warm = (b - 0.5) * 0.16;          // + で黄寄り、- で青寄り
+    this.trees.push({
+      x, y, z, h: height, sp: kind, va: variant, ry, lod: -1,
+      cr: val * (1 + warm), cg: val, cb: val * (1 - warm),
+    });
+    this._dirty = true;
+  }
+
+  /**
+   * まだ焼けていない遠景インポスターを焼いて LOD2 に差し替える。
+   * 描画バッファに実サイズが付くまでは何もしない。
+   */
+  _tryBake() {
+    if (!this._pendingBake.length || !this.renderer) return;
+    const ctx = this.renderer.getContext();
+    if (!ctx || ctx.drawingBufferWidth < 8 || ctx.drawingBufferHeight < 8) return;
+
+    for (const job of this._pendingBake) {
+      const sp = SPECIES[job.kind];
+      const tex = this.textures[job.kind];
+      const imp = bakeImpostor(this.renderer, [
+        new THREE.Mesh(job.branchGeo, new THREE.MeshBasicMaterial({ map: tex.bark })),
+        new THREE.Mesh(job.leafGeo, new THREE.MeshBasicMaterial({
+          map: tex.leaf, alphaTest: 0.42, side: THREE.DoubleSide, vertexColors: true,
+        })),
+      ], { clearColor: sp.leafColor });
+      const mat = new THREE.MeshStandardMaterial({
+        map: imp.texture, roughness: 1, metalness: 0,
+        /* mipmap を落とすと二値アルファは痩せる。しきい値を下げて
+           遠景の樹冠がスカスカにならないようにする */
+        alphaTest: 0.22, transparent: false, side: THREE.DoubleSide,
+      });
+      const geo = impostorGeometry(imp.width, imp.height, imp.baseY);
+      for (const im of this.buckets.get(job.key)) {
+        im.geometry = geo;
+        im.material = mat;
+      }
+    }
+    this._pendingBake.length = 0;
+    this._dirty = true;
+  }
+
+  /** カメラ距離で LOD を振り直す。変化があったときだけ行列を作り直す */
+  update(dt, cameraPos) {
+    this._tryBake();
+    this._timer -= dt;
+    if (this._timer > 0 && !this._dirty) return;
+    this._timer = 0.15;
+
+    let changed = this._dirty;
+    for (const t of this.trees) {
+      const d = Math.hypot(t.x - cameraPos.x, t.y - cameraPos.y, t.z - cameraPos.z);
+      const l = lodFor(d, t.lod);
+      if (l !== t.lod) { t.lod = l; changed = true; }
+    }
+    if (!changed) return;
+    this._dirty = false;
+    this._rebuild();
+  }
+
+  _rebuild() {
+    const counts = new Map();
+    const m = new THREE.Matrix4();
+    const p = new THREE.Vector3();
+    const q = new THREE.Quaternion();
+    const s = new THREE.Vector3();
+    const up = new THREE.Vector3(0, 1, 0);
+    const col = new THREE.Color();
+
+    for (const list of this.buckets.values()) for (const im of list) counts.set(im, 0);
+
+    for (const t of this.trees) {
+      const list = this.buckets.get(`${t.sp}|${t.va}|${t.lod}`);
+      if (!list) continue;
+      p.set(t.x, t.y, t.z);
+      q.setFromAxisAngle(up, t.ry);
+      s.set(t.h, t.h, t.h);
+      m.compose(p, q, s);
+      col.setRGB(t.cr, t.cg, t.cb);
+      for (const im of list) {
+        const n = counts.get(im);
+        if (n >= im.instanceMatrix.count) continue;
+        im.setMatrixAt(n, m);
+        im.setColorAt(n, col);
+        counts.set(im, n + 1);
+      }
+    }
+    for (const [im, n] of counts) {
+      im.count = n;
+      im.instanceMatrix.needsUpdate = true;
+      if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    }
+  }
+
+  /** デバッグ／テスト用：LOD ごとの本数 */
+  lodCounts() {
+    const out = [0, 0, 0];
+    for (const t of this.trees) if (t.lod >= 0) out[t.lod]++;
+    return out;
+  }
+
+  setQuality(q) { this.quality = q; }
+
+  dispose() {
+    for (const im of this.meshes) {
+      this.scene.remove(im);
+      im.geometry.dispose();
+    }
+    this.meshes.length = 0;
+  }
+}

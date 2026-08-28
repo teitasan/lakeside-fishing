@@ -7,6 +7,8 @@ import { waveGLSL } from './waveField.js?v=20260828-lakescale1';
 import { UnderwaterPropScatter, addUnderwaterCaustics } from './underwaterProps.js?v=20260828-uwgfx18';
 import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js';
 import { makeTileableHeightField } from './tileableNoise.js?v=20260827-orgnoise4';
+import { TreeSet, VARIANTS as TREE_VARIANTS } from './trees.js?v=20260828-vegetation1';
+import { SPECIES_IDS } from './treeSkeleton.js?v=20260828-vegetation1';
 import { WORLD_SIZE, WATER_REGION, MAX_DEPTH, resolveLake } from './lakefield.js';
 
 export { WORLD_SIZE, WATER_REGION, MAX_DEPTH };
@@ -431,6 +433,8 @@ export class Terrain {
       uShoreTop: { value: 0.34 },
     };
     this._causticsUniforms = opts.causticsUniforms || null;
+    /* 遠景インポスターを起動時に 1 回だけ焼くのに使う。無ければ中景で代用する */
+    this._renderer = opts.renderer || null;
     this._dockTextures = opts.dockTextures || null;
     this._buildTerrainMesh(opts.bedTextures || null);
     this._findDock();
@@ -1090,34 +1094,31 @@ export class Terrain {
   _buildProps() {
     const rng = makeRng(this.seed ^ 0x5a5a);
     const q = this.quality;
-    const treeTarget = q === 'low' ? 260 : q === 'high' ? 900 : 620;
+    /* 遠景がインポスター 4 ポリなので、本数は近景の面積だけで決まる。
+       900 本だと 20m 間隔の疎林で「植えた公園」に見えるため増やす */
+    const treeTarget = q === 'low' ? 700 : q === 'high' ? 2000 : 1400;
     const rockTarget = q === 'low' ? 120 : 260;
     const reedTarget = q === 'low' ? 260 : 720;
 
-    /* --- 木 --- */
-    const trunkGeo = new THREE.CylinderGeometry(0.22, 0.34, 1, 6);
-    trunkGeo.translate(0, 0.5, 0);
-    const leafGeo = new THREE.ConeGeometry(1, 1, 7);
-    leafGeo.translate(0, 0.5, 0);
-    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3524, roughness: 1 });
-    // 葉だけ揺らす（幹は動かさない）
-    const leafMat = addWindSway(
-      new THREE.MeshStandardMaterial({ color: 0x2f5a2c, roughness: 0.95, flatShading: true }),
-      { strength: q === 'low' ? 0.035 : 0.05, freq: 1.4, gustiness: 0.55 }
-    );
+    /* --- 木（ブナ・スギ） ---
+       円柱＋円錐をやめ、骨格から起こした枝と葉カードにする。
+       近景 / 中景 / 遠景インポスターの 3 段を種 × バリエーションごとに
+       持ち、カメラ距離で振り分ける（trees.js / treeSkeleton.js） */
+    this.treeSet = new TreeSet(this.scene, {
+      quality: q,
+      renderer: this._renderer,
+      seed: this.seed ^ 0x7ee5,
+      addWindSway,
+      capacity: Math.ceil(treeTarget / SPECIES_IDS.length / TREE_VARIANTS) + 40,
+    });
 
-    const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, treeTarget);
-    const leaves = new THREE.InstancedMesh(leafGeo, leafMat, treeTarget * 2);
-    trunks.castShadow = true;
-    leaves.castShadow = true;
-    const leafColor = new THREE.Color();
-
+    // 岩・葦の配置でも使い回すスクラッチ
     const m = new THREE.Matrix4();
     const p = new THREE.Vector3();
     const qt = new THREE.Quaternion();
     const s = new THREE.Vector3();
-    let ti = 0, li = 0, tries = 0;
 
+    let ti = 0, tries = 0;
     while (ti < treeTarget && tries < treeTarget * 30) {
       tries++;
       const ang = rng() * TAU;
@@ -1130,47 +1131,34 @@ export class Terrain {
       if (this.distToDock(x, z) < 3.6) continue;
       if (Math.hypot(x - this.spawnPos.x, z - this.spawnPos.z) < 6) continue;
 
-      const scale = 2.6 + rng() * 4.4 * (1 - clamp01(h / 80));
-      const tsx = scale * (0.7 + rng() * 0.35), tsz = scale * (0.7 + rng() * 0.35);
-      qt.setFromAxisAngle(UP, rng() * TAU);
-      p.set(x, h - 0.2, z);
-      s.set(tsx, scale, tsz);
-      m.compose(p, qt, s);
-      trunks.setMatrixAt(ti, m);
-      // 幹の当たり判定（根元の半径 0.34 × スケール／上端は幹の高さ）
-      this.addObstacle(x, z, Math.max(tsx, tsz) * 0.34 * 0.62, h - 0.2 + scale * 0.95);
+      /* 樹種の分布：スギは沢筋〜低い斜面に群れて生え、ブナは尾根まで上がる。
+         完全なランダムだと 2 種が均一に混ざって「植えた林」に見えるので、
+         ゆるいノイズで塊にする */
+      const patch = this.noise.fbm(x * 0.011, z * 0.011, 2);
+      const cedarBias = clamp01(0.62 - (h - 6) / 46) * 0.85;
+      const kind = (patch * 0.5 + 0.5) < cedarBias + (rng() - 0.5) * 0.22 ? 'cedar' : 'beech';
+      const va = rng() < 0.5 ? 0 : 1;
 
-      // 葉（2段の円錐）
-      const cold = clamp01((h - 30) / 40);
-      leafColor.setRGB(
-        lerp(0.13, 0.16, cold) + rng() * 0.05,
-        lerp(0.34, 0.26, cold) + rng() * 0.08,
-        lerp(0.14, 0.20, cold) + rng() * 0.04
-      );
-      for (let k = 0; k < 2; k++) {
-        if (li >= leaves.count) break;
-        const ls = scale * (k === 0 ? 1.0 : 0.68);
-        p.set(x, h - 0.2 + scale * (k === 0 ? 0.55 : 1.02), z);
-        s.set(ls * 0.62, ls * 1.15, ls * 0.62);
-        m.compose(p, qt, s);
-        leaves.setMatrixAt(li, m);
-        leaves.setColorAt(li, leafColor);
-        li++;
-      }
+      // 樹高（m）。高いところほど風衝で低くなる
+      const alt = clamp01(h / 80);
+      const height = kind === 'cedar'
+        ? lerp(16, 30, rng()) * lerp(1, 0.62, alt)
+        : lerp(11, 22, rng()) * lerp(1, 0.66, alt);
+
+      this.treeSet.add(x, h - 0.15, z, height, kind, va, rng() * TAU);
+      // 幹の当たり判定。半径は樹高から逆算する（ジオメトリは樹高 1 に正規化済み）
+      const trunkR = (this.treeSet.trunkR[kind] || 0.02) * height;
+      this.addObstacle(x, z, Math.max(trunkR * 1.15, 0.28), h - 0.15 + height * 0.9);
       ti++;
     }
-    trunks.count = ti;
-    leaves.count = li;
-    trunks.instanceMatrix.needsUpdate = true;
-    leaves.instanceMatrix.needsUpdate = true;
-    if (leaves.instanceColor) leaves.instanceColor.needsUpdate = true;
-    this.scene.add(trunks, leaves);
+    this.treeCount = ti;
+
     // 水面より上にしか存在しない物（水越しには絶対に写らないので、
     // 水中描画用のシーン取り込みでは省いて負荷を下げる）。
     // 岸の岩は水際にまたがって置かれる＝水中部分が見えるので入れない
-    this.overWaterProps = [trunks, leaves];
-    // reedMat は後段（葦）で生成するので、ここでは leaf だけ入れて後で追加する
-    this.swayMaterials = [leafMat];
+    this.overWaterProps = this.treeSet.meshes.slice();
+    // reedMat は後段（葦）で生成するので、ここでは葉だけ入れて後で追加する
+    this.swayMaterials = this.treeSet.swayMaterials.slice();
 
     /* --- 岩 --- */
     const rockGeo = new THREE.IcosahedronGeometry(1, 0);
@@ -1296,5 +1284,10 @@ export class Terrain {
   /** 風揺れの時刻を進める（windPow: 雨天ほど強く） */
   updateWind(time, windPow = 1) {
     if (this.swayMaterials) tickVegetationWind(this.swayMaterials, time * 1.0, windPow);
+  }
+
+  /** 木の LOD をカメラ距離で振り直す（変化があったときだけ行列を作り直す） */
+  updateTrees(dt, cameraPos) {
+    this.treeSet?.update(dt, cameraPos);
   }
 }
