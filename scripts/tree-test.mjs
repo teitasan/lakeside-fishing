@@ -88,22 +88,22 @@ assert.ok(stats.beech.minR > 0 && stats.cedar.minR > 0, '枝の半径は必ず�
 }
 
 /* ---------------- LOD ---------------- */
-assert.deepStrictEqual(LOD_DIST, [34, 105], '近景 / 中景 / 遠景のしきい値');
+assert.deepStrictEqual(LOD_DIST, [48, 105], '近景 / 中景 / 遠景のしきい値');
 // 初回（cur = -1）は外側の境界で判定される
 assert.strictEqual(lodFor(10, -1), 0);
 assert.strictEqual(lodFor(80, -1), 1);
 assert.strictEqual(lodFor(300, -1), 2);
 /* ヒステリシス：境界上を往復しても LOD が張り付き、
    毎フレーム行列を作り直す羽目にならないこと */
-assert.strictEqual(lodFor(38, 0), 0, '境界 +4m ではまだ近景に留まる');
-assert.strictEqual(lodFor(44, 0), 1, '境界 +10m で中景へ落ちる');
-assert.strictEqual(lodFor(30, 1), 1, '中景から近景へ戻るには内側の境界まで近づく必要がある');
-assert.strictEqual(lodFor(24, 1), 0);
+assert.strictEqual(lodFor(52, 0), 0, '境界 +4m ではまだ近景に留まる');
+assert.strictEqual(lodFor(58, 0), 1, '境界 +10m で中景へ落ちる');
+assert.strictEqual(lodFor(44, 1), 1, '中景から近景へ戻るには内側の境界まで近づく必要がある');
+assert.strictEqual(lodFor(38, 1), 0);
 {
   // 境界のすぐ外を 1m 刻みで往復させて、切り替わりが 1 回ずつしか起きないこと
   let cur = 0, flips = 0;
   for (let pass = 0; pass < 6; pass++) {
-    const seq = pass % 2 ? [42, 40, 38, 36, 34] : [34, 36, 38, 40, 42];
+    const seq = pass % 2 ? [56, 54, 52, 50, 48] : [48, 50, 52, 54, 56];
     for (const d of seq) {
       const l = lodFor(d, cur);
       if (l !== cur) flips++;
@@ -151,7 +151,7 @@ assert.match(terrainWind, /if \(u\.uWindFlutter\) u\.uWindFlutter\.value = m\.us
   'the flutter amplitude must follow the weather like the bend does');
 
 // 中景の葉も十字のまま（1 枚板は真横から消えて樹冠に穴があく）
-assert.match(treesSrc, /const l1 = buildLeaves\(skel, \{ stride: 5, sizeScale: 2\.1, cross: true \}\);/,
+assert.match(treesSrc, /const l1 = buildLeaves\(skel, \{ stride: 7, sizeScale: 2\.5, cross: true \}\);/,
   'mid-range foliage must stay crossed or cards vanish edge-on');
 // 木ごとの色ムラ（同じ緑が 900 本並ぶのを避ける）
 assert.match(treesSrc, /im\.setColorAt\(n, col\);/,

@@ -12,7 +12,7 @@
    森全体がチラチラした砂目に見えるため。
    =========================================================== */
 import * as THREE from 'three';
-import { growTree, SPECIES, lodFor, LOD_DIST } from './treeSkeleton.js?v=20260828-vegetation2';
+import { growTree, SPECIES, lodFor, LOD_DIST } from './treeSkeleton.js?v=20260828-vegetation3';
 import { makeRng, TAU, lerp, clamp01 } from './util.js';
 
 export { LOD_DIST, lodFor };
@@ -562,12 +562,14 @@ export class TreeSet {
         // --- LOD0：近景 ---
         const b0 = buildBranches(skel, { radial: radial0 });
         const l0 = buildLeaves(skel, { stride: leafStride, sizeScale: 1, cross: true });
-        /* --- LOD1：中景。枝は最終段を落とし、葉は 1/5 の枚数を 2.1 倍の大きさで ---
+        /* --- LOD1：中景。枝は最終段を落とし、葉は 1/7 の枚数を 2.5 倍の大きさで ---
            板 1 枚にすると真横から見たカードが消えて樹冠に穴があき、
            近景から切り替わった瞬間に «葉が減った» と分かる。
-           枚数を半分にしてでも十字のままにしたほうが安定する */
+           枚数を減らしてでも十字のままにしたほうが安定する。
+           房を大きくすれば被覆面積は保てるので、ここを削って浮いた予算を
+           近景のしきい値（LOD_DIST[0]）を広げる方へ回している */
         const b1 = buildBranches(skel, { radial: [4, 3, 3, 3], levelMax: sp.levels.length - 2 });
-        const l1 = buildLeaves(skel, { stride: 5, sizeScale: 2.1, cross: true });
+        const l1 = buildLeaves(skel, { stride: 7, sizeScale: 2.5, cross: true });
         for (const g of [b0, l0, b1, l1]) g.scale(norm, norm, norm);
 
         this._addLevel(k, va, 0, [
