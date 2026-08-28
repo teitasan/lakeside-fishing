@@ -4,8 +4,8 @@
 import * as THREE from 'three';
 import { CAUSTICS_GLSL } from './shaders.js?v=20260828-snellwin2';
 import { waveGLSL } from './waveField.js?v=20260828-lakescale1';
-import { UnderwaterPropScatter, addUnderwaterCaustics, patchUwMaterial } from './underwaterProps.js?v=20260828-waterplants9';
-import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260828-waterplants9';
+import { UnderwaterPropScatter, addUnderwaterCaustics, patchUwMaterial } from './underwaterProps.js?v=20260828-waterplants11';
+import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260828-waterplants11';
 import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js';
 import { makeTileableHeightField } from './tileableNoise.js?v=20260827-orgnoise4';
 import { TreeSet, VARIANTS as TREE_VARIANTS } from './trees.js?v=20260828-vegetation3';
@@ -1153,7 +1153,7 @@ export class Terrain {
     const PLANT = {
       reed: Math.round(14400 * plantScale),
       manomo: Math.round(3200 * plantScale),
-      hydrilla: Math.round(12000 * plantScale),
+      hydrilla: Math.round(16000 * plantScale),
     };
 
     /* --- 木（ブナ・スギ） ---
@@ -1312,7 +1312,7 @@ export class Terrain {
       capacity: {
         reed: [900, 1800, 9000].map((n) => Math.ceil(n * plantScale)),
         manomo: [320, 720, 2600].map((n) => Math.ceil(n * plantScale)),
-        hydrilla: [900, 7000].map((n) => Math.ceil(n * plantScale)),
+        hydrilla: [1100, 9000].map((n) => Math.ceil(n * plantScale)),
       },
       addWindSway,
       addUnderwaterCaustics,
@@ -1324,8 +1324,9 @@ export class Terrain {
       /* kind, 目標数, 汀線からどこまで内側を探すか(m), 地面の高さの帯,
          株の高さ(m), 群落ノイズのしきい値と種 */
       { kind: 'reed', n: PLANT.reed, reach: 20, hMin: -0.95, hMax: 0.45, s0: 1.7, s1: 3.1, thr: -0.10, salt: 11.3 },
-      { kind: 'manomo', n: PLANT.manomo, reach: 28, hMin: -1.30, hMax: -0.06, s0: 1.1, s1: 1.9, thr: 0.10, salt: -37.7 },
-      { kind: 'hydrilla', n: PLANT.hydrilla, reach: 95, hMin: -4.60, hMax: -0.60, s0: 0.55, s1: 1.70, thr: -0.20, salt: 61.9 },
+      { kind: 'manomo', n: PLANT.manomo, reach: 28, hMin: -1.30, hMax: -0.06, s0: 1.0, s1: 1.7, thr: 0.10, salt: -37.7 },
+      // クロモは株を小さく（実物の葉 5〜20mm に見合う大きさ）、そのぶん数を増やす
+      { kind: 'hydrilla', n: PLANT.hydrilla, reach: 95, hMin: -4.60, hMax: -0.60, s0: 0.35, s1: 0.95, thr: -0.20, salt: 61.9 },
     ];
 
     this.plantCounts = {};

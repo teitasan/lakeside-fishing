@@ -15,7 +15,7 @@
    穂とクロモの輪生葉だけは形が細かすぎるのでカード + テクスチャ。
    =========================================================== */
 import * as THREE from 'three';
-import { LodInstances, tintAt } from './lodInstances.js?v=20260828-waterplants10';
+import { LodInstances, tintAt } from './lodInstances.js?v=20260828-waterplants11';
 import { makeRng, TAU, clamp01, lerp } from './util.js';
 
 /**
@@ -34,7 +34,7 @@ const CARDS_PER_LOD = [3, 2, 1];
  * 葉群カードの横／縦比。makeBladeTexture の縦横比と必ず揃える
  * （ずれるとカード上で葉が伸び縮みして «針金» に見える）
  */
-export const BLADE_ASPECT = { reed: 1 / 2.6, manomo: 1 / 0.72, tuft: 1, hydrilla: 1 / 0.75 };
+export const BLADE_ASPECT = { reed: 1 / 2.6, manomo: 1 / 0.95, tuft: 1, hydrilla: 1 / 0.75 };
 
 /** 種ごとの見た目のバリエーション数 */
 export const PLANT_VARIANTS = 3;
@@ -170,7 +170,10 @@ function leafGreen(v, warm) {
  *
  * @param {'reed'|'manomo'|'tuft'} kind
  */
-export function makeBladeTexture(kind, W = 384) {
+/** 種ごとのテクスチャ幅。クロモは葉が 1〜2cm しかないので細かく描く */
+const TEX_W = { reed: 384, manomo: 384, tuft: 384, hydrilla: 768 };
+
+export function makeBladeTexture(kind, W = TEX_W[kind] ?? 384) {
   const cfg = {
     reed: {
       /* ヨシの葉は稈から 30〜50° で出て、外半分が弓なりに垂れる。
@@ -186,11 +189,13 @@ export function makeBladeTexture(kind, W = 384) {
       culms: [5, 8], plumes: [2, 4],
     },
     manomo: {
-      /* マコモの葉身は幅 2〜3cm × 長さ 1.5m ＝ 50:1 前後。
-         幅を取りすぎると «肉厚» に見えてマコモではなくオリヅルランになる。
+      /* マコモの葉身は実物で 幅 2〜3cm × 長さ 1〜2m。
+         h 0.72 だと株の広がりが 1.5〜2.5m になり（実物は 1〜1.5m）、
+         そのぶん葉幅も 2.8〜5.3cm まで太っていた。
+         カードを縦長（0.95）にして幅を約半分に絞る。
          細くしたぶん枚数で密度を稼ぐ */
-      layout: 'fan', h: 0.72, blades: 34,
-      len: [0.66, 1.10], width: [0.011, 0.021],
+      layout: 'fan', h: 0.95, blades: 50,
+      len: [0.66, 1.10], width: [0.008, 0.014],
       tilt: [0.35, 1.30], bend: [0.35, 0.85], from: 0.13,
       v: [158, 218], warm: [0.08, 0.52],
     },
@@ -202,8 +207,11 @@ export function makeBladeTexture(kind, W = 384) {
     },
     hydrilla: {
       /* クロモは «マット» なので縦長より横広。細い茎に輪生葉が付いた
-         小枝を数本、1 枚に描く */
-      layout: 'sprig', h: 0.75, sprigs: [5, 8],
+         小枝を数本、1 枚に描く。
+         葉は実物で 5〜20mm、節間 1〜2cm しかない。カードを 2.2m 幅で
+         取っていたときは葉長 10〜16cm・節間 12cm ＝ 実物の 5〜8 倍で、
+         これが «クロモがデカい» の正体だった */
+      layout: 'sprig', h: 0.75, sprigs: [7, 11],
       v: [110, 158], warm: [-0.16, 0.10],
     },
   }[kind];
@@ -315,13 +323,13 @@ function paintSprig(g, x0, y0, len, tilt, W, v, warm, rng) {
   const dx = Math.sin(tilt), dy = -Math.cos(tilt);
   const ex = x0 + dx * len, ey = y0 + dy * len;
   g.strokeStyle = leafGreen(v * 0.62, warm * 0.4);
-  g.lineWidth = W * 0.007;
+  g.lineWidth = W * 0.0035;
   g.beginPath();
   g.moveTo(x0, y0);
   g.quadraticCurveTo(x0 + dx * len * 0.5, y0 + dy * len * 0.5 + len * 0.06, ex, ey);
   g.stroke();
-  // 節ごとに 5〜7 枚の披針形の葉を輪生させる
-  const nodes = Math.max(5, Math.round(len / (W * 0.055)));
+  // 節ごとに 5〜7 枚の披針形の葉を輪生させる。節間は実物で 1〜2cm
+  const nodes = Math.max(6, Math.round(len / (W * 0.020)));
   for (let i = 1; i <= nodes; i++) {
     const t = i / (nodes + 0.5);
     const px = x0 + dx * len * t;
@@ -330,9 +338,10 @@ function paintSprig(g, x0, y0, len, tilt, W, v, warm, rng) {
     for (let j = 0; j < leaves; j++) {
       const spread = -1 + 2 * (j / (leaves - 1));
       const ang = tilt + spread * 1.35 + (rng() - 0.5) * 0.2;
-      const L = W * (0.045 + rng() * 0.030);
+      // 葉は実物で 5〜20mm。カード幅に対する比で 1.0〜1.8%
+      const L = W * (0.010 + rng() * 0.008);
       g.strokeStyle = leafGreen(v * (0.85 + rng() * 0.3), warm);
-      g.lineWidth = W * 0.010;
+      g.lineWidth = W * 0.0045;
       g.beginPath();
       g.moveTo(px, py);
       g.lineTo(px + Math.sin(ang) * L, py - Math.cos(ang) * L * 0.55);
