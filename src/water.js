@@ -3,7 +3,7 @@
    CPU と GPU で同一の波関数を使い、ウキが正しく浮くようにする
    =========================================================== */
 import * as THREE from 'three';
-import { COMMON_GLSL } from './shaders.js?v=20260828-caustlod1';
+import { COMMON_GLSL } from './shaders.js?v=20260828-snellwin2';
 import { WATER_REGION } from './lakefield.js';
 import { rand, TAU, clamp, smoothstep } from './util.js';
 import { makeTileableHeightField } from './tileableNoise.js?v=20260827-orgnoise4';
@@ -95,6 +95,8 @@ function createRippleNormalTexture() {
   return tex;
 }
 
+const _m4 = new THREE.Matrix4();
+
 export class Water {
   constructor(scene, terrain, opts = {}) {
     this.scene = scene;
@@ -133,6 +135,10 @@ export class Water {
          「不透明度で水を被せる」方式だと湖底の色との差で境目が出るため */
       uSceneColor: { value: null },
       uSceneDepth: { value: null },
+      /* 水中から見上げたとき、屈折した向きを本カメラで投影し直して
+         capture を引くために使う（スネルの窓に水上の景色を映す） */
+      uProjView: { value: new THREE.Matrix4() },
+      uInvProjView: { value: new THREE.Matrix4() },
       uResolution: { value: new THREE.Vector2(1, 1) },
       uCamNear: { value: 0.1 },
       uCamFar: { value: 3000 },
@@ -220,6 +226,7 @@ export class Water {
         uniform float uTime, uNight, uRain, uFogNear, uFogFar, uExposure, uWind, uCamNear, uCamFar;
         uniform sampler2D uSceneColor, uSceneDepth, uReflColor, uRippleNormal, uHeightTex;
         uniform mat4 uTexMat;
+        uniform mat4 uProjView, uInvProjView;
         uniform float uHasRefl, uReflTexel;
         uniform vec4 uFoamTip, uFoamLace;
         uniform vec3 uMixAmt;
@@ -311,13 +318,17 @@ export class Water {
              全反射で水中側が鏡のように映る。以前は水路長の計算が空気側の
              距離を拾っていたため、見上げても濃紺の霧壁しか出ていなかった */
           if (under) {
-            /* 臨界角 cos(asin(1/1.333)) = 0.7442。ここより内側だけ空が見える。
-               窓の中身は capture ではなく skyAt で作る：capture は空ドームを
-               隠してあるので、そこから読むと窓の中心が真っ暗になる。
-               また Snell で屈折方向を作ると、臨界角へ近づくほど視線が水平へ
-               寝るので、窓の縁が自然に明るい環になる（全方位の圧縮） */
-            const float CRIT = 0.7442;
-            float win = smoothstep(CRIT - 0.045, CRIT + 0.085, ndv);
+            /* 臨界角 cos(asin(1/1.333)) = 0.6612。ここより内側だけ空が見える。
+               （0.7442 は 41.9° 相当で、48.6° の窓が 14% 狭かった。そのぶん
+                 太陽高度が 28° を切ると太陽の像が窓の外に落ちて消えていた）
+               Snell で屈折方向を作ると、臨界角へ近づくほど視線が水平へ
+               寝るので、窓の縁が自然に明るい環になる（全方位の圧縮）。
+               窓の位置は水面法線＝ほぼ真上に決まり、太陽の方向とは無関係。
+               太陽は「窓の中のどこに写るか」で効く */
+            const float CRIT = 0.6612;
+            /* 実際の縁は波でぼやけるので軟らかく。ただし CRIT を中心に対称に
+               取る。片側へ寄せると窓そのものの大きさが狂う */
+            float win = smoothstep(CRIT - 0.065, CRIT + 0.065, ndv);
             vec3 up = -N;                                  // 水面の外向き（上）法線
             vec3 I = -V;                                   // 目 → 水面
             float sinI = sqrt(max(0.0, 1.0 - ndv * ndv));
@@ -326,15 +337,50 @@ export class Water {
             vec3 horiz = I - dot(I, up) * up;
             vec3 tangent = length(horiz) > 1e-4 ? normalize(horiz) : vec3(1.0, 0.0, 0.0);
             vec3 Rf = tangent * sinT + up * cosT;
-            vec3 aboveLin = skyAt(vec3(Rf.x, max(Rf.y, 0.012), Rf.z));
+
+            /* 窓の中身（1）空と太陽。
+               太陽は屈折後の向きに写るので、低いほど窓の中心から縁へ寄る
+               （仰角 20° なら天頂から 44.8°、窓の縁 48.6° の 92% の位置）。
+               skyAt には円盤が無く pow(sd,9) のにじみだけなので、そのままだと
+               「太陽がどっちにあるか」が窓の中に出ない。空ドームと同じ円盤を
+               ここでだけ足す（skyAt は水面反射にも使うので、そちらに足すと
+               鏡像のギラつきが二重になる） */
+            vec3 dirSky = vec3(Rf.x, max(Rf.y, 0.012), Rf.z);
+            vec3 aboveLin = skyAt(dirSky);
+            float sdw = max(dot(dirSky, uSunDir), 0.0);
+            aboveLin += uSunColor * smoothstep(0.9994, 0.99975, sdw) * 14.0 * (1.0 - uNight);
+            aboveLin += uSunColor * pow(sdw, 220.0) * 1.6 * (1.0 - uNight);
+
+            /* 窓の中身（2）水上の景色。
+               実際のスネルの窓には空だけでなく桟橋・釣り人・岸が圧縮されて映る。
+               capture は本カメラの視野ぶんしか無いので、屈折方向を本カメラで
+               投影し直し、そこに写っているものが水面より上ならその色を使う。
+               視野外／水面下に当たった向きは空のままにする（岸の圧縮像は
+               本カメラの画角を超えるので窓の縁までは埋まらない） */
+            vec4 wp4 = uProjView * vec4(vWorld + Rf * 32.0, 1.0);
+            if (wp4.w > 0.001) {
+              vec2 wuv = wp4.xy / wp4.w * 0.5 + 0.5;
+              if (all(greaterThan(wuv, vec2(0.002))) && all(lessThan(wuv, vec2(0.998)))) {
+                float wz = texture2D(uSceneDepth, wuv).x;
+                if (wz < 0.9999) {
+                  vec4 wpos = uInvProjView * vec4(wuv * 2.0 - 1.0, wz * 2.0 - 1.0, 1.0);
+                  wpos /= wpos.w;
+                  if (wpos.y > 0.05) aboveLin = texture2D(uSceneColor, wuv).rgb;
+                }
+              }
+            }
+
             // 窓の外：全反射。水中の濁りが波形にゆらぐ鏡になる
             float shimmer = smoothstep(0.0, 0.34, length(slope));
             vec3 tirLin = mix(uDeep, uShallow, 0.34) * (0.62 + 1.05 * shimmer);
             tirLin *= mix(0.22, 1.0, 1.0 - uNight * 0.82);
             vec3 lin = mix(tirLin, aboveLin, win);
-            // 縁の環をもう一段立てる（win=0.5 付近で最大）
+            /* 縁が明るいのは、地平線までの 180° が細い環に圧縮されるから。
+               太陽色を一様に足すと方位に依らない偽の光輪になる（太陽をどこへ
+               動かしても窓の見た目が変わらなくなる）。その向きの空そのものを
+               持ち上げれば、太陽側の縁だけが明るくなる */
             float rim = win * (1.0 - win) * 4.0;
-            lin += uSunColor * rim * 0.30 * (1.0 - uNight * 0.9);
+            lin += aboveLin * rim * 0.42 * (1.0 - uNight * 0.9);
             if (uDebug > 0.5) { gl_FragColor = vec4(vec3(win), 1.0); return; }
             gl_FragColor = vec4(encodeOut(lin, uExposure, uLinearOut), 1.0);
             return;
@@ -1026,6 +1072,13 @@ export class Water {
     u.uNight.value = env.nightAmount;
     u.uRain.value = env.rainIntensity;
     u.uCamPos.value.copy(camera.position);
+    /* 水中から見上げる窓の中身を capture から引くための行列。
+       matrixWorldInverse は renderer が更新するので 1 フレーム遅れる。
+       ここで自前に作り直して、屈折方向と capture をずらさない */
+    camera.updateMatrixWorld();
+    _m4.copy(camera.matrixWorld).invert();
+    u.uProjView.value.multiplyMatrices(camera.projectionMatrix, _m4);
+    u.uInvProjView.value.copy(u.uProjView.value).invert();
 
     const cu = this.causticsUniforms;
     cu.uCaustTime.value = this.time;

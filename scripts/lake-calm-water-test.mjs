@@ -154,10 +154,26 @@ assert.match(waterSrc, /vec3 sss = uShallow \* uSunColor/, 'crest SSS must tint 
 assert.match(waterSrc, /\+ encodeOut\(sss, uExposure, uLinearOut\)/, 'SSS must be added below the Fresnel mix');
 
 // スネルの窓 / 全反射
-assert.match(waterSrc, /const float CRIT = 0\.7442;/,
-  'the underwater surface must build a Snell window around the critical angle');
-assert.match(waterSrc, /vec3 aboveLin = skyAt\(vec3\(Rf\.x, max\(Rf\.y, 0\.012\), Rf\.z\)\);/,
-  'the window content must come from the sky, not the capture RT (which hides the sky dome)');
+// cos(asin(1/1.333)) = 0.6612。0.7442 だと窓が 41.9° 相当まで縮み、太陽高度が
+// 28° を切ると太陽の像が窓の外へ落ちて消えてしまう
+assert.match(waterSrc, /const float CRIT = 0\.6612;/,
+  'the Snell window must sit on the real critical angle (48.6 deg), not a 41.9 deg one');
+assert.match(waterSrc, /smoothstep\(CRIT - 0\.065, CRIT \+ 0\.065, ndv\)/,
+  'the rim softening must stay symmetric about CRIT or the window size drifts');
+assert.match(waterSrc, /vec3 aboveLin = skyAt\(dirSky\);/,
+  'the window content must start from the sky in the refracted direction');
+// 窓の中で太陽の位置が分かること：円盤が無いと方位を振っても絵が変わらない
+assert.match(waterSrc, /aboveLin \+= uSunColor \* pow\(sdw, 220\.0\)/,
+  'the window must carry a sun disc so the sun reads as a direction, not a wash');
+assert.doesNotMatch(waterSrc, /lin \+= uSunColor \* rim \* 0\.30/,
+  'the rim must not be a uniform sun-coloured halo: it made the window azimuth-independent');
+assert.match(waterSrc, /lin \+= aboveLin \* rim \* 0\.42/,
+  'the rim must lift the sky in that direction so only the sun side brightens');
+// 窓には水上の景色（桟橋・釣り人）も映る
+assert.match(waterSrc, /vec4 wp4 = uProjView \* vec4\(vWorld \+ Rf \* 32\.0, 1\.0\);/,
+  'the window must reproject the refracted ray into the capture to show above-water objects');
+assert.match(waterSrc, /if \(wpos\.y > 0\.05\) aboveLin = texture2D\(uSceneColor, wuv\)\.rgb;/,
+  'only geometry above the waterline may fill the window; underwater hits must fall back to sky');
 assert.match(waterSrc, /float sinT = min\(sinI \* 1\.333, 0\.9995\);/,
   'the window must refract through Snell so the rim compresses');
 assert.match(waterSrc, /vec3 tirLin = mix\(uDeep, uShallow, 0\.34\)/,
