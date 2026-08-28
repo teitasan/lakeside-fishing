@@ -15,7 +15,7 @@
    穂とクロモの輪生葉だけは形が細かすぎるのでカード + テクスチャ。
    =========================================================== */
 import * as THREE from 'three';
-import { LodInstances, tintAt } from './lodInstances.js?v=20260828-waterplants9';
+import { LodInstances, tintAt } from './lodInstances.js?v=20260828-waterplants10';
 import { makeRng, TAU, clamp01, lerp } from './util.js';
 
 /**
@@ -34,7 +34,7 @@ const CARDS_PER_LOD = [3, 2, 1];
  * 葉群カードの横／縦比。makeBladeTexture の縦横比と必ず揃える
  * （ずれるとカード上で葉が伸び縮みして «針金» に見える）
  */
-export const BLADE_ASPECT = { reed: 1 / 1.85, manomo: 1 / 0.72, tuft: 1, hydrilla: 1 / 0.75 };
+export const BLADE_ASPECT = { reed: 1 / 2.6, manomo: 1 / 0.72, tuft: 1, hydrilla: 1 / 0.75 };
 
 /** 種ごとの見た目のバリエーション数 */
 export const PLANT_VARIANTS = 3;
@@ -173,9 +173,14 @@ function leafGreen(v, warm) {
 export function makeBladeTexture(kind, W = 384) {
   const cfg = {
     reed: {
-      layout: 'axis', h: 1.85, blades: 34,
-      len: [0.26, 0.44], width: [0.014, 0.026],
-      tilt: [1.15, 1.52], bend: [0.55, 1.05], from: [0.09, 0.96],
+      /* ヨシの葉は稈から 30〜50° で出て、外半分が弓なりに垂れる。
+         66〜87°（ほぼ水平）で描いていたので «横に広がりすぎ» に見えた。
+         葉長も 20〜40cm が実物で、株高の 26〜44%（3m の株で 0.8〜1.3m）は
+         長すぎた。短く立てたぶん枚数を増やして密度を保つ。
+         カードも縦長（h 1.85 → 2.6）にして横幅を 1.6m → 1.15m へ絞る */
+      layout: 'axis', h: 2.6, blades: 64,
+      len: [0.09, 0.17], width: [0.010, 0.020],
+      tilt: [0.42, 0.88], bend: [0.35, 0.80], from: [0.09, 0.96],
       v: [150, 208], warm: [0.02, 0.42],
       // 稈と穂もここに描く。管ジオメトリをやめてカード 1 枚で株にする
       culms: [5, 8], plumes: [2, 4],
@@ -228,7 +233,7 @@ export function makeBladeTexture(kind, W = 384) {
       // 穂は伸びきった稈だけ。全部に付けると «穂の壁» になる
       if (top < H * 0.10 && cfg.plumes && !plumed) {
         plumed = true;
-        paintPlume(g, x + lean, top, W * 0.030, H * 0.115, rng);
+        paintPlume(g, x + lean, top, W * 0.045, H * 0.085, rng);
       }
     }
   }
