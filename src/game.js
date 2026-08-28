@@ -3,7 +3,7 @@
    =========================================================== */
 import * as THREE from 'three';
 import { Environment } from './sky.js?v=20260828-uwgfx18';
-import { Terrain, WATER_REGION } from './terrain.js?v=20260828-vegetation2';
+import { Terrain, WATER_REGION } from './terrain.js?v=20260828-waterplants6';
 import { resolveLake } from './lakefield.js';
 import { Water } from './water.js?v=20260828-snellwin2';
 import { FishSchool } from './fish.js?v=20260827-lkwgfx';
@@ -427,7 +427,13 @@ export class Game {
     /* 水越しの絵に写らないもの（空・雨・陸の木と岩）はキャプチャから外す */
     this.water.setCaptureHidden([this.env.sky, this.env.rain, ...(this.terrain.overWaterProps || [])]);
     // 反射では空・岸木を残す。カメラ追従の雨線だけは鏡像から外す。
-    this.water.setReflectionHidden([this.env.rain, this.terrain.underwaterProps?.group]);
+    /* 完全に水中の物は水面の鏡像に絶対に写らないので反射パスから外す。
+       クロモは 1900 株あるので、これだけで 1 パスぶん丸ごと減る */
+    this.water.setReflectionHidden([
+      this.env.rain,
+      this.terrain.underwaterProps?.group,
+      ...(this.terrain.waterPlants?.submergedMeshes || []),
+    ]);
 
     this.school.populate(this.pos, (d) => this.rollSpecies(d));
     if (this.state.settings.debug) this.debug.setEnabled(true);

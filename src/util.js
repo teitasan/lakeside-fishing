@@ -167,3 +167,22 @@ export function timeBand(hour) {
   if (hour >= 16.5 && hour < 19.5) return 'dusk';
   return 'night';
 }
+
+/**
+ * 距離から LOD 段を選ぶ（境界にヒステリシスを付ける）。
+ * @param {number} dist カメラからの距離
+ * @param {number[]} dists 昇順のしきい値（[近→中, 中→遠, ...]）
+ * @param {number} cur いま割り当てられている段（初回は -1）
+ * @param {number} hyst 境界の遊び幅（m）
+ *
+ * すでに粗い側にいるなら内側の境界まで戻らないと細かい側へ復帰しない。
+ * これが無いと境界上を往復するだけで毎フレーム行列を作り直す羽目になる。
+ */
+export function lodForList(dist, dists, cur = -1, hyst = 8) {
+  let lod = 0;
+  for (let i = 0; i < dists.length; i++) {
+    const edge = cur > i ? dists[i] - hyst : dists[i] + hyst;
+    if (dist > edge) lod = i + 1;
+  }
+  return lod;
+}

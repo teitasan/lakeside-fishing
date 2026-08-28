@@ -13,7 +13,7 @@
      - 先端が上を向くか垂れるか（gravity）
    で決まるので、樹種の差はこの 3 つに集約している。
    =========================================================== */
-import { TAU, clamp01, lerp } from './util.js';
+import { TAU, clamp01, lerp, lodForList } from './util.js';
 
 /* ---------------- 小さなベクトル演算 ---------------- */
 const v = (x = 0, y = 0, z = 0) => ({ x, y, z });
@@ -274,17 +274,11 @@ export const LOD_DIST = [48, 105];
 /**
  * どの LOD を使うか。境界でパタパタ切り替わらないよう、
  * いま使っている LOD から離れる方向にだけヒステリシスを付ける。
+ * 判定そのものは util.lodForList（他の植生でも同じ規則を使う）。
  * @param {number} dist カメラからの距離
  * @param {number} cur いま割り当てられている LOD（初回は -1）
  * @param {number} hyst 境界の遊び幅（m）
  */
 export function lodFor(dist, cur = -1, hyst = 8) {
-  let lod = 0;
-  for (let i = 0; i < LOD_DIST.length; i++) {
-    /* すでに粗い側にいるなら内側の境界まで戻らないと細かい側へ復帰しない。
-       境界をまたいで往復するときの再アップロードを止めるのが目的 */
-    const edge = cur > i ? LOD_DIST[i] - hyst : LOD_DIST[i] + hyst;
-    if (dist > edge) lod = i + 1;
-  }
-  return lod;
+  return lodForList(dist, LOD_DIST, cur, hyst);
 }

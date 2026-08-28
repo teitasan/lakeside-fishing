@@ -74,7 +74,12 @@ const UW_BEGIN = /* glsl */ `
 }
 `;
 
-function patchUwMaterial(mat, { causticsUniforms, sway = 0.04, caustics = true } = {}) {
+/**
+ * 水中プロップ用のマテリアル注入。
+ * caustics（水面の網目）・流れによる揺れ・距離での間引きをまとめて入れる。
+ * 沈水植物（クロモ）も同じ扱いなので waterPlants.js から使う。
+ */
+export function patchUwMaterial(mat, { causticsUniforms, sway = 0.04, caustics = true } = {}) {
   mat.onBeforeCompile = (shader) => {
     if (causticsUniforms) Object.assign(shader.uniforms, causticsUniforms);
     shader.uniforms.uUwTime = { value: 0 };
@@ -176,6 +181,8 @@ export class UnderwaterPropScatter {
     this.scene = scene;
     this.terrain = terrain;
     this.causticsUniforms = opts.causticsUniforms || null;
+    this.weedGeo = opts.weedGeo || null;
+    this.weedMap = opts.weedMap || null;
     this.quality = opts.quality || 'mid';
     this.group = new THREE.Group();
     this.group.name = 'underwaterProps';
@@ -191,16 +198,27 @@ export class UnderwaterPropScatter {
     const rng = makeRng((t.seed ^ 0xa11ce) >>> 0);
     const lake = t.lake;
 
-    const weedGeo = new THREE.ConeGeometry(0.05, 0.9, 4, 1, true);
-    weedGeo.translate(0, 0.45, 0);
+    /* 藻は既定では円錐 1 個だが、waterPlants の «房» を渡せる。
+       クロモの隣に円錐が並ぶと造り物に見えるので、terrain 側から差し替える */
+    let weedGeo = this.weedGeo;
+    if (!weedGeo) {
+      weedGeo = new THREE.ConeGeometry(0.05, 0.9, 4, 1, true);
+      weedGeo.translate(0, 0.45, 0);
+    }
     const pebbleGeo = new THREE.IcosahedronGeometry(1, 0);
     const twigGeo = new THREE.CylinderGeometry(0.04, 0.06, 1, 4);
     twigGeo.translate(0, 0.5, 0);
 
+    /* 藻に葉群テクスチャを渡されたら、色はテクスチャ任せでアルファ抜きにする。
+       円錐 1 個のままだと «描いた葉» のクロモの隣で明らかに安く見える */
     const weedMat = patchUwMaterial(
-      new THREE.MeshStandardMaterial({
-        color: 0x3f5a32, roughness: 1, side: THREE.DoubleSide, flatShading: true,
-      }),
+      new THREE.MeshStandardMaterial(this.weedMap
+        ? {
+          // カードは表裏 2 枚ぶん索引してあるので FrontSide
+          map: this.weedMap, roughness: 0.92, side: THREE.FrontSide,
+          alphaTest: 0.26, transparent: false,
+        }
+        : { color: 0x3f5a32, roughness: 1, side: THREE.DoubleSide, flatShading: true }),
       { causticsUniforms: this.causticsUniforms, sway: 1.25 }
     );
     const pebbleMat = patchUwMaterial(

@@ -4,11 +4,12 @@
 import * as THREE from 'three';
 import { CAUSTICS_GLSL } from './shaders.js?v=20260828-snellwin2';
 import { waveGLSL } from './waveField.js?v=20260828-lakescale1';
-import { UnderwaterPropScatter, addUnderwaterCaustics } from './underwaterProps.js?v=20260828-uwgfx18';
+import { UnderwaterPropScatter, addUnderwaterCaustics, patchUwMaterial } from './underwaterProps.js?v=20260828-waterplants6';
+import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260828-waterplants6';
 import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js';
 import { makeTileableHeightField } from './tileableNoise.js?v=20260827-orgnoise4';
-import { TreeSet, VARIANTS as TREE_VARIANTS } from './trees.js?v=20260828-vegetation2';
-import { SPECIES_IDS } from './treeSkeleton.js?v=20260828-vegetation2';
+import { TreeSet, VARIANTS as TREE_VARIANTS } from './trees.js?v=20260828-vegetation3';
+import { SPECIES_IDS } from './treeSkeleton.js?v=20260828-vegetation3';
 import { WORLD_SIZE, WATER_REGION, MAX_DEPTH, resolveLake } from './lakefield.js';
 
 export { WORLD_SIZE, WATER_REGION, MAX_DEPTH };
@@ -475,6 +476,9 @@ export class Terrain {
     this.underwaterProps = new UnderwaterPropScatter(this.scene, this, {
       causticsUniforms: this._causticsUniforms,
       quality: this.quality,
+      // 湖底の «藻» を円錐からカードの房に差し替える（クロモと質感を揃える）
+      weedGeo: buildSubmergedTuft(this.seed ^ 0x6c1b),
+      weedMap: this.waterPlants?.bladeTex?.tuft || null,
     });
   }
 
@@ -491,6 +495,15 @@ export class Terrain {
   /** 水中プロップ：カメラ・流れ・時刻 */
   updateUnderwaterProps(time, camera, flowDir, flowStrength) {
     this.underwaterProps?.update(time, camera, flowDir, flowStrength);
+    // クロモも水中プロップと同じマテリアルなので、流れと caustics を同じ値で回す
+    for (const mat of this.waterPlants?.uwMaterials || []) {
+      const u = mat.userData?.uwUniforms;
+      if (!u) continue;
+      if (u.uUwTime) u.uUwTime.value = time;
+      if (u.uUwCamPos) u.uUwCamPos.value.copy(camera.position);
+      if (u.uFlowDir) u.uFlowDir.value.set(flowDir.x, flowDir.z);
+      if (u.uFlowStrength) u.uFlowStrength.value = flowStrength;
+    }
   }
 
   /** 渚の濡れ砂：水面と同じ時刻・風速を渡す（毎フレーム） */
@@ -1130,7 +1143,13 @@ export class Terrain {
        900 本だと 20m 間隔の疎林で「植えた公園」に見えるため増やす */
     const treeTarget = q === 'low' ? 700 : q === 'high' ? 2000 : 1400;
     const rockTarget = q === 'low' ? 120 : 260;
-    const reedTarget = q === 'low' ? 260 : 720;
+    /* 水辺〜水中の植物。遠景は描かないので本数を増やしても近景の面積で決まる */
+    const plantScale = q === 'low' ? 0.42 : q === 'high' ? 1 : 0.7;
+    const PLANT = {
+      reed: Math.round(1500 * plantScale),
+      manomo: Math.round(700 * plantScale),
+      hydrilla: Math.round(1900 * plantScale),
+    };
 
     /* --- 木（ブナ・スギ） ---
        円柱＋円錐をやめ、骨格から起こした枝と葉カードにする。
@@ -1276,34 +1295,51 @@ export class Terrain {
       this.scene.add(sRocks, snagRoot);
     }
 
-    /* --- 葦（浅場） --- */
-    const reedGeo = new THREE.ConeGeometry(0.06, 1, 4, 1, true);
-    reedGeo.translate(0, 0.5, 0);
-    const reedMat = addWindSway(new THREE.MeshStandardMaterial({
-      color: 0x4c6b34, roughness: 1, side: THREE.DoubleSide,
-    }), { strength: q === 'low' ? 0.05 : 0.075, freq: 2.1, gustiness: 0.7 });
-    const reeds = new THREE.InstancedMesh(reedGeo, reedMat, reedTarget);
-    let rdi = 0; tries = 0;
-    while (rdi < reedTarget && tries < reedTarget * 40) {
-      tries++;
-      const ang = rng() * TAU;
-      const rr = this.shoreRadius(Math.cos(ang) * 150, Math.sin(ang) * 150);
-      const dist = rr - rng() * 16;
-      const x = Math.cos(ang) * dist, z = Math.sin(ang) * dist;
-      const h = this.heightAt(x, z);
-      if (h > 0.35 || h < -1.5) continue;
-      if (this.distToDock(x, z) < 2.4) continue;   // 板を突き抜けないように
-      const sc = 1.1 + rng() * 1.9;
-      qt.setFromAxisAngle(new THREE.Vector3(rng() * 0.2 - 0.1, 1, rng() * 0.2 - 0.1).normalize(), rng() * TAU);
-      p.set(x, h, z);
-      s.set(1, sc, 1);
-      m.compose(p, qt, s);
-      reeds.setMatrixAt(rdi++, m);
+    /* --- 水辺〜水中の植物（ヨシ・マコモ・クロモ） ---
+       円錐 1 個の «葦» をやめ、種ごとに株を組んで生やす。
+       水深の帯で棲み分けさせ、さらにノイズで «群落» に固める。
+       等確率で撒くと岸をぐるりと均一に縁取って、植えた花壇に見える */
+    this.waterPlants = new WaterPlants(this.scene, {
+      quality: q,
+      seed: this.seed ^ 0x2f19,
+      capacity: Math.ceil(Math.max(...Object.values(PLANT)) / 3) + 60,
+      addWindSway,
+      addUnderwaterCaustics,
+      patchUwMaterial,
+      causticsUniforms: this._causticsUniforms,
+    });
+
+    const BANDS = [
+      /* kind, 目標数, 汀線からどこまで内側を探すか(m), 地面の高さの帯,
+         株の高さ(m), 群落ノイズのしきい値と種 */
+      { kind: 'reed', n: PLANT.reed, reach: 20, hMin: -0.95, hMax: 0.45, s0: 1.7, s1: 3.1, thr: -0.10, salt: 11.3 },
+      { kind: 'manomo', n: PLANT.manomo, reach: 28, hMin: -1.30, hMax: -0.06, s0: 1.1, s1: 1.9, thr: 0.10, salt: -37.7 },
+      { kind: 'hydrilla', n: PLANT.hydrilla, reach: 95, hMin: -4.60, hMax: -0.60, s0: 0.55, s1: 1.70, thr: -0.20, salt: 61.9 },
+    ];
+
+    this.plantCounts = {};
+    for (const b of BANDS) {
+      let placed = 0; tries = 0;
+      while (placed < b.n && tries < b.n * 40) {
+        tries++;
+        const ang = rng() * TAU;
+        const rr = this.shoreRadius(Math.cos(ang) * 150, Math.sin(ang) * 150);
+        const dist = rr + 1.5 - Math.pow(rng(), 0.75) * b.reach;
+        const x = Math.cos(ang) * dist, z = Math.sin(ang) * dist;
+        const h = this.heightAt(x, z);
+        if (h < b.hMin || h > b.hMax) continue;
+        if (this.slopeAt(x, z) > 1.15) continue;
+        if (this.distToDock(x, z) < 2.4) continue;   // 板を突き抜けないように
+        // 群落：同じ種は塊で生える。種ごとに salt を変えて場所をずらす
+        if (this.noise.fbm(x * 0.042 + b.salt, z * 0.042 - b.salt, 2) < b.thr) continue;
+        // 小さい株がやや多い（群落の縁は背が低い）
+        const sc = lerp(b.s0, b.s1, Math.pow(rng(), 1.35));
+        this.waterPlants.add(b.kind, x, h, z, sc, (rng() * 3) | 0, rng() * TAU);
+        placed++;
+      }
+      this.plantCounts[b.kind] = placed;
     }
-    reeds.count = rdi;
-    reeds.instanceMatrix.needsUpdate = true;
-    this.scene.add(reeds);
-    this.swayMaterials.push(reedMat);
+    this.swayMaterials.push(...this.waterPlants.swayMaterials);
   }
 
   /** 夜間の灯り更新 */
@@ -1318,8 +1354,9 @@ export class Terrain {
     if (this.swayMaterials) tickVegetationWind(this.swayMaterials, time * 1.0, windPow);
   }
 
-  /** 木の LOD をカメラ距離で振り直す（変化があったときだけ行列を作り直す） */
+  /** 木・水辺の植物の LOD をカメラ距離で振り直す（変化時だけ行列を作り直す） */
   updateTrees(dt, cameraPos) {
     this.treeSet?.update(dt, cameraPos);
+    this.waterPlants?.update(dt, cameraPos);
   }
 }
