@@ -4,8 +4,8 @@
 import * as THREE from 'three';
 import { CAUSTICS_GLSL } from './shaders.js?v=20260828-snellwin2';
 import { waveGLSL } from './waveField.js?v=20260828-lakescale1';
-import { UnderwaterPropScatter, addUnderwaterCaustics, patchUwMaterial } from './underwaterProps.js?v=20260828-waterplants7';
-import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260828-waterplants7';
+import { UnderwaterPropScatter, addUnderwaterCaustics, patchUwMaterial } from './underwaterProps.js?v=20260828-waterplants9';
+import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260828-waterplants9';
 import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js';
 import { makeTileableHeightField } from './tileableNoise.js?v=20260827-orgnoise4';
 import { TreeSet, VARIANTS as TREE_VARIANTS } from './trees.js?v=20260828-vegetation3';
@@ -1143,12 +1143,17 @@ export class Terrain {
        900 本だと 20m 間隔の疎林で「植えた公園」に見えるため増やす */
     const treeTarget = q === 'low' ? 700 : q === 'high' ? 2000 : 1400;
     const rockTarget = q === 'low' ? 120 : 260;
-    /* 水辺〜水中の植物。遠景は描かないので本数を増やしても近景の面積で決まる */
-    const plantScale = q === 'low' ? 0.42 : q === 'high' ? 1 : 0.7;
+    /* 水辺〜水中の植物。
+       生育可能面積を実測すると ヨシ 5982 / マコモ 2780 / クロモ 10539 m2 で、
+       1500 / 700 / 1900 株では 0.2 株/m2 ＝ 現実の 1/10 の疎さだった
+       （実際のヨシ原は 50〜200 稈/m2、マコモも夏で 100〜200 芽/m2）。
+       1 株が «葉の束を描いたカード» 3 枚 ＝ 12 三角なので、
+       株密度を 1 桁上げても近景の面積ぶんしか増えない */
+    const plantScale = q === 'low' ? 0.40 : q === 'high' ? 1 : 0.68;
     const PLANT = {
-      reed: Math.round(1500 * plantScale),
-      manomo: Math.round(700 * plantScale),
-      hydrilla: Math.round(1900 * plantScale),
+      reed: Math.round(14400 * plantScale),
+      manomo: Math.round(3200 * plantScale),
+      hydrilla: Math.round(12000 * plantScale),
     };
 
     /* --- 木（ブナ・スギ） ---
@@ -1302,7 +1307,13 @@ export class Terrain {
     this.waterPlants = new WaterPlants(this.scene, {
       quality: q,
       seed: this.seed ^ 0x2f19,
-      capacity: Math.ceil(Math.max(...Object.values(PLANT)) / 3) + 60,
+      /* 段ごとの枠。近景は «汀線から半径 16m の帯» にしか入らないので、
+         遠景と同じ枠を確保すると丸ごと無駄になる */
+      capacity: {
+        reed: [900, 1800, 9000].map((n) => Math.ceil(n * plantScale)),
+        manomo: [320, 720, 2600].map((n) => Math.ceil(n * plantScale)),
+        hydrilla: [900, 7000].map((n) => Math.ceil(n * plantScale)),
+      },
       addWindSway,
       addUnderwaterCaustics,
       patchUwMaterial,

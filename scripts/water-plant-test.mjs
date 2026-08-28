@@ -57,6 +57,15 @@ assert.match(wp, /export function makeBladeTexture\(/,
 assert.doesNotMatch(wp, /function ribbon\(/,
   'the ribbon blade builder must be gone');
 assert.match(wp, /function cardFan\(/, '葉群はカードのファンで置く');
+/* 管ジオメトリ（稈・茎）も持たない。稈も穂も輪生葉もテクスチャに描き込む。
+   実測した現実の密度を出すには 1 株 10 三角ていどまで落とす必要がある */
+assert.doesNotMatch(wp, /function tube\(/, '管ジオメトリは持たない');
+assert.doesNotMatch(wp, /function curvePts\(/, '中心線の生成も不要');
+assert.match(wp, /culms: \[5, 8\], plumes: \[2, 4\],/,
+  'the reed culms and panicles must be painted into the texture');
+assert.match(wp, /function paintSprig\(/, 'クロモの小枝もテクスチャに描く');
+assert.match(wp, /const CARDS_PER_LOD = \[3, 2, 1\];/,
+  '遠景でもカードは 1 枚残す（0 枚だと真横から株が消える）');
 
 /* カードは表裏 2 枚ぶん索引して FrontSide で描く。
    DoubleSide の法線反転は gl_FrontFacing で決まるので、上向きの法線を
@@ -81,7 +90,7 @@ assert.match(wp, /side: THREE\.FrontSide, alphaTest: 0\.26/, '葉群カードは
     else if (p[3]) aspects[p[3]] = 1;
   }
   const cfg = wp.slice(wp.indexOf('export function makeBladeTexture('));
-  for (const kind of ['reed', 'manomo', 'tuft']) {
+  for (const kind of ['reed', 'manomo', 'tuft', 'hydrilla']) {
     // 種のブロック（次の }, まで）の中から h を拾う。コメントが入っても壊れないように
     const blk = cfg.match(new RegExp(`${kind}: \\{([\\s\\S]*?)\\n {4}\\},`));
     const hm = blk && blk[1].match(/h: ([\d.]+)/);
@@ -93,21 +102,23 @@ assert.match(wp, /side: THREE\.FrontSide, alphaTest: 0\.26/, '葉群カードは
 }
 
 /* LOD をまたいでも同じ株のまま：設計図を 1 回引いて 2 段を起こす */
-assert.match(wp, /const plan = planFor\(name, makeRng\(.*\);\s*\n\s*for \(let lod = 0; lod < 2; lod\+\+\) \{/,
-  'both LODs must be emitted from one plan so the plant does not change shape');
+assert.match(wp, /const plan = planFor\(name, makeRng\(.*\);\s*\n\s*for \(let lod = 0; lod < tiers; lod\+\+\) \{/,
+  'every tier must be emitted from one plan so the plant does not change shape');
+assert.match(wp, /n: CARDS_PER_LOD\[Math\.min\(lod, CARDS_PER_LOD\.length - 1\)\],/,
+  '段で変わるのはカード枚数だけ。大きさや向きは設計図のまま');
 
 /* クロモは水中プロップと同じマテリアル＝流れの揺れ・caustics・距離間引き */
 assert.match(uwp, /export function patchUwMaterial\(/, 'patchUwMaterial が公開されていること');
-assert.match(wp, /this\.mats\.hydrillaStem = uw\(/, 'クロモは水中マテリアルを使う');
-assert.match(wp, /const uwSway = 5\.4;/, '沈水植物は流れで大きく倒れる');
-assert.match(wp, /this\.mats\.hydrillaLeaf = uw\(new THREE\.MeshStandardMaterial\(\{[\s\S]*?\}\), uwSway\);/,
-  '茎と葉の揺れ量は同じでないと葉が茎から抜ける');
+assert.match(wp, /this\.mats\.hydrilla = uw\(new THREE\.MeshStandardMaterial\([\s\S]*?\), 5\.4\);/,
+  'クロモは水中マテリアル（流れの揺れ・caustics・距離間引き）で、揺れは大きく取る');
 
 /* 抽水植物は水面をまたぐので «風で揺れる» と «水面下だけ caustics» の両方 */
 assert.match(wp, /function applyPatches\(mat, patches\) \{/,
   'onBeforeCompile を上書きし合わないよう合成すること');
-assert.match(wp, /\[wind\(reedWind\), caust\]/, 'ヨシは風と caustics の両方');
-assert.match(wp, /\[wind\(manomoWind\), caust\]/, 'マコモも同様');
+assert.match(wp, /bladeBase\(this\.bladeTex\.reed\)\), \[wind\(reedWind\), caust\]\)/,
+  'ヨシは風と caustics の両方');
+assert.match(wp, /bladeBase\(this\.bladeTex\.manomo\)\), \[wind\(manomoWind\), caust\]\)/,
+  'マコモも同様');
 
 /* 湖底の «藻» が円錐 1 個のままだと、描いた葉のクロモの隣で浮く */
 assert.match(uwp, /let weedGeo = this\.weedGeo;/, '藻のジオメトリを差し替えられること');
@@ -127,6 +138,22 @@ assert.match(terrain, /weedMap: this\.waterPlants\?\.bladeTex\?\.tuft/, '藻に�
   assert.ok(hyd.min < manomo.min, 'クロモが一番深い');
   assert.ok(hyd.max < manomo.max, 'クロモは抽水植物より深いところだけ');
   for (const b of [reed, manomo, hyd]) assert.ok(b.min < b.max, '帯の上下が逆');
+}
+
+/* 密度：現実のヨシ原は 50〜200 稈/m2。1 株が «葉の束» なので株数はそれより
+   ずっと少なくて済むが、0.2 株/m2 では明らかにスカスカだった。
+   実測した生育可能面積に対して 1 株/m2 を下回らないこと */
+{
+  const AREA = { reed: 5982, manomo: 2780, hydrilla: 10539 };   // Node で実測
+  const m = terrain.match(/const PLANT = \{([\s\S]*?)\};/);
+  assert.ok(m, 'PLANT が読めない');
+  for (const [kind, area] of Object.entries(AREA)) {
+    const nm = m[1].match(new RegExp(`${kind}: Math\\.round\\((\\d+) \\* plantScale\\)`));
+    assert.ok(nm, `${kind} の株数が読めない`);
+    const dens = parseInt(nm[1], 10) / area;
+    assert.ok(dens > 1.0,
+      `${kind}: ${dens.toFixed(2)} 株/m2 では «わしゃわしゃ» にならない（1.0 以上必要）`);
+  }
 }
 
 /* 群落：等確率で撒くと岸をぐるりと均一に縁取って花壇に見える */
