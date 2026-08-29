@@ -10,6 +10,7 @@
    =========================================================== */
 import * as THREE from 'three';
 import { lodForList } from './util.js';
+export { tintAt } from './util.js';
 
 export class LodInstances {
   /**
@@ -19,11 +20,15 @@ export class LodInstances {
    *   hysteresis 境界の遊び幅（m）。往復での作り直しを防ぐ
    *   interval   振り直しの最短間隔（秒）
    */
-  constructor(scene, { lodDist, hysteresis = 8, interval = 0.15 } = {}) {
+  constructor(scene, { lodDist, hysteresis = 8, interval = 0.15, fadeBand = 0 } = {}) {
     this.scene = scene;
     this.lodDist = lodDist;
     this.hysteresis = hysteresis;
     this.interval = interval;
+    /* 境界の前後この幅だけ «両方の段» を描き、画面空間のディザで
+       それぞれを間引いてクロスフェードする（materialPatch.lodDitherFade）。
+       0 なら従来どおり瞬時に切り替わる */
+    this.fadeBand = fadeBand;
     this.items = [];
     this.meshes = [];
     this.buckets = new Map();   // `${key}|${lod}` -> InstancedMesh[]
@@ -40,8 +45,13 @@ export class LodInstances {
    */
   register(key, lod, parts, capacity) {
     const list = [];
+    /* この段が受け持つ距離の範囲。マテリアルは段をまたいで共有するので、
+       範囲は «頂点属性» で渡す（0 以下は «境界なし» の意味） */
+    const lo = lod === 0 ? -1 : this.lodDist[lod - 1];
+    const hi = lod < this.lodDist.length ? this.lodDist[lod] : -1;
     for (const p of parts) {
-      const im = new THREE.InstancedMesh(p.geo, p.mat, capacity);
+      const geo = this.fadeBand > 0 ? withLodBand(p.geo, lo, hi) : p.geo;
+      const im = new THREE.InstancedMesh(geo, p.mat, capacity);
       im.count = 0;
       im.castShadow = !!p.shadow;
       im.receiveShadow = false;
@@ -81,7 +91,7 @@ export class LodInstances {
   add(x, y, z, scale, key, ry = 0, tint = null) {
     const s = typeof scale === 'number' ? { x: scale, y: scale, z: scale } : scale;
     this.items.push({
-      x, y, z, sx: s.x, sy: s.y, sz: s.z, key, ry, lod: -1,
+      x, y, z, sx: s.x, sy: s.y, sz: s.z, key, ry, lod: -1, lod2: -1,
       cr: tint ? tint.r : 1, cg: tint ? tint.g : 1, cb: tint ? tint.b : 1,
       tinted: !!tint,
     });
@@ -95,10 +105,21 @@ export class LodInstances {
     this._timer = this.interval;
 
     let changed = this._dirty;
+    const band = this.fadeBand;
     for (const it of this.items) {
       const d = Math.hypot(it.x - cameraPos.x, it.y - cameraPos.y, it.z - cameraPos.z);
       const l = lodForList(d, this.lodDist, it.lod, this.hysteresis);
-      if (l !== it.lod) { it.lod = l; changed = true; }
+      /* 境界の帯に入っている株は隣の段にも入れる。両方が描かれて、
+         ディザで «だんだん入れ替わる»。帯の外なら -1（片方だけ） */
+      let l2 = -1;
+      if (band > 0) {
+        for (let i = 0; i < this.lodDist.length; i++) {
+          const e = this.lodDist[i];
+          if (d > e - band && d < e + band) { l2 = d < e ? i + 1 : i; break; }
+        }
+        if (l2 === l) l2 = -1;
+      }
+      if (l !== it.lod || l2 !== it.lod2) { it.lod = l; it.lod2 = l2; changed = true; }
     }
     if (!changed) return;
     this._dirty = false;
@@ -117,19 +138,23 @@ export class LodInstances {
     for (const list of this.buckets.values()) for (const im of list) counts.set(im, 0);
 
     for (const it of this.items) {
-      const list = this.buckets.get(`${it.key}|${it.lod}`);
-      if (!list) continue;                     // 最終段より遠い＝描かない
       p.set(it.x, it.y, it.z);
       q.setFromAxisAngle(up, it.ry);
       s.set(it.sx, it.sy, it.sz);
       m.compose(p, q, s);
       col.setRGB(it.cr, it.cg, it.cb);
-      for (const im of list) {
-        const n = counts.get(im);
-        if (n >= im.instanceMatrix.count) continue;
-        im.setMatrixAt(n, m);
-        if (it.tinted) im.setColorAt(n, col);
-        counts.set(im, n + 1);
+      // 帯の中は 2 段ぶん書き込む（片方はディザで間引かれて消える）
+      for (const lod of [it.lod, it.lod2]) {
+        if (lod < 0) continue;
+        const list = this.buckets.get(`${it.key}|${lod}`);
+        if (!list) continue;                   // 最終段より遠い＝描かない
+        for (const im of list) {
+          const n = counts.get(im);
+          if (n >= im.instanceMatrix.count) continue;
+          im.setMatrixAt(n, m);
+          if (it.tinted) im.setColorAt(n, col);
+          counts.set(im, n + 1);
+        }
       }
     }
     for (const [im, n] of counts) {
@@ -158,19 +183,18 @@ export class LodInstances {
 }
 
 /**
- * 位置から決める株ごとの色ムラ。
- * 同じ緑が何百株も並ぶと、形をいくら作り込んでも «同じ物を並べた» と分かる。
- * seed ではなく座標から決めるので、ワールドは再現できる。
- * @param {number} x
- * @param {number} z
- * @param {number} valSpan 明るさの振れ幅
- * @param {number} warmSpan 色温度の振れ幅（+ で黄寄り, - で青寄り）
+ * «この段が受け持つ距離» を持たせたジオメトリを返す。
+ * 属性バッファは共有したまま、別の BufferGeometry として包む
+ * （同じジオメトリを別の段でも使うことがあるので、上書きしない）。
  */
-export function tintAt(x, z, valSpan = 0.30, warmSpan = 0.16) {
-  const hp = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
-  const hb = Math.sin(x * 39.3468 - z * 11.135) * 24634.6345;
-  const a = hp - Math.floor(hp), b = hb - Math.floor(hb);
-  const val = 1 - valSpan * 0.5 + a * valSpan;
-  const warm = (b - 0.5) * warmSpan;
-  return { r: val * (1 + warm), g: val, b: val * (1 - warm) };
+function withLodBand(geo, lo, hi) {
+  const out = new THREE.BufferGeometry();
+  for (const [name, attr] of Object.entries(geo.attributes)) out.setAttribute(name, attr);
+  if (geo.index) out.setIndex(geo.index);
+  const n = geo.attributes.position.count;
+  const band = new Float32Array(n * 2);
+  for (let i = 0; i < n; i++) { band[i * 2] = lo; band[i * 2 + 1] = hi; }
+  out.setAttribute('aLodBand', new THREE.BufferAttribute(band, 2));
+  out.userData.lodBandSource = geo;
+  return out;
 }

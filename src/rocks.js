@@ -15,9 +15,9 @@
    半透明も細い枝も無いので、超低ポリのメッシュのままで十分。
    =========================================================== */
 import * as THREE from 'three';
-import { makeRockShape, makeRockLods, ROCK_KINDS } from './rockShape.js?v=20260828-lodwide3';
-import { LodInstances, tintAt } from './lodInstances.js?v=20260828-lodwide3';
-import { applyPatches } from './materialPatch.js?v=20260828-lodwide3';
+import { makeRockShape, makeRockLods, ROCK_KINDS } from './rockShape.js?v=20260828-lodfade2';
+import { LodInstances, tintAt } from './lodInstances.js?v=20260828-lodfade2';
+import { applyPatches, lodDitherFade } from './materialPatch.js?v=20260828-lodfade2';
 import { makeRng, TAU, lerp } from './util.js';
 
 /**
@@ -34,6 +34,11 @@ export const ROCK_TIERS = {
   cobble: { lodDist: [40, 100], detail: [2, 1], salt: 0x7c02 },
   pebble: { lodDist: [34], detail: [1], salt: 0xa4d9 },
 };
+
+/** 段の境界でクロスフェードする帯の幅（m）。
+    岩は粗い段が細かい段の «部分集合» なので形は動かないが、
+    細かい凹凸が消える瞬間はやはり見えるので薄く掛ける */
+export const ROCK_FADE_BAND = 8;
 
 /** 形のバリエーション数（階層ごと） */
 export const ROCK_VARIANTS = 5;
@@ -369,12 +374,13 @@ export class RockSet {
           rockTex: this.rockTex, mossTex: this.mossTex, ...look[tier],
         }),
         caust,
+        (m) => lodDitherFade(m, ROCK_FADE_BAND),
       ]);
       this.materials.push(mat);
       this.mats[tier] = mat;
 
       const set = new LodInstances(scene, {
-        lodDist: cfg.lodDist, hysteresis: 5, interval: 0.2,
+        lodDist: cfg.lodDist, hysteresis: 5, interval: 0.2, fadeBand: ROCK_FADE_BAND,
       });
       this.sets[tier] = set;
       const caps = (opts.capacity || {})[tier] || cfg.lodDist.map(() => 400);

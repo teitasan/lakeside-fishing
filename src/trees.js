@@ -12,13 +12,17 @@
    森全体がチラチラした砂目に見えるため。
    =========================================================== */
 import * as THREE from 'three';
-import { growTree, SPECIES, lodFor, LOD_DIST } from './treeSkeleton.js?v=20260828-lodwide3';
+import { growTree, SPECIES, lodFor, LOD_DIST } from './treeSkeleton.js?v=20260828-lodfade2';
 import { lodForList } from './util.js';
+import { LodInstances, tintAt } from './lodInstances.js?v=20260828-lodfade2';
 import { makeRng, TAU, lerp, clamp01 } from './util.js';
-import { applyPatches, keepAuthoredNormals, foliageTranslucency }
-  from './materialPatch.js?v=20260828-lodwide3';
+import { applyPatches, keepAuthoredNormals, foliageTranslucency, lodDitherFade }
+  from './materialPatch.js?v=20260828-lodfade2';
 
 export { LOD_DIST, lodFor };
+
+/** 段の境界でクロスフェードする帯の幅（m） */
+export const LOD_FADE_BAND = 12;
 
 /** 種ごとの見た目のバリエーション数（LOD をまたいでも同じ骨格を使う） */
 export const VARIANTS = 2;
@@ -503,20 +507,18 @@ export class TreeSet {
     const seed = (opts.seed ?? 1) >>> 0;
     const cap = opts.capacity ?? 520;
 
-    /* しきい値はインスタンスが持つ。実機で負荷を見ながら振りたいので、
-       モジュール定数を直接読まずコピーを持たせる（terrain.setLodScale） */
-    this.lodDist = [...LOD_DIST];
     this.kinds = Object.keys(SPECIES);
-    this.trees = [];
-    this.meshes = [];          // すべての InstancedMesh（描画順の都合で保持）
     this.swayMaterials = [];
-    this.buckets = new Map();  // `${sp}|${va}|${lod}` -> InstancedMesh 群
+    /* 段の振り分けは他の植生と同じ仕組みに載せる。
+       境界の前後でディザのクロスフェードを効かせるため
+       （木は岩と違って «粗い段＝細かい段の部分集合» にできない） */
+    this.set = new LodInstances(scene, {
+      lodDist: [...LOD_DIST], hysteresis: 8, interval: 0.15, fadeBand: LOD_FADE_BAND,
+    });
     /* 樹高 1 に正規化したあとの根元半径。当たり判定はこれ × 樹高 */
     this.trunkR = {};
     this.renderer = opts.renderer || null;
     this._pendingBake = [];
-    this._dirty = true;
-    this._timer = 0;
 
     /* 近景の枝の細かさ。low では 1 段落として辺の数を減らす */
     const radial0 = q === 'low' ? [6, 4, 3, 3] : q === 'high' ? [9, 6, 4, 3] : [8, 5, 4, 3];
@@ -552,18 +554,19 @@ export class TreeSet {
         bendPow: 1.7,
       };
       const sway = opts.addWindSway ? (o) => (m) => opts.addWindSway(m, o) : () => null;
-      const barkNear = applyPatches(new THREE.MeshStandardMaterial(barkBase), [sway(bend)]);
-      const barkMid = new THREE.MeshStandardMaterial(barkBase);
+      const fade = (m) => lodDitherFade(m, LOD_FADE_BAND);
+      const barkNear = applyPatches(new THREE.MeshStandardMaterial(barkBase), [sway(bend), fade]);
+      const barkMid = lodDitherFade(new THREE.MeshStandardMaterial(barkBase), LOD_FADE_BAND);
       /* 葉の法線は «樹冠中心からの外向き» を自分で入れてある。
          DoubleSide の反転は表裏で決まるので、放っておくと樹冠の奥側の葉が
          手前と同じだけ太陽を向き、暗い側が消えて葉群が白っぽく飛ぶ */
       const translucency = (m) => foliageTranslucency(m, 0.14);
       const leafNear = applyPatches(new THREE.MeshStandardMaterial(leafBase), [
         sway({ ...bend, flutter: q === 'low' ? 0 : 0.010, flutterFreq: 2.9 }),
-        keepAuthoredNormals, translucency,
+        keepAuthoredNormals, translucency, fade,
       ]);
       const leafMid = applyPatches(new THREE.MeshStandardMaterial(leafBase),
-        [sway(bend), keepAuthoredNormals, translucency]);
+        [sway(bend), keepAuthoredNormals, translucency, fade]);
       if (opts.addWindSway) this.swayMaterials.push(barkNear, leafNear, leafMid);
 
       for (let va = 0; va < VARIANTS; va++) {
@@ -601,7 +604,7 @@ export class TreeSet {
         this._addLevel(k, va, 2, [{ geo: l1, mat: leafMid, shadow: false }], cap);
         if (opts.renderer) {
           this._pendingBake.push({
-            key: `${k}|${va}|2`, kind: k, branchGeo: b0, leafGeo: l0,
+            key: `${k}|${va}`, kind: k, branchGeo: b0, leafGeo: l0,
           });
         }
       }
@@ -609,19 +612,7 @@ export class TreeSet {
   }
 
   _addLevel(kind, va, lod, parts, cap) {
-    const list = [];
-    for (const p of parts) {
-      const im = new THREE.InstancedMesh(p.geo, p.mat, cap);
-      im.count = 0;
-      im.castShadow = p.shadow;
-      im.receiveShadow = false;
-      im.frustumCulled = false;   // 木は湖の全周に散るので個別カリングに任せる
-      im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      this.scene.add(im);
-      this.meshes.push(im);
-      list.push(im);
-    }
-    this.buckets.set(`${kind}|${va}|${lod}`, list);
+    this.set.register(`${kind}|${va}`, lod, parts, cap);
   }
 
   /**
@@ -629,22 +620,10 @@ export class TreeSet {
    * ジオメトリは樹高 1 に正規化してあるので、そのまま倍率になる。
    */
   add(x, y, z, height, kind, variant, ry) {
-    /* 木ごとの色ムラ。900 本が同一の緑だと、形をいくら作り込んでも
-       「同じ木を並べた」ことが一目で分かる。位置から決めるので
+    /* 木ごとの色ムラ。2000 本が同一の緑だと、形をいくら作り込んでも
+       «同じ木を並べた» ことが一目で分かる。位置から決めるので
        seed が同じならワールドは再現できる */
-    const hp = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
-    const hb = Math.sin(x * 39.3468 - z * 11.135) * 24634.6345;
-    const a = hp - Math.floor(hp), b = hb - Math.floor(hb);
-    /* 明るさは 1 を超えさせない。テクスチャのアルベドに 1.2 を掛けると
-       物理的にありえない反射率になり、日向でトーンマップに飛ばされて
-       葉が白っぽく抜ける */
-    const val = 0.74 + a * 0.26;            // 明るさ 0.74〜1.00
-    const warm = (b - 0.5) * 0.14;          // + で黄寄り、- で青寄り
-    this.trees.push({
-      x, y, z, h: height, sp: kind, va: variant, ry, lod: -1,
-      cr: val * (1 + warm), cg: val, cb: val * (1 - warm),
-    });
-    this._dirty = true;
+    this.set.add(x, y, z, height, `${kind}|${variant}`, ry, tintAt(x, z, 0.26, 0.14));
   }
 
   /**
@@ -670,78 +649,29 @@ export class TreeSet {
         /* mipmap を落とすと二値アルファは痩せる。しきい値を下げて
            遠景の樹冠がスカスカにならないようにする */
         alphaTest: 0.22, transparent: false, side: THREE.DoubleSide,
-      }), [keepAuthoredNormals, (m) => foliageTranslucency(m, 0.10)]);
+      }), [keepAuthoredNormals, (m) => foliageTranslucency(m, 0.10),
+        (m) => lodDitherFade(m, LOD_FADE_BAND)]);
       const geo = impostorGeometry(imp.width, imp.height, imp.baseY);
-      for (const im of this.buckets.get(job.key)) {
-        im.geometry = geo;
-        im.material = mat;
-      }
+      this.set.replace(job.key, 2, [{ geo, mat }]);
     }
     this._pendingBake.length = 0;
-    this._dirty = true;
   }
 
   /** カメラ距離で LOD を振り直す。変化があったときだけ行列を作り直す */
   update(dt, cameraPos) {
     this._tryBake();
-    this._timer -= dt;
-    if (this._timer > 0 && !this._dirty) return;
-    this._timer = 0.15;
-
-    let changed = this._dirty;
-    for (const t of this.trees) {
-      const d = Math.hypot(t.x - cameraPos.x, t.y - cameraPos.y, t.z - cameraPos.z);
-      const l = lodForList(d, this.lodDist, t.lod, 8);
-      if (l !== t.lod) { t.lod = l; changed = true; }
-    }
-    if (!changed) return;
-    this._dirty = false;
-    this._rebuild();
+    this.set.update(dt, cameraPos);
   }
 
-  _rebuild() {
-    const counts = new Map();
-    const m = new THREE.Matrix4();
-    const p = new THREE.Vector3();
-    const q = new THREE.Quaternion();
-    const s = new THREE.Vector3();
-    const up = new THREE.Vector3(0, 1, 0);
-    const col = new THREE.Color();
+  /** 実機で負荷を見ながら振るためのしきい値（terrain.setLodScale が触る） */
+  get lodDist() { return this.set.lodDist; }
 
-    for (const list of this.buckets.values()) for (const im of list) counts.set(im, 0);
-
-    for (const t of this.trees) {
-      const list = this.buckets.get(`${t.sp}|${t.va}|${t.lod}`);
-      if (!list) continue;
-      p.set(t.x, t.y, t.z);
-      q.setFromAxisAngle(up, t.ry);
-      s.set(t.h, t.h, t.h);
-      m.compose(p, q, s);
-      col.setRGB(t.cr, t.cg, t.cb);
-      for (const im of list) {
-        const n = counts.get(im);
-        if (n >= im.instanceMatrix.count) continue;
-        im.setMatrixAt(n, m);
-        im.setColorAt(n, col);
-        counts.set(im, n + 1);
-      }
-    }
-    for (const [im, n] of counts) {
-      im.count = n;
-      im.instanceMatrix.needsUpdate = true;
-      if (im.instanceColor) im.instanceColor.needsUpdate = true;
-    }
-  }
-
-  /** 段の数が増減しても counts の長さが合うように */
-  get tiers() { return this.lodDist.length + 1; }
+  get meshes() { return this.set.meshes; }
 
   /** デバッグ／テスト用：LOD ごとの本数 */
-  lodCounts() {
-    const out = new Array(this.tiers).fill(0);
-    for (const t of this.trees) if (t.lod >= 0) out[t.lod]++;
-    return out;
-  }
+  lodCounts() { return this.set.counts(); }
+
+  dispose() { this.set.dispose(); }
 
   setQuality(q) { this.quality = q; }
 

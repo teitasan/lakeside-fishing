@@ -86,3 +86,58 @@ export function foliageTranslucency(mat, amount = 0.14) {
   mat.customProgramCacheKey = () => `foliage-translucency-${amount}`;
   return mat;
 }
+
+/**
+ * LOD の切り替わりをディザでクロスフェードする。
+ *
+ * 段が変わる瞬間にジオメトリが差し替わるので、木のように
+ * «粗い段を細かい段の部分集合にできない» ものは形が飛んで見える。
+ * 境界の前後に帯を設けて両方の段を描き、画面空間のディザで
+ * それぞれを間引けば、実際には «だんだん入れ替わる» ように見える。
+ *
+ * 各段のジオメトリは «自分が受け持つ距離の範囲» を aLodBand（vec2）で
+ * 持つ。マテリアルは段をまたいで共有するので、範囲は頂点属性で渡す。
+ *
+ * 影の深度パスにはこの注入が入らないので、影だけは帯の中でも
+ * 切り替わる。近景しか影を落とさないので実害は小さい。
+ * @param {THREE.Material} mat
+ * @param {number} band 帯の幅（m）
+ */
+export function lodDitherFade(mat, band = 10) {
+  const uniforms = { uLodFadeBand: { value: band } };
+  mat.userData.lodFadeUniforms = uniforms;
+  mat.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+        attribute vec2 aLodBand;
+        uniform float uLodFadeBand;
+        varying float vLodFade;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        {
+          #ifdef USE_INSTANCING
+            vec3 lodPos = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+          #else
+            vec3 lodPos = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+          #endif
+          float lodD = distance(lodPos, cameraPosition);
+          float b = max(uLodFadeBand, 0.001);
+          /* 手前の境界では入り、奥の境界では抜ける。
+             aLodBand.x <= 0 は «最も近い段» ＝ 手前側の境界が無い */
+          float inA = aLodBand.x <= 0.0 ? 1.0 : smoothstep(aLodBand.x - b, aLodBand.x, lodD);
+          float outA = aLodBand.y <= 0.0 ? 0.0 : smoothstep(aLodBand.y, aLodBand.y + b, lodD);
+          vLodFade = clamp(inA * (1.0 - outA), 0.0, 1.0);
+        }`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        varying float vLodFade;
+        /* interleaved gradient noise。表を持たずに済むディザ */
+        float lodIgn(vec2 p) {
+          return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+        }`)
+      .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+        if (vLodFade < 0.999 && vLodFade <= lodIgn(gl_FragCoord.xy)) discard;`);
+  };
+  mat.customProgramCacheKey = () => `lod-dither-fade-${band}`;
+  return mat;
+}

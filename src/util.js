@@ -186,3 +186,25 @@ export function lodForList(dist, dists, cur = -1, hyst = 8) {
   }
   return lod;
 }
+
+/**
+ * 位置から決める株ごとの色ムラ。
+ * 同じ緑が何百株も並ぶと、形をいくら作り込んでも «同じ物を並べた» と分かる。
+ * seed ではなく座標から決めるので、ワールドは再現できる。
+ * @param {number} x
+ * @param {number} z
+ * @param {number} valSpan 明るさの振れ幅
+ * @param {number} warmSpan 色温度の振れ幅（+ で黄寄り, - で青寄り）
+ */
+export function tintAt(x, z, valSpan = 0.30, warmSpan = 0.16) {
+  const hp = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
+  const hb = Math.sin(x * 39.3468 - z * 11.135) * 24634.6345;
+  const a = hp - Math.floor(hp), b = hb - Math.floor(hb);
+  /* どのチャンネルも 1 を超えさせない。テクスチャのアルベドに 1 より
+     大きい値を掛けると物理的にありえない反射率になり、日向で
+     トーンマップに飛ばされて葉や岩が白っぽく抜ける */
+  const val = 1 - valSpan + a * valSpan;        // (1 - valSpan) 〜 1
+  const warm = (b - 0.5) * warmSpan;            // + で黄寄り、- で青寄り
+  const k = 1 / (1 + Math.abs(warm));
+  return { r: val * (1 + warm) * k, g: val * k, b: val * (1 - warm) * k };
+}

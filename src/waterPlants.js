@@ -15,9 +15,9 @@
    穂とクロモの輪生葉だけは形が細かすぎるのでカード + テクスチャ。
    =========================================================== */
 import * as THREE from 'three';
-import { LodInstances, tintAt } from './lodInstances.js?v=20260828-lodwide3';
+import { LodInstances, tintAt } from './lodInstances.js?v=20260828-lodfade2';
 import { makeRng, TAU, clamp01, lerp } from './util.js';
-import { applyPatches } from './materialPatch.js?v=20260828-lodwide3';
+import { applyPatches, lodDitherFade } from './materialPatch.js?v=20260828-lodfade2';
 
 /**
  * 抽水植物（ヨシ・マコモ）の LOD しきい値。
@@ -27,6 +27,9 @@ import { applyPatches } from './materialPatch.js?v=20260828-lodwide3';
 export const EMERGENT_LOD = [32, 88, 190];
 /** 沈水植物（クロモ）。水の吸収で 55m 先はもう見えない */
 export const SUBMERGED_LOD = [34, 78];
+
+/** 段の境界でクロスフェードする帯の幅（m） */
+export const PLANT_FADE_BAND = 8;
 
 /** LOD ごとのカード枚数。1 枚だと真横から消えるので遠景でも 1 枚は残す */
 const CARDS_PER_LOD = [3, 2, 1];
@@ -431,9 +434,9 @@ export class WaterPlants {
     /* 株が数万あるので振り直しの間隔は長めに取る。
        1 回の rebuild で全株の行列を作り直すため */
     this.emergent = new LodInstances(scene,
-      { lodDist: EMERGENT_LOD, hysteresis: 5, interval: 0.22 });
+      { lodDist: EMERGENT_LOD, hysteresis: 5, interval: 0.22, fadeBand: PLANT_FADE_BAND });
     this.submerged = new LodInstances(scene,
-      { lodDist: SUBMERGED_LOD, hysteresis: 4, interval: 0.22 });
+      { lodDist: SUBMERGED_LOD, hysteresis: 4, interval: 0.22, fadeBand: PLANT_FADE_BAND });
 
     this.bladeTex = {
       reed: makeBladeTexture('reed').tex,
@@ -461,11 +464,12 @@ export class WaterPlants {
     const reedWind = { strength: 0.045, freq: 1.9, gustiness: 0.75, bendPow: 1.35 };
     const manomoWind = { strength: 0.055, freq: 1.6, gustiness: 0.8, bendPow: 1.15 };
 
+    const fade = (m) => lodDitherFade(m, PLANT_FADE_BAND);
     this.mats = {
       reed: applyPatches(new THREE.MeshStandardMaterial(
-        bladeBase(this.bladeTex.reed)), [wind(reedWind), caust]),
+        bladeBase(this.bladeTex.reed)), [wind(reedWind), caust, fade]),
       manomo: applyPatches(new THREE.MeshStandardMaterial(
-        bladeBase(this.bladeTex.manomo)), [wind(manomoWind), caust]),
+        bladeBase(this.bladeTex.manomo)), [wind(manomoWind), caust, fade]),
     };
     if (opts.addWindSway) this.swayMaterials.push(this.mats.reed, this.mats.manomo);
 
@@ -475,8 +479,8 @@ export class WaterPlants {
     const uw = opts.patchUwMaterial
       ? (m, sway) => opts.patchUwMaterial(m, { causticsUniforms: opts.causticsUniforms, sway })
       : (m) => m;
-    this.mats.hydrilla = uw(new THREE.MeshStandardMaterial(
-      bladeBase(this.bladeTex.hydrilla)), 5.4);
+    this.mats.hydrilla = applyPatches(new THREE.MeshStandardMaterial(
+      bladeBase(this.bladeTex.hydrilla)), [(m) => uw(m, 5.4), fade]);
     if (opts.patchUwMaterial) this.uwMaterials.push(this.mats.hydrilla);
 
     /* --- 株の形をバリエーションぶん焼く ---

@@ -4,13 +4,13 @@
 import * as THREE from 'three';
 import { CAUSTICS_GLSL } from './shaders.js?v=20260828-snellwin2';
 import { waveGLSL } from './waveField.js?v=20260828-lakescale1';
-import { UnderwaterPropScatter, addUnderwaterCaustics, patchUwMaterial } from './underwaterProps.js?v=20260828-lodwide3';
-import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260828-lodwide3';
-import { RockSet, makeSingleRock } from './rocks.js?v=20260828-lodwide3';
+import { UnderwaterPropScatter, addUnderwaterCaustics, patchUwMaterial } from './underwaterProps.js?v=20260828-lodfade2';
+import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260828-lodfade2';
+import { RockSet, makeSingleRock } from './rocks.js?v=20260828-lodfade2';
 import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js';
 import { makeTileableHeightField } from './tileableNoise.js?v=20260827-orgnoise4';
-import { TreeSet, VARIANTS as TREE_VARIANTS } from './trees.js?v=20260828-lodwide3';
-import { SPECIES_IDS } from './treeSkeleton.js?v=20260828-lodwide3';
+import { TreeSet, VARIANTS as TREE_VARIANTS } from './trees.js?v=20260828-lodfade2';
+import { SPECIES_IDS } from './treeSkeleton.js?v=20260828-lodfade2';
 import { WORLD_SIZE, WATER_REGION, MAX_DEPTH, resolveLake } from './lakefield.js';
 
 export { WORLD_SIZE, WATER_REGION, MAX_DEPTH };

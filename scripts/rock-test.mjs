@@ -235,6 +235,12 @@ assert.match(rocks, /for \(let va = 0; va < ROCK_VARIANTS; va\+\+\) \{/);
 assert.doesNotMatch(rocks, /add\([\s\S]{0,400}makeRock/,
   'add() の中で形を作ってはいけない（InstancedMesh で共有する）');
 
+/* 岩は粗い段が細かい段の部分集合なので形は動かないが、
+   細かい凹凸が消える瞬間はやはり見えるので薄くクロスフェードする */
+assert.match(rocks, /export const ROCK_FADE_BAND = 8;/);
+assert.match(rocks, /fadeBand: ROCK_FADE_BAND/);
+assert.match(rocks, /\(m\) => lodDitherFade\(m, ROCK_FADE_BAND\),/);
+
 /* 大きさで作りを分ける（全部テクスチャでも全部ポリゴンでもない） */
 assert.match(rocks, /boulder: \{ lodDist: \[60, 140, 320\], detail: \[3, 2, 1\], salt: 0x[0-9a-f]+ \}/);
 assert.match(rocks, /cobble: \{ lodDist: \[40, 100\], detail: \[2, 1\], salt: 0x[0-9a-f]+ \}/);

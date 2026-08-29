@@ -109,19 +109,22 @@ assert.match(wp, /n: CARDS_PER_LOD\[Math\.min\(lod, CARDS_PER_LOD\.length - 1\)\
 
 /* クロモは水中プロップと同じマテリアル＝流れの揺れ・caustics・距離間引き */
 assert.match(uwp, /export function patchUwMaterial\(/, 'patchUwMaterial が公開されていること');
-assert.match(wp, /this\.mats\.hydrilla = uw\(new THREE\.MeshStandardMaterial\([\s\S]*?\), 5\.4\);/,
+assert.match(wp, /\[\(m\) => uw\(m, 5\.4\), fade\]\);/,
   'クロモは水中マテリアル（流れの揺れ・caustics・距離間引き）で、揺れは大きく取る');
+/* 段の切り替わりは境界の前後でディザのクロスフェード */
+assert.match(wp, /export const PLANT_FADE_BAND = 8;/);
+assert.match(wp, /fadeBand: PLANT_FADE_BAND/, '両方の LodInstances に帯を渡すこと');
 
 /* 抽水植物は水面をまたぐので «風で揺れる» と «水面下だけ caustics» の両方 */
 // パッチの合成は materialPatch.js に共通化した（木と水草で同じ問題）
 const mpatch = read('src/materialPatch.js');
 assert.match(mpatch, /export function applyPatches\(mat, patches\) \{/,
   'onBeforeCompile を上書きし合わないよう合成すること');
-assert.match(wp, /import \{ applyPatches \} from '\.\/materialPatch\.js/,
+assert.match(wp, /import \{ applyPatches, lodDitherFade \} from '\.\/materialPatch\.js/,
   '水草も共通の合成を使う');
-assert.match(wp, /bladeBase\(this\.bladeTex\.reed\)\), \[wind\(reedWind\), caust\]\)/,
+assert.match(wp, /bladeBase\(this\.bladeTex\.reed\)\), \[wind\(reedWind\), caust, fade\]\)/,
   'ヨシは風と caustics の両方');
-assert.match(wp, /bladeBase\(this\.bladeTex\.manomo\)\), \[wind\(manomoWind\), caust\]\)/,
+assert.match(wp, /bladeBase\(this\.bladeTex\.manomo\)\), \[wind\(manomoWind\), caust, fade\]\)/,
   'マコモも同様');
 
 /* 湖底の «藻» が円錐 1 個のままだと、描いた葉のクロモの隣で浮く */
@@ -179,10 +182,11 @@ assert.match(gameSrc, /\.\.\.\(this\.terrain\.waterPlants\?\.submergedMeshes \|\
 /* LodInstances：段が変わった株があったときだけ行列を作り直す */
 assert.match(li, /if \(this\._timer > 0 && !this\._dirty\) return;/,
   'LOD の振り直しは間隔を空けること');
-assert.match(li, /if \(l !== it\.lod\) \{ it\.lod = l; changed = true; \}/,
+assert.match(li, /if \(l !== it\.lod \|\| l2 !== it\.lod2\) \{ it\.lod = l; it\.lod2 = l2; changed = true; \}/,
   '変化がなければ再アップロードしない');
 assert.match(li, /if \(!list\) continue;\s*\/\/ 最終段より遠い＝描かない/,
   '最終段より遠い株は描かない');
-assert.match(li, /export function tintAt\(/, '株ごとの色ムラ');
+// tintAt は純粋な数学なので THREE 非依存の util.js に置く（テストから呼べる）
+assert.match(li, /export \{ tintAt \} from '\.\/util\.js';/, '株ごとの色ムラ');
 
 console.log('water-plant-test: ok');

@@ -125,16 +125,16 @@ assert.match(treesSrc, /nrm\.copy\(outward\)\.multiplyScalar\(0\.78\)/,
   'leaf normals must be dominated by the outward canopy direction');
 /* 風：近景は幹・枝と葉が同じ bend で動く。葉だけ動かすと、近くで見たとき
    葉が枝から剥がれて浮いて見える（実際にそう見えたので直した） */
-assert.match(treesSrc, /const barkNear = applyPatches\(new THREE\.MeshStandardMaterial\(barkBase\), \[sway\(bend\)\]\);/,
+assert.match(treesSrc, /const barkNear = applyPatches\(new THREE\.MeshStandardMaterial\(barkBase\), \[sway\(bend\), fade\]\);/,
   'the trunk and branches must bend with the same wind term as the leaves');
 assert.match(treesSrc, /sway\(\{ \.\.\.bend, flutter:/,
   'near foliage must reuse the very same bend options as the bark');
 /* 葉の法線は «樹冠中心からの外向き» を自分で入れてある。DoubleSide の
    法線反転は表裏で決まるので、放っておくと樹冠の奥側の葉が手前と同じだけ
    太陽を向き、暗い側が消えて葉群ぜんたいが白っぽく飛ぶ */
-assert.match(treesSrc, /keepAuthoredNormals, translucency,/,
+assert.match(treesSrc, /keepAuthoredNormals, translucency, fade,/,
   'foliage normals must not be flipped by which side is facing the camera');
-assert.match(treesSrc, /\[keepAuthoredNormals, \(m\) => foliageTranslucency\(m, 0\.10\)\]\);/,
+assert.match(treesSrc, /\[keepAuthoredNormals, \(m\) => foliageTranslucency\(m, 0\.10\),/,
   'the far impostor billboard has authored normals too');
 /* 反転を止めると樹冠に暗い側が戻るが、フィルが半球光だけだと日陰側が
    ほぼ黒に落ちる。実際の葉は薄いので裏から光が抜ける */
@@ -150,10 +150,21 @@ assert.match(treesSrc, /const translucency = \(m\) => foliageTranslucency\(m, 0\
   assert.match(mp, /normal = normalize\( vNormal \);/,
     'the flip must be undone right after normal_fragment_begin');
 }
-// 木ごとの色ムラは 1 を超えない（アルベド 1.2 は日向で白く飛ぶ）
-assert.match(treesSrc, /const val = 0\.74 \+ a \* 0\.26;/,
-  'the per-tree tint must not push albedo above 1');
-assert.match(treesSrc, /const barkMid = new THREE\.MeshStandardMaterial\(barkBase\);/,
+/* 木ごとの色ムラは 1 を超えないこと。アルベド 1.2 は物理的にありえない
+   反射率で、日向でトーンマップに飛ばされて葉が白く抜ける */
+{
+  const { tintAt } = await import('../src/util.js');
+  let mx = 0, mn = 1;
+  for (let i = 0; i < 4000; i++) {
+    const t = tintAt(i * 0.37 - 500, i * 0.71 - 300, 0.26, 0.14);
+    for (const c of [t.r, t.g, t.b]) { mx = Math.max(mx, c); mn = Math.min(mn, c); }
+  }
+  assert.ok(mx <= 1.0000001, `色ムラの最大が ${mx.toFixed(3)}。1 を超えると白く飛ぶ`);
+  assert.ok(mn > 0.6 && mx > 0.95, `色ムラの幅が足りない（${mn.toFixed(2)}〜${mx.toFixed(2)}）`);
+}
+assert.match(treesSrc, /tintAt\(x, z, 0\.26, 0\.14\)/,
+  'the per-tree tint span must stay where it was tuned');
+assert.match(treesSrc, /const barkMid = lodDitherFade\(new THREE\.MeshStandardMaterial\(barkBase\), LOD_FADE_BAND\);/,
   'mid-range bark must be static: moving those vertices buys nothing past 34m');
 assert.match(treesSrc, /\{ geo: b0, mat: barkNear, shadow: true \}/);
 assert.match(treesSrc, /\{ geo: b1, mat: barkMid, shadow: false \}/);
@@ -179,10 +190,25 @@ assert.match(treesSrc, /const l1 = buildLeaves\(skel, \{ stride: 7, sizeScale: 2
   'mid-range foliage must stay crossed or cards vanish edge-on');
 /* しきい値はインスタンスが持つ（実機で負荷を見ながら振れるように）。
    モジュール定数を直接読むと terrain.setLodScale が効かない */
-assert.match(treesSrc, /this\.lodDist = \[\.\.\.LOD_DIST\];/,
+assert.match(treesSrc, /lodDist: \[\.\.\.LOD_DIST\], hysteresis: 8, interval: 0\.15, fadeBand: LOD_FADE_BAND,/,
   'the tree LOD thresholds must be per-instance so they can be swept at runtime');
-assert.match(treesSrc, /lodForList\(d, this\.lodDist, t\.lod, 8\)/,
-  '木も共通の LOD 判定を使う');
+assert.match(treesSrc, /get lodDist\(\) \{ return this\.set\.lodDist; \}/,
+  '木も共通の LodInstances に載せる');
+/* 段の切り替わりは «ジオメトリが差し替わる» ので、岩のように
+   部分集合にできない木では形が飛ぶ。境界の前後で両方描いて
+   画面空間のディザで入れ替える */
+{
+  const li = read('src/lodInstances.js');
+  const mp = read('src/materialPatch.js');
+  assert.match(mp, /export function lodDitherFade\(mat, band = 10\)/);
+  assert.match(mp, /if \(vLodFade < 0\.999 && vLodFade <= lodIgn\(gl_FragCoord\.xy\)\) discard;/,
+    'the fade must be a screen-space dither discard');
+  assert.match(li, /for \(const lod of \[it\.lod, it\.lod2\]\) \{/,
+    '帯の中は 2 段ぶん書き込むこと');
+  assert.match(li, /function withLodBand\(geo, lo, hi\)/,
+    '段の受け持ち範囲は頂点属性で渡す（マテリアルは段をまたいで共有する）');
+  assert.match(treesSrc, /export const LOD_FADE_BAND = 12;/);
+}
 {
   const terr = read('src/terrain.js');
   assert.match(terr, /setLodScale\(scale = 1\) \{/, '近景の範囲を一括で振るノブ');
@@ -191,10 +217,15 @@ assert.match(treesSrc, /lodForList\(d, this\.lodDist, t\.lod, 8\)/,
 }
 
 // 木ごとの色ムラ（同じ緑が 900 本並ぶのを避ける）
-assert.match(treesSrc, /im\.setColorAt\(n, col\);/,
-  'each tree must get its own tint through instanceColor');
-assert.match(treesSrc, /if \(im\.instanceColor\) im\.instanceColor\.needsUpdate = true;/,
-  'the instance colours must be re-uploaded after a LOD rebuild');
+{
+  // 段の振り分けと色ムラは LodInstances に共通化した
+  const li = read('src/lodInstances.js');
+  assert.match(treesSrc, /this\.set\.add\(x, y, z, height, `\$\{kind\}\|\$\{variant\}`, ry, tintAt\(/,
+    'each tree must get its own tint through instanceColor');
+  assert.match(li, /if \(it\.tinted\) im\.setColorAt\(n, col\);/);
+  assert.match(li, /if \(im\.instanceColor\) im\.instanceColor\.needsUpdate = true;/,
+    'the instance colours must be re-uploaded after a LOD rebuild');
+}
 // 内側の房を暗くする擬似 AO
 assert.match(treesSrc, /const ao = lerp\(0\.62, 1\.0, depth \* depth\);/,
   'inner foliage must be darkened or the canopy reads as cotton candy');
@@ -205,7 +236,7 @@ assert.match(treesSrc, /renderer\.toneMapping = THREE\.NoToneMapping;/,
 // サイズが付くまで焼かず、中景で代用しておくこと
 assert.match(treesSrc, /ctx\.drawingBufferWidth < 8 \|\| ctx\.drawingBufferHeight < 8/,
   'the impostor bake must wait for a real drawing buffer');
-assert.ok(treesSrc.indexOf('this._tryBake();') < treesSrc.indexOf('this._timer -= dt;'),
+assert.ok(treesSrc.indexOf('this._tryBake();') < treesSrc.indexOf('this.set.update(dt, cameraPos);'),
   'the deferred bake must be retried from the per-frame update');
 assert.match(treesSrc, /MeshBasicMaterial/,
   'the impostor must be baked unlit so far trees still follow the time of day');
