@@ -17,9 +17,28 @@ sharedBait.readyAt = Date.now() - 1;
 // 既存魚を全て餌から遠ざけ、シングル同様「適合魚が近くにいなければ5.5〜9.5mへ生成」を必ず通す。
 for (const f of world.fishes.values()) { f.x += 100; f.z += 100; f.tx = f.x; f.tz = f.z; }
 const idsBefore = new Set(world.fishes.keys());
-world.tick(players);
-let target = world.snapshot().find((f) => f.targetBaitId === 'b:p1' || f.ownerPlayerId === 'p1');
-assert.ok(target, '待機終了時にアタリ対象魚が生成されない');
+
+/* ここが 1 tick 決め打ちだと 20 回に 1 回落ちる（CI のデプロイも止めた）。理由は 2 つ。
+ *
+ *  - 魚が出ないことがある。chooseBiterSpecies も makeBiterSpawn も «今回は該当なし» を
+ *    正当に返し、そのとき readyAt が 2〜4 秒先へ送られる
+ *  - ゴミが掛かることがある。中層・深場の worm で 4.7%。ゴミは state 'reserved' で
+ *    餌を占有するが、所有者以外のスナップショットからは隠れる仕様なので
+ *    プレイヤー指定なしの world.snapshot() には出てこない。放っておくと
+ *    occupied が真のままで引き直しも起きず、その run は何 tick 回しても通らない
+ *
+ * どちらも «そのうち魚が来る» のが正しい挙動なので、ゴミは片付けて引き直す。 */
+let target = null;
+let ticks = 0;
+for (; ticks < 40 && !target; ticks++) {
+  sharedBait.readyAt = Date.now() - 1;
+  world.tick(players);
+  for (const [id, f] of world.fishes) {
+    if (f.junk && f.targetBaitId === 'b:p1') world.fishes.delete(id);
+  }
+  target = world.snapshot().find((f) => f.targetBaitId === 'b:p1' || f.ownerPlayerId === 'p1');
+}
+assert.ok(target, `待機終了時にアタリ対象魚が生成されない（${ticks} tick 試行）`);
 assert.ok(!idsBefore.has(target.id), '近くに適合魚がいないのに既存魚だけを待っている');
 const spawnDistance = Math.hypot(target.x - bait.x, target.z - bait.z);
 assert.ok(spawnDistance >= 5 && spawnDistance <= 10, `アタリ対象魚の生成距離が不正: ${spawnDistance}`);
@@ -50,4 +69,4 @@ assert.ok(escaped && !escaped.removed);
 assert.equal(world.snapshot().find((f) => f.id === target.id).state, 'swimming');
 assert.equal(world.hook('p1', target.id), false, 'escape後に予約なしhookできる');
 
-console.log(`OK shared world: ${world.snapshot().length} fish, forced biter spawn/approach/nibble/reservation/escape passed`);
+console.log(`OK shared world: ${world.snapshot().length} fish, forced biter spawn (${ticks} tick)/approach/nibble/reservation/escape passed`);
