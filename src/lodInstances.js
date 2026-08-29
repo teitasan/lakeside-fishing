@@ -12,6 +12,10 @@ import * as THREE from 'three';
 import { lodForList } from './util.js';
 export { tintAt } from './util.js';
 
+/* 枠を自動で広げるときの上限（登録時の何倍まで）。
+   青天井にするとバグで際限なく確保してしまう */
+const GROW_LIMIT = 8;
+
 export class LodInstances {
   /**
    * @param {THREE.Scene} scene
@@ -59,6 +63,7 @@ export class LodInstances {
          カメラの向きによって群落ごと消える。個別カリングに任せる */
       im.frustumCulled = false;
       im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      im.userData.baseCap = capacity;
       this.scene.add(im);
       this.meshes.push(im);
       list.push(im);
@@ -126,7 +131,73 @@ export class LodInstances {
     this.rebuild();
   }
 
+  /** 各段が今回いくつ抱えるか。書き込む前に数える（枠が足りるかの判断に使う） */
+  _demand() {
+    const demand = new Map();
+    for (const list of this.buckets.values()) for (const im of list) demand.set(im, 0);
+    for (const it of this.items) {
+      // 帯の中の株は 2 段ぶん要る（片方はディザで間引かれて消える）
+      for (const lod of [it.lod, it.lod2]) {
+        if (lod < 0) continue;
+        const list = this.buckets.get(`${it.key}|${lod}`);
+        if (!list) continue;                   // 最終段より遠い＝描かない
+        for (const im of list) demand.set(im, demand.get(im) + 1);
+      }
+    }
+    return demand;
+  }
+
+  /**
+   * 枠が足りない段を張り替える。
+   *
+   * InstancedMesh の枠は作ったあと増やせないので、大きいものを作って差し替える。
+   * ジオメトリとマテリアルは使い回すので、増えるのは行列と色のバッファだけ。
+   */
+  _grow(im, need) {
+    const base = im.userData.baseCap || im.instanceMatrix.count;
+    const cap = Math.min(Math.ceil(need * 1.3) + 8, base * GROW_LIMIT);
+    if (cap <= im.instanceMatrix.count) {
+      if (!this._grewWarned) {
+        this._grewWarned = true;
+        console.warn(`LodInstances: 枠の上限（登録時の ${GROW_LIMIT} 倍）に達した。`
+          + `${need} 株ぶん要るが ${im.instanceMatrix.count} までしか描けない`);
+      }
+      return null;
+    }
+    const next = new THREE.InstancedMesh(im.geometry, im.material, cap);
+    next.count = 0;
+    next.castShadow = im.castShadow;
+    next.receiveShadow = im.receiveShadow;
+    next.frustumCulled = false;
+    next.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    next.userData.baseCap = base;
+    this.scene.add(next);
+    this.scene.remove(im);
+    const i = this.meshes.indexOf(im);
+    if (i >= 0) this.meshes[i] = next;
+    im.dispose();   // ジオメトリとマテリアルは next が引き継ぐので捨てない
+    return next;
+  }
+
   rebuild() {
+    /* まず «いくつ要るか» を数えて、足りない段は枠を広げてから書き込む。
+       以前はここで溢れたぶんを黙って捨てていた。捨てられる株はカメラの位置で
+       変わるので、近づくと株が消え、視点を振ると戻る、という見え方になっていた
+       （クロスフェードで帯の中の株が 2 段ぶん枠を食うようになって表面化した） */
+    const demand = this._demand();
+    for (const list of this.buckets.values()) {
+      for (let i = 0; i < list.length; i++) {
+        const im = list[i];
+        const need = demand.get(im) || 0;
+        if (need <= im.instanceMatrix.count) continue;
+        const grown = this._grow(im, need);
+        if (!grown) continue;
+        demand.delete(im);
+        demand.set(grown, need);
+        list[i] = grown;
+      }
+    }
+
     const counts = new Map();
     const m = new THREE.Matrix4();
     const p = new THREE.Vector3();
@@ -143,14 +214,13 @@ export class LodInstances {
       s.set(it.sx, it.sy, it.sz);
       m.compose(p, q, s);
       col.setRGB(it.cr, it.cg, it.cb);
-      // 帯の中は 2 段ぶん書き込む（片方はディザで間引かれて消える）
       for (const lod of [it.lod, it.lod2]) {
         if (lod < 0) continue;
         const list = this.buckets.get(`${it.key}|${lod}`);
-        if (!list) continue;                   // 最終段より遠い＝描かない
+        if (!list) continue;
         for (const im of list) {
           const n = counts.get(im);
-          if (n >= im.instanceMatrix.count) continue;
+          if (n >= im.instanceMatrix.count) continue;   // 上限に達した段だけ
           im.setMatrixAt(n, m);
           if (it.tinted) im.setColorAt(n, col);
           counts.set(im, n + 1);

@@ -10,7 +10,7 @@ import { RockSet, makeSingleRock } from './rocks.js?v=20260829-radial2';
 import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js';
 import { buildRadialGrid, DETAIL_BY_QUALITY } from './terrainMesh.js?v=20260829-radial2';
 import { makeTileableHeightField, makeTileablePebbleField, bakeLandDetailMaps }
-  from './tileableNoise.js?v=20260829-landtex3';
+  from './tileableNoise.js?v=20260829-bark2';
 import { TreeSet, VARIANTS as TREE_VARIANTS } from './trees.js?v=20260829-radial2';
 import { SPECIES_IDS } from './treeSkeleton.js?v=20260829-radial2';
 import { WORLD_SIZE, WATER_REGION, MAX_DEPTH, resolveLake } from './lakefield.js';

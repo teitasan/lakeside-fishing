@@ -14,6 +14,7 @@
 import * as THREE from 'three';
 import { growTree, SPECIES, lodFor, LOD_DIST } from './treeSkeleton.js?v=20260829-radial2';
 import { lodForList } from './util.js';
+import { boxBlurWrap } from './tileableNoise.js?v=20260829-bark2';
 import { LodInstances, tintAt } from './lodInstances.js?v=20260829-radial2';
 import { makeRng, TAU, lerp, clamp01 } from './util.js';
 import { applyPatches, keepAuthoredNormals, foliageTranslucency, lodDitherFade }
@@ -37,6 +38,46 @@ function wrapDraw(ctx, size, x, fn) {
 }
 
 /**
+ * 低周波の明暗を均す。
+ *
+ * 樹皮に «テクスチャの幅» ほどの緩い明暗のうねりがあると、円柱に巻いたとき
+ * それが «陰影» に見えて幹が縦に凹んでいるように読める。照明を外しても
+ * 暗いままなので照明のせいではない、と切り分けられる。
+ * 局所平均を全体平均へ寄せて、模様（高周波）だけを残す。
+ */
+function flattenBarkShading(g, size, { radius = 0.2, amount = 0.85 } = {}) {
+  const img = g.getImageData(0, 0, size, size);
+  const d = img.data;
+  const luma = new Float32Array(size * size);
+  for (let i = 0; i < size * size; i++) {
+    const o = i * 4;
+    luma[i] = (0.2126 * d[o] + 0.7152 * d[o + 1] + 0.0722 * d[o + 2]) / 255 + 1e-3;
+  }
+  // タイル境界をまたぐぼかし（またがないと縁だけ均され方が変わる）
+  const blur = boxBlurWrap(luma, size, Math.max(1, Math.round(radius * size)));
+  let mean = 0;
+  for (const v of luma) mean += v;
+  mean /= luma.length;
+  for (let i = 0; i < size * size; i++) {
+    const k = 1 + amount * (mean / blur[i] - 1);
+    const o = i * 4;
+    d[o] = Math.min(255, d[o] * k);
+    d[o + 1] = Math.min(255, d[o + 1] * k);
+    d[o + 2] = Math.min(255, d[o + 2] * k);
+  }
+  g.putImageData(img, 0, 0);
+}
+
+/** 縦にも回り込ませて描く（上下の継ぎ目に線を残さない） */
+function wrapDraw2(ctx, size, x, y, fn) {
+  wrapDraw(ctx, size, x, (xx) => {
+    fn(xx, y);
+    if (y < size * 0.25) fn(xx, y + size);
+    else if (y > size * 0.75) fn(xx, y - size);
+  });
+}
+
+/**
  * 樹皮。
  * ブナ：灰白色でなめらか。地衣類の斑と横向きの皮目が特徴。
  * スギ：赤褐色で縦に裂ける繊維状。
@@ -47,58 +88,93 @@ export function makeBarkTexture(kind, size = 256) {
   const g = c.getContext('2d');
   const rng = makeRng(kind === 'beech' ? 0x8e3c11 : 0x2f77a3);
 
+  /* 縦縞«だけ»で描くと、テクスチャが縦に繰り返したときに全長を貫く
+     一本の帯になる。それが円柱に巻かれると «縞» ではなく «陰影» に見えて、
+     幹が縦に凹んでいるように読める。どちらの樹種も横方向の構造を入れて、
+     縞が上下に途切れるようにしてある。 */
   if (kind === 'beech') {
+    /* ブナの樹皮はもともと滑らかで、縦に裂けない。
+       雲のような斑・地衣類・皮目でできている */
     g.fillStyle = '#a9a79c';
     g.fillRect(0, 0, size, size);
-    // うっすらした縦の濃淡（丸みの陰影ではなく地の斑）
-    for (let i = 0; i < 90; i++) {
-      const x = rng() * size, w = 2 + rng() * 14;
-      g.fillStyle = `rgba(${rng() < 0.5 ? '120,118,110' : '198,196,186'},${0.05 + rng() * 0.09})`;
-      wrapDraw(g, size, x, (xx) => g.fillRect(xx, 0, w, size));
+    // 地の斑。大きさの違う楕円を重ねて «向きのない» ムラにする
+    for (let i = 0; i < 120; i++) {
+      const x = rng() * size, y = rng() * size;
+      const rx = 10 + rng() * 46, ry = rx * (0.5 + rng() * 1.1);
+      const light = rng() < 0.5;
+      const a = 0.04 + rng() * 0.08;
+      wrapDraw2(g, size, x, y, (xx, yy) => {
+        const grd = g.createRadialGradient(xx, yy, 0, xx, yy, Math.max(rx, ry));
+        const c = light ? '206,204,194' : '124,122,114';
+        grd.addColorStop(0, `rgba(${c},${a})`);
+        grd.addColorStop(1, `rgba(${c},0)`);
+        g.save();
+        g.translate(xx, yy); g.scale(1, ry / rx); g.translate(-xx, -yy);
+        g.fillStyle = grd;
+        g.beginPath(); g.arc(xx, yy, Math.max(rx, ry), 0, TAU); g.fill();
+        g.restore();
+      });
     }
     // 地衣類：緑がかった不定形の斑
     for (let i = 0; i < 46; i++) {
       const x = rng() * size, y = rng() * size, r = 6 + rng() * 26;
-      wrapDraw(g, size, x, (xx) => {
-        const grd = g.createRadialGradient(xx, y, 0, xx, y, r);
+      wrapDraw2(g, size, x, y, (xx, yy) => {
+        const grd = g.createRadialGradient(xx, yy, 0, xx, yy, r);
         const a = 0.10 + rng() * 0.16;
         grd.addColorStop(0, `rgba(176,183,158,${a})`);
         grd.addColorStop(1, 'rgba(176,183,158,0)');
         g.fillStyle = grd;
-        g.beginPath(); g.arc(xx, y, r, 0, TAU); g.fill();
+        g.beginPath(); g.arc(xx, yy, r, 0, TAU); g.fill();
       });
     }
-    // 皮目（横向きの短い線）
-    for (let i = 0; i < 130; i++) {
-      const x = rng() * size, y = rng() * size, w = 3 + rng() * 9;
-      g.fillStyle = `rgba(88,84,76,${0.12 + rng() * 0.2})`;
-      wrapDraw(g, size, x, (xx) => g.fillRect(xx, y, w, 1));
+    // 皮目（横向きの短い線）。ブナらしさはここが一番出る
+    for (let i = 0; i < 260; i++) {
+      const x = rng() * size, y = rng() * size, w = 3 + rng() * 11;
+      g.fillStyle = `rgba(88,84,76,${0.10 + rng() * 0.22})`;
+      wrapDraw2(g, size, x, y, (xx, yy) => g.fillRect(xx, yy, w, 1));
+    }
+    // 古い傷あと（横に走る淡い帯）。縦の連続を切る
+    for (let i = 0; i < 7; i++) {
+      const y = rng() * size, h = 2 + rng() * 5;
+      g.fillStyle = `rgba(132,128,118,${0.06 + rng() * 0.07})`;
+      wrapDraw2(g, size, size * 0.5, y, (xx, yy) => g.fillRect(0, yy, size, h));
     }
   } else {
     g.fillStyle = '#6d4a37';
     g.fillRect(0, 0, size, size);
-    // 縦裂：幅と濃さの違う縦縞を重ねる。太い溝ほど暗い
-    for (let i = 0; i < 220; i++) {
+    /* 縦裂：スギは縦に裂けるので縦縞で正しいが、1 本が全長を貫くと
+       «縞» ではなく «溝» に見える。実物も短冊が上下で途切れて重なっている
+       ので、有限の長さの短冊として置く */
+    for (let i = 0; i < 300; i++) {
       const x = rng() * size, w = 1 + rng() * 7;
+      const y0 = rng() * size, len = 26 + rng() * 118;
       const dark = rng() < 0.55;
       const a = 0.08 + rng() * 0.26;
       g.fillStyle = dark ? `rgba(48,30,22,${a})` : `rgba(150,104,76,${a * 0.8})`;
-      wrapDraw(g, size, x, (xx) => {
+      wrapDraw2(g, size, x, y0, (xx, yy) => {
         // 縞は真っ直ぐではなく少し蛇行させる（定規で引いた縞に見せない）
         let cx = xx;
-        for (let y = 0; y < size; y += 8) {
+        for (let d = 0; d < len; d += 8) {
           cx += (rng() - 0.5) * 1.6;
-          g.fillRect(cx, y, w, 9);
+          g.fillRect(cx, yy + d, w, 9);
         }
       });
+    }
+    // 短冊の切れ目（横向きの暗い段）。縦の連続をはっきり断つ
+    for (let i = 0; i < 34; i++) {
+      const x = rng() * size, y = rng() * size, w = 10 + rng() * 40;
+      g.fillStyle = `rgba(40,26,19,${0.10 + rng() * 0.14})`;
+      wrapDraw2(g, size, x, y, (xx, yy) => g.fillRect(xx, yy, w, 1 + rng() * 3));
     }
     // 剥がれかけの繊維
     for (let i = 0; i < 40; i++) {
       const x = rng() * size, y = rng() * size, h = 14 + rng() * 46;
       g.fillStyle = `rgba(196,150,116,${0.10 + rng() * 0.16})`;
-      wrapDraw(g, size, x, (xx) => g.fillRect(xx, y, 1 + rng() * 2, h));
+      wrapDraw2(g, size, x, y, (xx, yy) => g.fillRect(xx, yy, 1 + rng() * 2, h));
     }
   }
+
+  flattenBarkShading(g, size);
 
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -258,7 +334,10 @@ export function makeLeafTexture(kind, cell = 256) {
  * フレームは平行移動（parallel transport）で運ぶ。各点で法線を作り直すと
  * 曲がった枝が軸まわりに捻れ、樹皮の縞が螺旋に見えてしまう。
  */
-export function buildBranches(skel, { radial = [8, 5, 4, 3], levelMax = 99, vScale = 0.45 } = {}) {
+/* 樹皮タイルの縦の縮尺。幹（半径 0.4m 前後）では u が 2 周ぶんで
+   1 枚 ≒ 1.26m なので、縦もそこへ合わせて正方形にする。
+   0.45（＝ 1 枚 2.2m）だと縦に 1.75 倍伸びて、縞がなお «溝» に見えた */
+export function buildBranches(skel, { radial = [8, 5, 4, 3], levelMax = 99, vScale = 0.8 } = {}) {
   const pos = [], nor = [], uv = [], idx = [];
   const up = new THREE.Vector3(0, 1, 0);
   const T = new THREE.Vector3(), N = new THREE.Vector3(), B = new THREE.Vector3();

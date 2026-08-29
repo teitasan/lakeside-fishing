@@ -263,6 +263,33 @@ assert.match(gameSrc, /this\.terrain\.updateTrees\(dt, this\.camera\.position\);
 assert.match(gameSrc, /renderer: this\.renderer,/,
   'the renderer must reach Terrain so impostors can be baked at load');
 
+/* 枠が足りないときは «捨てる» のではなく «広げる»。
+   クロスフェードで境界の帯にいる株は 2 段ぶん枠を食うので、登録時の枠だと
+   足りなくなる。以前は溢れたぶんを黙って捨てていて、捨てられる株がカメラの
+   位置で変わるため «近づくと草が消え、視点を振ると戻る» という見え方をした。 */
+const lodSrc = read('src/lodInstances.js');
+assert.match(lodSrc, /_demand\(\)\s*\{/, 'rebuild は書き込む前に必要数を数えること');
+assert.match(lodSrc, /_grow\(im, need\)/, '足りない段は枠を張り替えること');
+assert.ok(
+  lodSrc.indexOf('const demand = this._demand();') < lodSrc.indexOf('im.setMatrixAt(n, m);'),
+  '必要数を数えるのは書き込みより前でなければ意味がない',
+);
+assert.match(lodSrc, /GROW_LIMIT = \d+/, '青天井に確保しないよう上限を持つこと');
+
+/* 樹皮は «全長を貫く縦縞» を作らないこと。円柱に巻くと縞が陰影に見えて、
+   幹が縦に凹んで見える（照明を外しても暗いままなので照明の問題ではない）。 */
+const barkSrc = treesSrc.slice(
+  treesSrc.indexOf('export function makeBarkTexture'),
+  treesSrc.indexOf('/* ---------------- 葉テクスチャ'),
+);
+assert.doesNotMatch(barkSrc, /fillRect\(xx, 0, w, size\)/,
+  '全高を貫く縦縞は幹の «溝» に見える');
+assert.match(barkSrc, /flattenBarkShading\(g, size\)/,
+  '低周波の明暗を均さないと、うねりが円柱の陰影に化ける');
+assert.match(treesSrc, /function flattenBarkShading/);
+assert.match(treesSrc, /boxBlurWrap\(luma, size/,
+  'ぼかしはタイル境界をまたぐこと（またがないと縁だけ均され方が変わる）');
+
 console.log('tree-test: ok');
 console.log(`  ブナ 枝${beech.branches.toFixed(0)} 葉${beech.leaves.toFixed(0)} ` +
   `樹高${beech.height.toFixed(1)}m 樹冠${beech.crownR.toFixed(1)}m (比 ${beechRatio.toFixed(2)})`);
