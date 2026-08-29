@@ -15,9 +15,9 @@
    半透明も細い枝も無いので、超低ポリのメッシュのままで十分。
    =========================================================== */
 import * as THREE from 'three';
-import { makeRockShape, makeRockLods, ROCK_KINDS } from './rockShape.js?v=20260828-lodfade2';
-import { LodInstances, tintAt } from './lodInstances.js?v=20260828-lodfade2';
-import { applyPatches, lodDitherFade } from './materialPatch.js?v=20260828-lodfade2';
+import { makeRockShape, makeRockLods, ROCK_KINDS } from './rockShape.js?v=20260828-ground1';
+import { LodInstances, tintAt } from './lodInstances.js?v=20260828-ground1';
+import { applyPatches, lodDitherFade } from './materialPatch.js?v=20260828-ground1';
 import { makeRng, TAU, lerp } from './util.js';
 
 /**

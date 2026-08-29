@@ -2,7 +2,7 @@
    タイル可能な多スケールノイズ（CPU 起動時テクスチャ生成用）
    period 周期のトーラス上で勾配ノイズ + fBm を評価する。
    =========================================================== */
-import { makeRng, lerp, TAU } from './util.js';
+import { makeRng, lerp, TAU, clamp01, makeNoise2D } from './util.js';
 
 function positiveInt(value, label) {
   if (!Number.isInteger(value) || value < 1) throw new RangeError(`${label} must be a positive integer`);
@@ -238,4 +238,119 @@ export function makeTileableFoldCaustics(size, seed, {
     }
   }
   return { data, mean: sum / (size * size), max };
+}
+
+/**
+ * 敷き詰めた小石のハイトフィールド（タイル可能）。
+ *
+ * 砂利は «ノイズの凹凸» ではなく «丸い石が重なって敷き詰まったもの» なので、
+ * fbm では出ない。石を 1 つずつドームとして置き、重なりは高いほうを採る。
+ * 石の間には砂粒のノイズを敷く。
+ *
+ * 返す 3 枚はそれぞれ
+ *   h     0..1 の高さ（法線の元）
+ *   ao    窪みほど暗い遮蔽。石の «あいだ» が締まって見えるのはこれ
+ *   rough 石は磨かれて滑らか、砂は粗い
+ *
+ * @param {number} size テクセル数（正方）
+ * @param {number} seed
+ * @param {{count?: number, rMin?: number, rMax?: number, flat?: number,
+ *          grain?: number, grainFreq?: number, aoRadius?: number}} opts
+ *   rMin/rMax/aoRadius はタイルの一辺に対する比
+ */
+export function makeTileablePebbleField(size, seed, {
+  count = 240, rMin = 0.030, rMax = 0.10, flat = 0.60,
+  grain = 0.12, grainFreq = 28, aoRadius = 0.055,
+} = {}) {
+  const rng = makeRng(seed >>> 0);
+  const n = size * size;
+  const h = new Float32Array(n);
+  const isStone = new Uint8Array(n);
+  const stoneR = new Float32Array(n);
+  /* 石ごとの «色味»。砂は 0、石は 0.30〜1.00。
+     全部が同じ明るさだと «型押しした砂» に見えてしまうので、
+     1 個ずつ違う色を持たせる。粗さもここから引く */
+  const tint = new Float32Array(n);
+
+  /* 石を大きい順に置く。小さい石が大きい石の上に乗るほうが
+     «あとから隙間に落ちた» 順序になって自然 */
+  const stones = [];
+  for (let i = 0; i < count; i++) {
+    stones.push({
+      cx: rng() * size, cy: rng() * size,
+      r: (rMin + (rMax - rMin) * Math.pow(rng(), 1.7)) * size,
+      // 少し潰す。真球だと «ビー玉» に見える
+      k: flat * (0.75 + rng() * 0.5),
+      t: 0.30 + rng() * 0.70,
+    });
+  }
+  stones.sort((a, b) => b.r - a.r);
+
+  const wrap = (v) => ((v % size) + size) % size;
+  for (const st of stones) {
+    const r = st.r, hh = r * st.k;
+    const x0 = Math.floor(st.cx - r), x1 = Math.ceil(st.cx + r);
+    const y0 = Math.floor(st.cy - r), y1 = Math.ceil(st.cy + r);
+    for (let y = y0; y <= y1; y++) {
+      const dy = y + 0.5 - st.cy;
+      for (let x = x0; x <= x1; x++) {
+        const dx = x + 0.5 - st.cx;
+        const d2 = dx * dx + dy * dy;
+        if (d2 >= r * r) continue;
+        const v = hh * Math.sqrt(1 - d2 / (r * r));
+        const idx = wrap(y) * size + wrap(x);
+        if (v > h[idx]) { h[idx] = v; isStone[idx] = 1; stoneR[idx] = r; tint[idx] = st.t; }
+      }
+    }
+  }
+
+  // 砂粒。石の «あいだ» を埋める
+  const noise = makeNoise2D(seed ^ 0x51ed);
+  const gf = grainFreq / size;
+  let hMax = 1e-6;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const i = y * size + x;
+      h[i] += (noise.fbm(x * gf, y * gf, 3) * 0.5 + 0.5) * grain * size * 0.02;
+      hMax = Math.max(hMax, h[i]);
+    }
+  }
+  for (let i = 0; i < n; i++) h[i] /= hMax;
+
+  /* 遮蔽は «まわりの平均よりどれだけ低いか»。
+     箱ぼかしを 1 回かけて差を取るだけで、石の間の溝が締まる */
+  const rad = Math.max(1, Math.round(aoRadius * size));
+  const blur = boxBlurWrap(h, size, rad);
+  const ao = new Float32Array(n);
+  for (let i = 0; i < n; i++) ao[i] = clamp01(0.5 + (h[i] - blur[i]) * 2.6);
+
+  const rough = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    // 石は磨かれて滑らか、砂は粗い。大きい石ほど滑らか
+    const stone = isStone[i] ? clamp01(stoneR[i] / (rMax * size)) : 0;
+    rough[i] = clamp01(0.92 - stone * 0.34 + (h[i] - 0.5) * 0.10);
+  }
+  return { h, ao, rough, tint, size };
+}
+
+/** タイル境界をまたぐ箱ぼかし（横→縦の 2 パス） */
+function boxBlurWrap(src, size, rad) {
+  const tmp = new Float32Array(src.length);
+  const out = new Float32Array(src.length);
+  const w = rad * 2 + 1;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      let s = 0;
+      for (let k = -rad; k <= rad; k++) s += src[y * size + (((x + k) % size) + size) % size];
+      tmp[y * size + x] = s / w;
+    }
+  }
+  for (let x = 0; x < size; x++) {
+    for (let y = 0; y < size; y++) {
+      let s = 0;
+      for (let k = -rad; k <= rad; k++) s += tmp[((((y + k) % size) + size) % size) * size + x];
+      out[y * size + x] = s / w;
+    }
+  }
+  return out;
 }

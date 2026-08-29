@@ -4,13 +4,14 @@
 import * as THREE from 'three';
 import { CAUSTICS_GLSL } from './shaders.js?v=20260828-snellwin2';
 import { waveGLSL } from './waveField.js?v=20260828-lakescale1';
-import { UnderwaterPropScatter, addUnderwaterCaustics, patchUwMaterial } from './underwaterProps.js?v=20260828-lodfade2';
-import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260828-lodfade2';
-import { RockSet, makeSingleRock } from './rocks.js?v=20260828-lodfade2';
+import { UnderwaterPropScatter, addUnderwaterCaustics, patchUwMaterial } from './underwaterProps.js?v=20260828-ground1';
+import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260828-ground1';
+import { RockSet, makeSingleRock } from './rocks.js?v=20260828-ground1';
 import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js';
-import { makeTileableHeightField } from './tileableNoise.js?v=20260827-orgnoise4';
-import { TreeSet, VARIANTS as TREE_VARIANTS } from './trees.js?v=20260828-lodfade2';
-import { SPECIES_IDS } from './treeSkeleton.js?v=20260828-lodfade2';
+import { makeTileableHeightField, makeTileablePebbleField }
+  from './tileableNoise.js?v=20260828-ground1';
+import { TreeSet, VARIANTS as TREE_VARIANTS } from './trees.js?v=20260828-ground1';
+import { SPECIES_IDS } from './treeSkeleton.js?v=20260828-ground1';
 import { WORLD_SIZE, WATER_REGION, MAX_DEPTH, resolveLake } from './lakefield.js';
 
 export { WORLD_SIZE, WATER_REGION, MAX_DEPTH };
@@ -195,6 +196,52 @@ vec3 shoreDress(vec3 base, vec3 wp, float under) {
 `;
 
 /** 湖底のmicro normal・roughness・色ムラを1枚にまとめたタイルテクスチャ。 */
+/**
+ * 地面の «粒» テクスチャ。RG = 傾き, B = 遮蔽, A = 粗さ。
+ *
+ * 砂利は «丸い石が敷き詰まったもの» なので fbm では出ない。
+ * 石を 1 つずつドームとして置いた高さ場から法線・遮蔽・粗さを焼く
+ * （makeTileablePebbleField）。
+ * 石を 1000 個ぶんの «情報» を地面に持たせておいて、その上に本物の 3D 石を
+ * 数十個だけ生やすほうが、全部を 3D にするより軽くて密度が出る。
+ *
+ * @param {'gravel'|'sand'} kind
+ */
+function createGroundDetailTexture(kind, size = 384) {
+  const cfg = kind === 'gravel'
+    // タイル 1.1m。石の半径 3〜11cm
+    ? { seed: 0x9a31c4, count: 300, rMin: 0.018, rMax: 0.11, flat: 0.74, grain: 0.16, grainFreq: 30, aoRadius: 0.055 }
+    // タイル 0.30m。粒 2〜5mm
+    : { seed: 0x4c7215, count: 900, rMin: 0.006, rMax: 0.017, flat: 0.50, grain: 0.55, grainFreq: 44, aoRadius: 0.020 };
+  const f = makeTileablePebbleField(size, cfg.seed, cfg);
+  const data = new Uint8Array(size * size * 4);
+  const at = (x, y) => f.h[(((y % size) + size) % size) * size + (((x % size) + size) % size)];
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const i = (y * size + x) * 4;
+      // 中央差分で傾きを取る。テクセル 1 つぶんの差なので係数で持ち上げる
+      const sx = (at(x + 1, y) - at(x - 1, y)) * 3.4;
+      const sz = (at(x, y + 1) - at(x, y - 1)) * 3.4;
+      const j = y * size + x;
+      data[i] = Math.round(clamp01(sx * 0.5 + 0.5) * 255);
+      data[i + 1] = Math.round(clamp01(sz * 0.5 + 0.5) * 255);
+      data[i + 2] = Math.round(f.ao[j] * 255);
+      /* 砂利は A に «石ごとの色味»（砂は 0）を入れて、粗さはそこから
+         シェーダ側で引く。砂には石がないので粗さをそのまま入れる */
+      data[i + 3] = Math.round((kind === 'gravel' ? f.tint[j] : f.rough[j]) * 255);
+    }
+  }
+  const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat, THREE.UnsignedByteType);
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.anisotropy = 8;
+  tex.generateMipmaps = true;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 function createBedDetailTexture() {
   const size = 128;
   const height = makeTileableHeightField(size, 0xbed0421, {
@@ -458,6 +505,9 @@ export class Terrain {
 
     this._buildHeightTexture();
     this.bedDetailTexture = createBedDetailTexture();
+    /* 地面の粒。汀線まわりは砂利、その上と深場は砂 */
+    this.groundGravel = createGroundDetailTexture('gravel');
+    this.groundSand = createGroundDetailTexture('sand');
     /* 渚の濡れ砂は水面シェーダと同じ高さテクスチャ・同じ遡上式を見る */
     this._shoreUniforms = {
       uShoreHeightTex: { value: this.heightTexture },
@@ -488,6 +538,9 @@ export class Terrain {
     this.quality = q;
     this.underwaterProps?.setQuality(q);
     const u = this.mesh?.material?.userData?.bedUniforms;
+    if (u?.uGroundStrength) {
+      u.uGroundStrength.value = q === 'high' ? 1 : q === 'low' ? 0.45 : 0.75;
+    }
     if (u?.uBedDetailStrength) {
       u.uBedDetailStrength.value = q === 'high' ? 0.34 : q === 'low' ? 0.16 : 0.25;
     }
@@ -639,6 +692,14 @@ export class Terrain {
       uBedScale: { value: 1 / 12 }, // 1 タイル ≈ 12 m
       uBedDetail: { value: this.bedDetailTexture },
       uBedDetailScale: { value: 1 / 1.8 },
+      uGroundGravel: { value: this.groundGravel },
+      uGroundSand: { value: this.groundSand },
+      // タイルの一辺（1/m）。砂利 1.1m、砂 0.30m
+      uGroundScale: { value: new THREE.Vector2(1 / 1.1, 1 / 0.30) },
+      /* 遠景では粒が 1px 未満になってチラつくので距離で消す。
+         代わりに «実物の 3D 石» が遠景のシルエットを担う */
+      uGroundFade: { value: new THREE.Vector2(14, 46) },
+      uGroundStrength: { value: this.quality === 'high' ? 1 : this.quality === 'low' ? 0.45 : 0.75 },
       uBedDetailStrength: { value: this.quality === 'high' ? 0.34 : this.quality === 'low' ? 0.16 : 0.25 },
     };
     Object.assign(uniforms, this._shoreUniforms);
@@ -670,11 +731,53 @@ export class Terrain {
           uniform sampler2D uBedRock;
           uniform sampler2D uBedMud;
           uniform sampler2D uBedDetail;
+          uniform sampler2D uGroundGravel;
+          uniform sampler2D uGroundSand;
+          uniform vec2 uGroundScale;
+          uniform vec2 uGroundFade;
+          uniform float uGroundStrength;
           uniform float uBedScale;
           uniform float uBedDetailScale;
           uniform float uBedDetailStrength;
           varying float vBed;
-          varying vec3 vBedWorldPos;`
+          varying vec3 vBedWorldPos;
+
+          /* 地面の «粒»：砂利と砂を選んで 1 枚にまとめる。
+             RG = 傾き, B = 遮蔽, A = 粗さ。
+             w.x = 効かせ具合（距離フェード込み）、w.y = 砂利の割合 */
+          vec4 gGround = vec4(0.5, 0.5, 0.5, 0.9);
+          vec2 gGroundW = vec2(0.0);
+          float gGravelTint = 1.0;
+          void groundDetail(vec3 wp, float bedKind) {
+            float fade = 1.0 - smoothstep(uGroundFade.x, uGroundFade.y,
+              length(wp - cameraPosition));
+            if (fade < 0.002) { gGroundW = vec2(0.0); return; }
+            /* 砂利は «汀線まわり» と «岩質の底»。それ以外は砂。
+               まっすぐな帯にならないようノイズで崩す */
+            float g = clamp((1.0 - smoothstep(0.05, 1.10, wp.y))
+                          + smoothstep(0.55, 0.75, bedKind), 0.0, 1.0);
+            g *= 0.30 + 0.70 * smoothstep(0.30, 0.70, shoreNoise(wp.xz * 0.16));
+            /* 1 枚をそのまま貼ると «同じ石の並び» が 1.1m ごとに現れて
+               プチプチに見える。回して縮めた 2 枚目を重ねて周期を殺す。
+               2 枚目は法線だけ弱めに足し、遮蔽と粗さは 1 枚目を主にする */
+            vec2 uv = wp.xz * uGroundScale.x;
+            /* 2 枚目は «回して 1.63m» にする。1.1 と 1.63 は割り切れないので
+               重ねた見た目の周期がとても長くなる。倍率を下げて大きくすると
+               今度は 30cm の塊がぼやけて見えるので、石の大きさは揃える */
+            vec2 uv2 = mat2(0.83, -0.56, 0.56, 0.83) * wp.xz * (uGroundScale.x * 0.675);
+            vec4 gv = texture2D(uGroundGravel, uv);
+            vec4 gv2 = texture2D(uGroundGravel, uv2);
+            gv.xy = (gv.xy + gv2.xy) * 0.5;
+            gv.b = min(gv.b, gv2.b * 1.15);
+            /* 石 1 個ずつの色味と粗さ。砂利は A に色味が入っている */
+            float stone = smoothstep(0.04, 0.30, gv.a);
+            gGravelTint = mix(1.0, 0.80 + gv.a * 0.40, stone);
+            gv.a = clamp(0.92 - stone * 0.34, 0.0, 1.0);
+            vec4 sd = texture2D(uGroundSand, wp.xz * uGroundScale.y);
+            gGround = mix(sd, gv, g);
+            gGravelTint = mix(1.0, gGravelTint, g);
+            gGroundW = vec2(fade * uGroundStrength, g);
+          }`
         )
         .replace(
           '#include <color_fragment>',
@@ -700,6 +803,10 @@ export class Terrain {
             }
             gShoreWet = shoreWetness(vBedWorldPos);
             diffuseColor.rgb = shoreDress(diffuseColor.rgb, vBedWorldPos, under);
+            /* 粒の遮蔽。石の «あいだ» が締まるので、平らな砂浜が
+               «塗った面» に見えなくなる。ここは水中も陸も同じに掛ける */
+            groundDetail(vBedWorldPos, vBed);
+            diffuseColor.rgb *= mix(1.0, mix(0.78, 1.12, gGround.b) * gGravelTint, gGroundW.x);
           }`
         )
         .replace(
@@ -712,6 +819,9 @@ export class Terrain {
             bedRough = mix(bedRough, 0.76, smoothstep(0.62, 0.74, vBed));
             bedRough = clamp(bedRough + (detail.a - 0.5) * 0.14, 0.66, 1.0);
           roughnessFactor = mix(roughnessFactor, bedRough, under);
+          /* 粒ごとの粗さ。磨かれた石は滑らかで砂は粗いので、
+             同じ濡れ具合でも石だけ先に光る */
+          roughnessFactor = mix(roughnessFactor, gGround.a, gGroundW.x * 0.75);
           // 濡れた砂は鏡面が立つ。太陽が低いときの照り返しがここで出る
           roughnessFactor = mix(roughnessFactor, 0.28, gShoreWet.x * 0.85);
           }`
@@ -726,6 +836,11 @@ export class Terrain {
             float detailAmt = uBedDetailStrength * max(under, gShoreWet.z * 0.28)
                             * (1.0 - gShoreWet.x * 0.65);
             normal = normalize(normal + detailView * detailAmt);
+            /* 粒の凹凸。以前は湖底だけに掛けていたので、乾いた砂浜が
+               のっぺりした面のままだった。陸にも同じだけ掛ける */
+            vec2 gs = gGround.xy * 2.0 - 1.0;
+            vec3 gView = mat3(viewMatrix) * vec3(-gs.x, 0.0, -gs.y);
+            normal = normalize(normal + gView * (gGroundW.x * 0.40));
           }`
         )
         .replace(
@@ -734,7 +849,7 @@ export class Terrain {
           totalEmissiveRadiance += causticLight(vBedWorldPos, normal);`
         );
     };
-    mat.customProgramCacheKey = () => 'terrain-bed-tex-v6-shorewet-caustics';
+    mat.customProgramCacheKey = () => 'terrain-bed-tex-v10-ground-grain';
   }
 
   /** 湖底テクスチャが使えない環境でも、頂点色の湖底へコースティクスを載せる。 */
