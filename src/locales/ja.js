@@ -11,7 +11,7 @@ export default {
     loading: '湖を生成中…',
     loadingSky: '空を描いています',
     loadingLake: '湖と山を生成しています',
-    loadingBed: '湖底の質感を敷いています',
+    loadingBed: '湖底と陸の質感を敷いています',
     loadingWater: '水を注いでいます',
     loadingFishTex: '魚の模様を塗っています',
     loadingFish: '魚を放しています',

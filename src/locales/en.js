@@ -12,7 +12,7 @@ export default {
     loading: 'Creating the lake…',
     loadingSky: 'Painting the sky',
     loadingLake: 'Shaping the lake and mountains',
-    loadingBed: 'Laying down the lakebed',
+    loadingBed: 'Laying down the ground',
     loadingWater: 'Filling the lake',
     loadingFishTex: 'Painting the fish',
     loadingFish: 'Releasing the fish',

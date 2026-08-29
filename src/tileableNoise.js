@@ -333,8 +333,47 @@ export function makeTileablePebbleField(size, seed, {
   return { h, ao, rough, tint, size };
 }
 
+/**
+ * 陸アルベドの輝度から Height → Normal / AO / Roughness を焼く。
+ * RG = 傾き, B = 遮蔽, A = 粗さ。タイル境界は boxBlurWrap でまたぐ。
+ *
+ * @param {Float32Array} luma  0〜1、行優先
+ * @param {number} size
+ */
+export function bakeLandDetailMaps(luma, size, {
+  aoRadius = 0.045,
+  nScale = 2.4,
+  roughLo = 0.72,
+  roughHi = 0.94,
+  heightBlur = 0.008,
+} = {}) {
+  positiveInt(size, 'size');
+  if (luma.length !== size * size) {
+    throw new RangeError(`luma length ${luma.length} != ${size * size}`);
+  }
+  const hRad = Math.max(1, Math.round(heightBlur * size));
+  const height = boxBlurWrap(luma, size, hRad);
+  const aoRad = Math.max(1, Math.round(aoRadius * size));
+  const blur = boxBlurWrap(height, size, aoRad);
+  const data = new Uint8Array(size * size * 4);
+  const at = (x, y) => height[(((y % size) + size) % size) * size + (((x % size) + size) % size)];
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const j = y * size + x;
+      const i = j * 4;
+      const sx = (at(x + 1, y) - at(x - 1, y)) * nScale;
+      const sz = (at(x, y + 1) - at(x, y - 1)) * nScale;
+      data[i] = Math.round(clamp01(sx * 0.5 + 0.5) * 255);
+      data[i + 1] = Math.round(clamp01(sz * 0.5 + 0.5) * 255);
+      data[i + 2] = Math.round(clamp01(0.5 + (height[j] - blur[j]) * 2.4) * 255);
+      data[i + 3] = Math.round(clamp01(roughLo + luma[j] * (roughHi - roughLo)) * 255);
+    }
+  }
+  return { data, height, size };
+}
+
 /** タイル境界をまたぐ箱ぼかし（横→縦の 2 パス） */
-function boxBlurWrap(src, size, rad) {
+export function boxBlurWrap(src, size, rad) {
   const tmp = new Float32Array(src.length);
   const out = new Float32Array(src.length);
   const w = rad * 2 + 1;

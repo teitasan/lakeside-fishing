@@ -9,8 +9,8 @@ import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260829-rad
 import { RockSet, makeSingleRock } from './rocks.js?v=20260829-radial2';
 import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js';
 import { buildRadialGrid, DETAIL_BY_QUALITY } from './terrainMesh.js?v=20260829-radial2';
-import { makeTileableHeightField, makeTileablePebbleField }
-  from './tileableNoise.js?v=20260829-radial2';
+import { makeTileableHeightField, makeTileablePebbleField, bakeLandDetailMaps }
+  from './tileableNoise.js?v=20260829-landtex3';
 import { TreeSet, VARIANTS as TREE_VARIANTS } from './trees.js?v=20260829-radial2';
 import { SPECIES_IDS } from './treeSkeleton.js?v=20260829-radial2';
 import { WORLD_SIZE, WATER_REGION, MAX_DEPTH, resolveLake } from './lakefield.js';
@@ -276,6 +276,85 @@ function createBedDetailTexture() {
   return tex;
 }
 
+const LAND_DETAIL_OPTS = {
+  beach: { aoRadius: 0.02, nScale: 1.1, roughLo: 0.88, roughHi: 0.97 },
+  grass: { aoRadius: 0.04, nScale: 2.2, roughLo: 0.80, roughHi: 0.94 },
+  forest: { aoRadius: 0.05, nScale: 2.6, roughLo: 0.58, roughHi: 0.90 },
+  rock: { aoRadius: 0.055, nScale: 3.2, roughLo: 0.68, roughHi: 0.88 },
+};
+
+/** 陸タイルの並び。シェーダ側の層番号（LAND_LAYER）と一致させる */
+export const LAND_KINDS = ['beach', 'grass', 'forest', 'rock'];
+const LAND_ALBEDO_SIZE = 1024;
+const LAND_DETAIL_SIZE = 512;
+
+/** 画像を canvas 経由で RGBA バイト列にする */
+function imageToRgba(img, size) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0, size, size);
+  return ctx.getImageData(0, 0, size, size).data;
+}
+
+/**
+ * 4 枚を 1 本のサンプラにまとめる。
+ *
+ * 別々の sampler2D で持つと、湖底 3 枚 + 粒 2 枚 + コースティクス + 汀線 +
+ * 陸 8 枚 で MAX_TEXTURE_IMAGE_UNITS(16) を超えてリンクに失敗する。
+ * 超えると地形マテリアルが «program not valid» になって地面が丸ごと消える。
+ * 2D 配列テクスチャなら 4 層で 1 本しか食わない。
+ */
+function makeLandArrayTexture(layers, size, colorSpace) {
+  const stride = size * size * 4;
+  const data = new Uint8Array(stride * layers.length);
+  layers.forEach((src, i) => data.set(src, stride * i));
+  const tex = new THREE.DataArrayTexture(data, size, size, layers.length);
+  tex.format = THREE.RGBAFormat;
+  tex.type = THREE.UnsignedByteType;
+  tex.colorSpace = colorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.anisotropy = 4;
+  tex.generateMipmaps = true;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/**
+ * 陸アルベドの輝度から Height→Normal/AO/Roughness を焼く。
+ * 砂浜は粒を pebble field が持つので、ここの法線は弱め（nScale 1.1）。
+ */
+function bakeLandDetailLayer(img, opts = {}) {
+  const size = LAND_DETAIL_SIZE;
+  const luma = new Float32Array(size * size);
+  if (typeof document !== 'undefined' && img) {
+    const pix = imageToRgba(img, size);
+    for (let i = 0; i < size * size; i++) {
+      const o = i * 4;
+      luma[i] = (0.2126 * pix[o] + 0.7152 * pix[o + 1] + 0.0722 * pix[o + 2]) / 255;
+    }
+  } else {
+    luma.fill(0.5);
+  }
+  return bakeLandDetailMaps(luma, size, opts).data;
+}
+
+function dummyBedTex() {
+  const t = new THREE.DataTexture(new Uint8Array([160, 150, 130, 255]), 1, 1);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.needsUpdate = true;
+  return t;
+}
+
+/** 陸テクスチャが読めなかったときの 1x1x4。層番号だけ合っていればいい */
+function dummyLandArray(fill, colorSpace) {
+  return makeLandArrayTexture(
+    LAND_KINDS.map(() => Uint8Array.from(fill)), 1, colorSpace,
+  );
+}
+
 /**
  * 植生マテリアルに風揺れを注入する。
  *
@@ -521,7 +600,8 @@ export class Terrain {
     /* 遠景インポスターを起動時に 1 回だけ焼くのに使う。無ければ中景で代用する */
     this._renderer = opts.renderer || null;
     this._dockTextures = opts.dockTextures || null;
-    this._buildTerrainMesh(opts.bedTextures || null);
+    this._landTextures = opts.landTextures || null;
+    this._buildTerrainMesh(opts.bedTextures || null, this._landTextures);
     this._findDock();
     this._buildDock();
     this._buildProps();
@@ -597,6 +677,31 @@ export class Terrain {
     ]).then(([plank, piling]) => ({ plank, piling }));
   }
 
+  /**
+   * 陸のアルベド 4 種。派生マップ（法線・遮蔽・粗さ）は輝度からその場で焼く。
+   *
+   * 4 種は 1 本の 2D 配列テクスチャにまとめる。別々の sampler2D にすると
+   * 地形フラグメントのサンプラが 16 本を超えてリンクに失敗し、地面が
+   * 丸ごと描画されなくなる（→ makeLandArrayTexture）。
+   */
+  static loadLandTextures() {
+    return Promise.all(
+      LAND_KINDS.map((k) => Terrain._loadRepeatTexture(`./assets/textures/land-${k}.webp`)),
+    ).then((maps) => {
+      const albedo = makeLandArrayTexture(
+        maps.map((m) => imageToRgba(m.image, LAND_ALBEDO_SIZE)),
+        LAND_ALBEDO_SIZE, THREE.SRGBColorSpace,
+      );
+      const detail = makeLandArrayTexture(
+        maps.map((m, i) => bakeLandDetailLayer(m.image, LAND_DETAIL_OPTS[LAND_KINDS[i]])),
+        LAND_DETAIL_SIZE, THREE.NoColorSpace,
+      );
+      // 配列へ焼いたので元の 1 枚ものはもう要らない
+      for (const m of maps) m.dispose();
+      return { albedo, detail };
+    });
+  }
+
   /* ---------------- 高さ関数（lakefield へ委譲） ---------------- */
   shoreRadius(x, z) { return this.lake.shoreRadius(x, z); }
   heightAt(x, z) { return this.lake.heightAt(x, z); }
@@ -652,12 +757,13 @@ export class Terrain {
    * 湖と同じ極座標で組んで汀線のバンドだけ詰める（→ terrainMesh.js）。
    * 結果、三角形は 135k → 168k とほぼ据え置きのまま、汀線には 111k が乗る。
    */
-  _buildTerrainMesh(bedTextures) {
+  _buildTerrainMesh(bedTextures, landTextures) {
     const grid = buildRadialGrid({ detail: DETAIL_BY_QUALITY[this.quality] ?? 1 });
     const n = grid.vertexCount;
     const verts = new Float32Array(n * 3);
     const colors = new Float32Array(n * 3);
     const beds = new Float32Array(n);
+    const slopes = new Float32Array(n);
 
     for (let i = 0; i < n; i++) {
       const x = grid.xz[i * 2], z = grid.xz[i * 2 + 1];
@@ -672,12 +778,14 @@ export class Terrain {
       colors[i * 3 + 1] = tmpColor.g;
       colors[i * 3 + 2] = tmpColor.b;
       beds[i] = h < 0.2 ? this.lake.bedAt(x, z, slope).v : 0.5;
+      slopes[i] = slope;
     }
 
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geo.setAttribute('aBed', new THREE.BufferAttribute(beds, 1));
+    geo.setAttribute('aSlope', new THREE.BufferAttribute(slopes, 1));
     geo.setIndex(new THREE.BufferAttribute(grid.index, 1));
     geo.computeVertexNormals();
     geo.computeBoundingSphere();
@@ -690,8 +798,11 @@ export class Terrain {
          地面に入れた砂利・砂の法線とケンカして «折り紙» に見えていた。
          細かい凹凸はディテール法線が持つので、面はなめらかでいい */
     });
-    if (bedTextures) this._applyBedTextures(mat, bedTextures, this._causticsUniforms);
-    else this._applyTerrainCaustics(mat, this._causticsUniforms);
+    if (bedTextures || landTextures) {
+      this._applyBedTextures(mat, bedTextures, this._causticsUniforms, landTextures);
+    } else {
+      this._applyTerrainCaustics(mat, this._causticsUniforms);
+    }
     this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.receiveShadow = true;
     this.mesh.castShadow = false;
@@ -700,14 +811,15 @@ export class Terrain {
   }
 
   /**
-   * 湖底だけ砂／岩／泥のタイルテクスチャをブレンドして貼る。
-   * 陸は従来どおり頂点色のまま。
+   * 湖底の砂／岩／泥と、陸の浜／草地／林床／岩肌をブレンドして貼る。
+   * 陸タイルの目標色は頂点色の実測平均なので、貼っても見た目の色は変わらない。
    */
-  _applyBedTextures(mat, tex, causticsUniforms) {
+  _applyBedTextures(mat, tex, causticsUniforms, landTextures) {
+    const dummyColor = dummyBedTex();
     const uniforms = {
-      uBedSand: { value: tex.sand },
-      uBedRock: { value: tex.rock },
-      uBedMud: { value: tex.mud },
+      uBedSand: { value: tex?.sand || dummyColor },
+      uBedRock: { value: tex?.rock || dummyColor },
+      uBedMud: { value: tex?.mud || dummyColor },
       uBedScale: { value: 1 / 12 }, // 1 タイル ≈ 12 m
       uBedDetail: { value: this.bedDetailTexture },
       uBedDetailScale: { value: 1 / 1.8 },
@@ -720,6 +832,14 @@ export class Terrain {
       uGroundFade: { value: new THREE.Vector2(26, 95) },
       uGroundStrength: { value: this.quality === 'high' ? 1 : this.quality === 'low' ? 0.45 : 0.75 },
       uBedDetailStrength: { value: this.quality === 'high' ? 0.34 : this.quality === 'low' ? 0.16 : 0.25 },
+      uLandAlbedo: { value: landTextures?.albedo || dummyLandArray([160, 150, 130, 255], THREE.SRGBColorSpace) },
+      uLandDetail: { value: landTextures?.detail || dummyLandArray([128, 128, 128, 230], THREE.NoColorSpace) },
+      // 浜 2m / 草地 3m / 林床 3m / 岩肌 4m
+      uLandScale: { value: new THREE.Vector4(1 / 2, 1 / 3, 1 / 3, 1 / 4) },
+      /* 遠景では効かないので切る。切っても «色» は変わらない
+         （タイルの平均色 = 頂点色の実測） */
+      uLandFade: { value: new THREE.Vector2(110, 190) },
+      uLandOn: { value: landTextures ? 1 : 0 },
     };
     Object.assign(uniforms, this._shoreUniforms);
     if (causticsUniforms) Object.assign(uniforms, causticsUniforms);
@@ -731,13 +851,16 @@ export class Terrain {
           '#include <common>',
           `#include <common>
           attribute float aBed;
+          attribute float aSlope;
           varying float vBed;
+          varying float vSlope;
           varying vec3 vBedWorldPos;`
         )
         .replace(
           '#include <begin_vertex>',
           `#include <begin_vertex>
           vBed = aBed;
+          vSlope = aSlope;
           vBedWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`
         );
       shader.fragmentShader = shader.fragmentShader
@@ -752,13 +875,25 @@ export class Terrain {
           uniform sampler2D uBedDetail;
           uniform sampler2D uGroundGravel;
           uniform sampler2D uGroundSand;
+          /* 陸の 4 種は層で持つ。sampler2D 8 本に分けると
+             MAX_TEXTURE_IMAGE_UNITS(16) を超えてリンクに失敗する */
+          uniform sampler2DArray uLandAlbedo;
+          uniform sampler2DArray uLandDetail;
+          #define LAND_BEACH 0.0
+          #define LAND_GRASS 1.0
+          #define LAND_FOREST 2.0
+          #define LAND_ROCK 3.0
           uniform vec2 uGroundScale;
           uniform vec2 uGroundFade;
           uniform float uGroundStrength;
           uniform float uBedScale;
           uniform float uBedDetailScale;
           uniform float uBedDetailStrength;
+          uniform vec4 uLandScale;
+          uniform vec2 uLandFade;
+          uniform float uLandOn;
           varying float vBed;
+          varying float vSlope;
           varying vec3 vBedWorldPos;
 
           /* 地面の «粒»：砂利と砂を選んで 1 枚にまとめる。
@@ -796,6 +931,57 @@ export class Terrain {
             gGround = mix(sd, gv, g);
             gGravelTint = mix(1.0, gGravelTint, g);
             gGroundW = vec2(fade * uGroundStrength, g);
+          }
+
+          vec4 gLandDet = vec4(0.5, 0.5, 0.5, 0.9);
+          float gLandAmt = 0.0;
+          vec4 gLandW = vec4(0.0);
+          /* 回して縮めた 2 枚目を混ぜてタイルの周期を殺す。
+             砂利と同じ手。1.0 と 0.73 は割り切れないので繰り返しが目立たない */
+          vec3 sampleLand(float layer, vec2 xz, float invTile) {
+            vec3 a = texture(uLandAlbedo, vec3(xz * invTile, layer)).rgb;
+            vec2 uv2 = mat2(0.83, -0.56, 0.56, 0.83) * xz * (invTile * 0.73);
+            vec3 b = texture(uLandAlbedo, vec3(uv2, layer)).rgb;
+            return mix(a, b, 0.34);
+          }
+          /* 派生（法線・遮蔽・粗さ）は 1 タップ。
+             アルベドと違って繰り返しが目に付かないので、
+             周期を殺す 2 枚目に取り出しコストを払う価値がない */
+          vec4 sampleLand4(float layer, vec2 xz, float invTile) {
+            return texture(uLandDetail, vec3(xz * invTile, layer));
+          }
+          vec3 applyLandAlbedo(vec3 wp, float under, vec3 diffuse) {
+            gLandAmt = 0.0;
+            if (uLandOn < 0.5) return diffuse;
+            /* タイルが 1px を割る遠景では、取り出しても頂点色との差が出ない。
+               タイルの平均色は頂点色の実測に合わせてあるので、
+               消しても «色が変わる» ことはない。遠くの山ぜんぶで
+               16 回のテクスチャ取り出しを省ける */
+            float lFade = 1.0 - smoothstep(uLandFade.x, uLandFade.y,
+              length(wp - cameraPosition));
+            if (lFade < 0.004 || under > 0.995) return diffuse;
+            float h = wp.y;
+            float wBeach = 1.0 - smoothstep(0.85, 1.35, h);
+            float wForest = smoothstep(6.5, 9.5, h);
+            float wGrass = max(0.0, 1.0 - wBeach - wForest);
+            float wRock = smoothstep(0.45, 0.72, vSlope);
+            float wSnow = smoothstep(58.0, 82.0, h) * (1.0 - clamp(vSlope - 0.85, 0.0, 1.0));
+            float wSum = max(1e-4, wBeach + wGrass + wForest);
+            vec2 xz = wp.xz;
+            vec3 col = (sampleLand(LAND_BEACH, xz, uLandScale.x) * wBeach
+                      + sampleLand(LAND_GRASS, xz, uLandScale.y) * wGrass
+                      + sampleLand(LAND_FOREST, xz, uLandScale.z) * wForest) / wSum;
+            col = mix(col, sampleLand(LAND_ROCK, xz, uLandScale.w), wRock * 0.85);
+            gLandAmt = (1.0 - under) * (1.0 - wSnow) * uLandOn * lFade;
+            gLandW = vec4(wBeach, wGrass, wForest, wRock);
+            gLandDet = (sampleLand4(LAND_BEACH, xz, uLandScale.x) * wBeach
+                      + sampleLand4(LAND_GRASS, xz, uLandScale.y) * wGrass
+                      + sampleLand4(LAND_FOREST, xz, uLandScale.z) * wForest) / wSum;
+            gLandDet = mix(gLandDet, sampleLand4(LAND_ROCK, xz, uLandScale.w), wRock * 0.85);
+            diffuse = mix(diffuse, col, gLandAmt);
+            float aoW = gLandAmt * mix(0.22, 0.80, 1.0 - gLandW.x);
+            diffuse *= mix(vec3(1.0), mix(vec3(0.84), vec3(1.06), gLandDet.b), aoW);
+            return diffuse;
           }`
         )
         .replace(
@@ -820,6 +1006,7 @@ export class Terrain {
               bedCol *= mix(1.0, 0.38, d);
               diffuseColor.rgb = mix(diffuseColor.rgb, bedCol, under);
             }
+            diffuseColor.rgb = applyLandAlbedo(vBedWorldPos, under, diffuseColor.rgb);
             gShoreWet = shoreWetness(vBedWorldPos);
             diffuseColor.rgb = shoreDress(diffuseColor.rgb, vBedWorldPos, under);
             /* 粒の遮蔽。石の «あいだ» が締まるので、平らな砂浜が
@@ -838,6 +1025,7 @@ export class Terrain {
             bedRough = mix(bedRough, 0.76, smoothstep(0.62, 0.74, vBed));
             bedRough = clamp(bedRough + (detail.a - 0.5) * 0.14, 0.66, 1.0);
           roughnessFactor = mix(roughnessFactor, bedRough, under);
+          roughnessFactor = mix(roughnessFactor, gLandDet.a, gLandAmt * 0.65);
           /* 粒ごとの粗さ。磨かれた石は滑らかで砂は粗いので、
              同じ濡れ具合でも石だけ先に光る */
           roughnessFactor = mix(roughnessFactor, gGround.a, gGroundW.x * 0.75);
@@ -860,6 +1048,12 @@ export class Terrain {
             vec2 gs = gGround.xy * 2.0 - 1.0;
             vec3 gView = mat3(viewMatrix) * vec3(-gs.x, 0.0, -gs.y);
             normal = normalize(normal + gView * (gGroundW.x * 0.40));
+            /* 陸タイル由来の凹凸。砂浜は pebble field に任せるので弱く */
+            vec2 ls = gLandDet.xy * 2.0 - 1.0;
+            vec3 lView = mat3(viewMatrix) * vec3(-ls.x, 0.0, -ls.y);
+            float nAmt = gLandAmt * (0.10 * gLandW.x + 0.40 * gLandW.y
+                       + 0.48 * gLandW.z + 0.58 * gLandW.w);
+            normal = normalize(normal + lView * nAmt);
           }`
         )
         .replace(
@@ -868,7 +1062,7 @@ export class Terrain {
           totalEmissiveRadiance += causticLight(vBedWorldPos, normal);`
         );
     };
-    mat.customProgramCacheKey = () => 'terrain-bed-tex-v10-ground-grain';
+    mat.customProgramCacheKey = () => 'terrain-bed-tex-v13-land-fade';
   }
 
   /** 湖底テクスチャが使えない環境でも、頂点色の湖底へコースティクスを載せる。 */

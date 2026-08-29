@@ -3,7 +3,7 @@
    =========================================================== */
 import * as THREE from 'three';
 import { Environment } from './sky.js?v=20260828-uwgfx18';
-import { Terrain, WATER_REGION } from './terrain.js?v=20260829-radial2';
+import { Terrain, WATER_REGION } from './terrain.js?v=20260829-landtex3';
 import { resolveLake } from './lakefield.js';
 import { Water } from './water.js?v=20260828-snellwin2';
 import { FishSchool } from './fish.js?v=20260827-lkwgfx';
@@ -323,14 +323,18 @@ export class Game {
     await onProgress(t('ui.loadingBed'));
     let bedTextures = null;
     let dockTextures = null;
+    let landTextures = null;
     const texResults = await Promise.allSettled([
       Terrain.loadBedTextures(),
       Terrain.loadDockTextures(),
+      Terrain.loadLandTextures(),
     ]);
     if (texResults[0].status === 'fulfilled') bedTextures = texResults[0].value;
     else console.warn('湖底テクスチャの読み込みに失敗、頂点色で描画します', texResults[0].reason);
     if (texResults[1].status === 'fulfilled') dockTextures = texResults[1].value;
     else console.warn('桟橋テクスチャの読み込みに失敗、単色で描画します', texResults[1].reason);
+    if (texResults[2].status === 'fulfilled') landTextures = texResults[2].value;
+    else console.warn('陸テクスチャの読み込みに失敗、頂点色で描画します', texResults[2].reason);
     const causticsUniforms = {
       // ボロノイ境界の明線を焼いたタイルテクスチャ（湖底・魚・水中プロップ共用）
       uCaustTex: { value: createCausticTexture() },
@@ -354,7 +358,7 @@ export class Game {
       uCaustStrength: { value: 0 },
     };
     this.terrain = new Terrain(this.scene, {
-      quality: q, lake: resolved.lake, bedTextures, dockTextures, causticsUniforms,
+      quality: q, lake: resolved.lake, bedTextures, dockTextures, landTextures, causticsUniforms,
       // 遠景の木のインポスターを起動時に焼くのに使う
       renderer: this.renderer,
     });
