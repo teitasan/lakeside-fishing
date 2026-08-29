@@ -9,7 +9,8 @@
  *   node scripts/process-land-textures.mjs --verify
  */
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -115,6 +116,21 @@ export function seamReport(rgb, n = SIZE) {
   return { seam, neighbour, ok: seam <= neighbour * 1.2 };
 }
 
+/** 焼いた結果の要約。ImageMagick の無い環境（CI）でも検査できるようにする */
+export const DIGEST_PATH = 'assets/textures/land-tiles.json';
+
+export function hasMagick() {
+  return spawnSync('magick', ['-version'], { stdio: 'ignore' }).status === 0;
+}
+
+export function sha256(path) {
+  return createHash('sha256').update(readFileSync(path)).digest('hex');
+}
+
+export function readDigest(root_ = root) {
+  return JSON.parse(readFileSync(join(root_, DIGEST_PATH), 'utf8'));
+}
+
 function runMagick(args, input, encoding = 'buffer') {
   const r = spawnSync('magick', args, {
     input,
@@ -163,13 +179,40 @@ function defaultInDir() {
   return '/Users/apple/.cursor/projects/Users-apple-Fishing-Game/assets';
 }
 
+/** コミット済みの webp から要約を焼き直す（画像を作り直さずに digest だけ更新） */
+function writeDigestFromWebp() {
+  const out = LAND_TILES.map((spec) => {
+    const webp = join(root, 'assets/textures', `${spec.id}.webp`);
+    const rgb = decodeRgb(webp);
+    const mean = meanRgb(rgb);
+    const seam = seamReport(rgb);
+    if (!seam.ok) throw new Error(`${spec.id}: tile seam visible`);
+    return {
+      id: spec.id,
+      target: spec.hex,
+      mean: mean.map((v) => Math.round(v * 10) / 10),
+      seam: Math.round(seam.seam * 10) / 10,
+      neighbour: Math.round(seam.neighbour * 10) / 10,
+      sha256: sha256(webp),
+      size: SIZE,
+    };
+  });
+  writeFileSync(join(root, DIGEST_PATH), `${JSON.stringify(out, null, 2)}\n`);
+  for (const t of out) {
+    console.log(`  ${t.id.padEnd(12)} ${hexOf(t.mean)}  seam ${t.seam} / nbor ${t.neighbour}  ${t.sha256.slice(0, 12)}`);
+  }
+  console.log(`${DIGEST_PATH} を書き出しました`);
+}
+
 function main() {
   const args = process.argv.slice(2);
+  if (args.includes('--digest')) { writeDigestFromWebp(); return; }
   const verify = args.includes('--verify');
   const inIdx = args.indexOf('--in');
   const inDir = inIdx >= 0 ? args[inIdx + 1] : defaultInDir();
   const outDir = join(root, 'assets/textures');
   mkdirSync(outDir, { recursive: true });
+  const written = [];
 
   for (const spec of LAND_TILES) {
     const webp = join(outDir, `${spec.id}.webp`);
@@ -198,6 +241,23 @@ function main() {
       + `  seam ${seam.seam.toFixed(1)} / nbor ${seam.neighbour.toFixed(1)}  ${seam.ok ? 'ok' : 'FAIL'}`,
     );
     if (!seam.ok) throw new Error(`${spec.id}: tile seam visible`);
+    written.push({
+      id: spec.id,
+      target: spec.hex,
+      mean: mean.map((v) => Math.round(v * 10) / 10),
+      seam: Math.round(seam.seam * 10) / 10,
+      neighbour: Math.round(seam.neighbour * 10) / 10,
+      sha256: sha256(webp),
+      size: SIZE,
+    });
+  }
+  if (!verify) {
+    /* ImageMagick はどこにでもある訳ではない（GitHub のランナーには無い）。
+       焼いた結果をここに残しておけば、CI は webp を復号しなくても
+       «コミットされている画像が、検査を通った画像そのものか» を
+       ハッシュで確かめられる（→ land-texture-test.mjs） */
+    writeFileSync(join(root, DIGEST_PATH), `${JSON.stringify(written, null, 2)}\n`);
+    console.log(`  ${DIGEST_PATH} を更新`);
   }
   console.log(verify ? 'land textures: verified' : 'land textures: written');
 }

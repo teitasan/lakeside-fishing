@@ -13,26 +13,60 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { bakeLandDetailMaps } from '../src/tileableNoise.js';
 import {
-  LAND_TILES, decodeRgb, meanRgb, parseHex, seamReport, SIZE,
+  LAND_TILES, decodeRgb, hasMagick, meanRgb, parseHex, readDigest,
+  seamReport, sha256, SIZE,
 } from './process-land-textures.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
+/* webp の復号には ImageMagick が要るが、GitHub のランナーには入っていない。
+   焼いたときの要約（平均色・継ぎ目・SHA-256）を land-tiles.json に残してあるので、
+   CI は画像を復号せずに «コミットされている画像が、検査を通ったその画像か» を
+   ハッシュで確かめられる。ImageMagick がある環境では、要約そのものが
+   画像と合っているかまで見る（要約だけ手で書き換えても通らないように）。 */
+const digest = readDigest(root);
+assert.strictEqual(digest.length, LAND_TILES.length, 'land-tiles.json の枚数が合わない');
+const magick = hasMagick();
+
 for (const spec of LAND_TILES) {
   const path = join(root, 'assets/textures', `${spec.id}.webp`);
-  const rgb = decodeRgb(path);
-  assert.strictEqual(rgb.length, SIZE * SIZE * 3, `${spec.id}: 1024² rgb`);
-  const mean = meanRgb(rgb);
+  const rec = digest.find((d) => d.id === spec.id);
+  assert.ok(rec, `land-tiles.json に ${spec.id} がない`);
+  assert.strictEqual(rec.target, spec.hex, `${spec.id}: 目標色が食い違う`);
+  assert.strictEqual(rec.size, SIZE, `${spec.id}: ${SIZE}² でない`);
+  assert.strictEqual(
+    sha256(path), rec.sha256,
+    `${spec.id}: 画像が land-tiles.json と一致しない。`
+    + ' 差し替えたら node scripts/process-land-textures.mjs --digest を走らせること',
+  );
+
   const target = parseHex(spec.hex);
-  const drift = Math.max(...mean.map((v, i) => Math.abs(v - target[i])));
-  assert.ok(drift <= 3, `${spec.id}: 平均 ${mean.map((v) => v.toFixed(1))} が ${spec.hex} から ${drift.toFixed(1)}`);
-  const seam = seamReport(rgb);
-  assert.ok(seam.ok, `${spec.id}: 継ぎ目 ${seam.seam.toFixed(1)} > 隣接 ${seam.neighbour.toFixed(1)}`);
+  const drift = Math.max(...rec.mean.map((v, i) => Math.abs(v - target[i])));
+  assert.ok(drift <= 3, `${spec.id}: 平均 ${rec.mean} が ${spec.hex} から ${drift.toFixed(1)}`);
+  assert.ok(
+    rec.seam <= rec.neighbour * 1.2,
+    `${spec.id}: 継ぎ目 ${rec.seam} > 隣接 ${rec.neighbour}`,
+  );
+
+  if (magick) {
+    const rgb = decodeRgb(path);
+    assert.strictEqual(rgb.length, SIZE * SIZE * 3, `${spec.id}: ${SIZE}² rgb`);
+    const mean = meanRgb(rgb);
+    for (let c = 0; c < 3; c++) {
+      assert.ok(
+        Math.abs(mean[c] - rec.mean[c]) <= 0.2,
+        `${spec.id}: land-tiles.json の平均色が画像と違う`,
+      );
+    }
+    assert.ok(seamReport(rgb).ok, `${spec.id}: 継ぎ目`);
+  }
+
   console.log(
     `  ${spec.id.padEnd(12)} ${spec.hex}  drift ${drift.toFixed(1)}`
-    + `  seam ${seam.seam.toFixed(1)} / nbor ${seam.neighbour.toFixed(1)}`,
+    + `  seam ${rec.seam} / nbor ${rec.neighbour}  ${rec.sha256.slice(0, 8)}`,
   );
 }
+console.log(`  （画像の復号 ${magick ? 'あり' : 'なし：ImageMagick が無いのでハッシュ照合のみ'}）`);
 
 {
   const N = 64;
@@ -125,10 +159,12 @@ assert.ok(
 );
 assert.ok(!/sampleLand[\s\S]{0,500}fract\s*\(/.test(terrain), '陸サンプルが fract() を使っている');
 
-const r = spawnSync(process.execPath, [
-  join(root, 'scripts/process-land-textures.mjs'),
-  '--verify',
-], { cwd: root, encoding: 'utf8' });
-assert.equal(r.status, 0, `verify failed:\n${r.stdout}\n${r.stderr}`);
+if (magick) {
+  const r = spawnSync(process.execPath, [
+    join(root, 'scripts/process-land-textures.mjs'),
+    '--verify',
+  ], { cwd: root, encoding: 'utf8' });
+  assert.equal(r.status, 0, `verify failed:\n${r.stdout}\n${r.stderr}`);
+}
 
 console.log('land-texture-test: ok');
