@@ -4,14 +4,15 @@
 import * as THREE from 'three';
 import { CAUSTICS_GLSL } from './shaders.js?v=20260828-snellwin2';
 import { waveGLSL } from './waveField.js?v=20260828-lakescale1';
-import { UnderwaterPropScatter, addUnderwaterCaustics, patchUwMaterial } from './underwaterProps.js?v=20260828-ground1';
-import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260828-ground1';
-import { RockSet, makeSingleRock } from './rocks.js?v=20260828-ground1';
+import { UnderwaterPropScatter, addUnderwaterCaustics, patchUwMaterial } from './underwaterProps.js?v=20260829-radial2';
+import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260829-radial2';
+import { RockSet, makeSingleRock } from './rocks.js?v=20260829-radial2';
 import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js';
+import { buildRadialGrid, DETAIL_BY_QUALITY } from './terrainMesh.js?v=20260829-radial2';
 import { makeTileableHeightField, makeTileablePebbleField }
-  from './tileableNoise.js?v=20260828-ground1';
-import { TreeSet, VARIANTS as TREE_VARIANTS } from './trees.js?v=20260828-ground1';
-import { SPECIES_IDS } from './treeSkeleton.js?v=20260828-ground1';
+  from './tileableNoise.js?v=20260829-radial2';
+import { TreeSet, VARIANTS as TREE_VARIANTS } from './trees.js?v=20260829-radial2';
+import { SPECIES_IDS } from './treeSkeleton.js?v=20260829-radial2';
 import { WORLD_SIZE, WATER_REGION, MAX_DEPTH, resolveLake } from './lakefield.js';
 
 export { WORLD_SIZE, WATER_REGION, MAX_DEPTH };
@@ -642,34 +643,52 @@ export class Terrain {
   }
 
   /* ---------------- 地形メッシュ ---------------- */
+  /**
+   * 同心円の格子で地形を組む。
+   *
+   * 一様な 1000m 四方の格子（セル 3.85m）だと、プレイヤーがいる汀線の帯には
+   * 13.5 万枚のうち 4400 枚しか無かった。面積の 96% を占める深場と遠くの山が
+   * 三角形をぜんぶ持っていく。一様に細かくしても無駄が増えるだけなので、
+   * 湖と同じ極座標で組んで汀線のバンドだけ詰める（→ terrainMesh.js）。
+   * 結果、三角形は 135k → 168k とほぼ据え置きのまま、汀線には 111k が乗る。
+   */
   _buildTerrainMesh(bedTextures) {
-    const segs = this.quality === 'low' ? 150 : this.quality === 'high' ? 260 : 210;
-    const geo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, segs, segs);
-    geo.rotateX(-Math.PI / 2);
-    const pos = geo.attributes.position;
-    const colors = new Float32Array(pos.count * 3);
-    const beds = new Float32Array(pos.count);
+    const grid = buildRadialGrid({ detail: DETAIL_BY_QUALITY[this.quality] ?? 1 });
+    const n = grid.vertexCount;
+    const verts = new Float32Array(n * 3);
+    const colors = new Float32Array(n * 3);
+    const beds = new Float32Array(n);
 
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), z = pos.getZ(i);
+    for (let i = 0; i < n; i++) {
+      const x = grid.xz[i * 2], z = grid.xz[i * 2 + 1];
       const h = this.heightAt(x, z);
-      pos.setY(i, h);
-      const slope = this.slopeAt(x, z, WORLD_SIZE / segs);
+      verts[i * 3] = x;
+      verts[i * 3 + 1] = h;
+      verts[i * 3 + 2] = z;
+      // 傾きを取る幅は «そこのセルの大きさ»。一様格子ではないので頂点ごとに違う
+      const slope = this.slopeAt(x, z, grid.cell[i]);
       this._terrainColor(h, slope, x, z, tmpColor);
       colors[i * 3] = tmpColor.r;
       colors[i * 3 + 1] = tmpColor.g;
       colors[i * 3 + 2] = tmpColor.b;
       beds[i] = h < 0.2 ? this.lake.bedAt(x, z, slope).v : 0.5;
     }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geo.setAttribute('aBed', new THREE.BufferAttribute(beds, 1));
+    geo.setIndex(new THREE.BufferAttribute(grid.index, 1));
     geo.computeVertexNormals();
+    geo.computeBoundingSphere();
 
     const mat = new THREE.MeshStandardMaterial({
       vertexColors: true,
       roughness: 0.94,
       metalness: 0,
-      flatShading: true,
+      /* flatShading を切った。3.85m の面を 1 枚ずつハードな法線で塗っていたので、
+         地面に入れた砂利・砂の法線とケンカして «折り紙» に見えていた。
+         細かい凹凸はディテール法線が持つので、面はなめらかでいい */
     });
     if (bedTextures) this._applyBedTextures(mat, bedTextures, this._causticsUniforms);
     else this._applyTerrainCaustics(mat, this._causticsUniforms);
@@ -698,7 +717,7 @@ export class Terrain {
       uGroundScale: { value: new THREE.Vector2(1 / 1.1, 1 / 0.30) },
       /* 遠景では粒が 1px 未満になってチラつくので距離で消す。
          代わりに «実物の 3D 石» が遠景のシルエットを担う */
-      uGroundFade: { value: new THREE.Vector2(14, 46) },
+      uGroundFade: { value: new THREE.Vector2(26, 95) },
       uGroundStrength: { value: this.quality === 'high' ? 1 : this.quality === 'low' ? 0.45 : 0.75 },
       uBedDetailStrength: { value: this.quality === 'high' ? 0.34 : this.quality === 'low' ? 0.16 : 0.25 },
     };
@@ -903,6 +922,11 @@ export class Terrain {
 
   _terrainColor(h, slope, x, z, out) {
     const n = this.noise.fbm(x * 0.09, z * 0.09, 2) * 0.5 + 0.5;
+    /* 波長 2.4m の細かいほう。3.85m 格子では拾えなかったので入れていなかったが、
+       汀線バンドが 1.25m になったので «地面のムラ» として効くようになった。
+       陸にはテクスチャが無く、頂点色だけで «地面らしさ» を作る必要がある */
+    const nf = this.noise.fbm(x * 0.42, z * 0.42, 2) * 0.5 + 0.5;
+    const nl = n * 0.58 + nf * 0.42;
     const rocky = clamp01((slope - 0.5) * 1.6);
 
     if (h < -0.15) {
@@ -924,18 +948,18 @@ export class Terrain {
     } else if (h < 1.1) {
       // 汀線の砂浜
       const t = clamp01((h + 0.15) / 1.25);
-      out.setRGB(0.52 + n * 0.07, 0.47 + n * 0.06, 0.36 + n * 0.05);
-      out.lerp(tmpSand.setRGB(0.30 + n * 0.08, 0.36 + n * 0.09, 0.19), t * 0.55);
+      out.setRGB(0.52 + nl * 0.09, 0.47 + nl * 0.08, 0.36 + nl * 0.06);
+      out.lerp(tmpSand.setRGB(0.30 + nl * 0.10, 0.36 + nl * 0.11, 0.19), t * 0.55);
     } else {
       const t = clamp01((h - 1.1) / 22);
       // 草地 -> 深い森
       out.setRGB(
-        lerp(0.24, 0.13, t) + n * 0.07,
-        lerp(0.36, 0.24, t) + n * 0.09,
-        lerp(0.15, 0.12, t) + n * 0.04
+        lerp(0.24, 0.13, t) + nl * 0.09,
+        lerp(0.36, 0.24, t) + nl * 0.12,
+        lerp(0.15, 0.12, t) + nl * 0.05
       );
       // 岩肌
-      out.lerp(tmpSand.setRGB(0.30 + n * 0.06, 0.29 + n * 0.05, 0.27 + n * 0.05), rocky * 0.85);
+      out.lerp(tmpSand.setRGB(0.30 + nl * 0.08, 0.29 + nl * 0.07, 0.27 + nl * 0.06), rocky * 0.85);
       // 高山の雪
       const snow = smoothstep(58, 82, h) * (1 - clamp01(slope - 0.85));
       out.lerp(tmpSand.setRGB(0.92, 0.94, 0.98), clamp01(snow));
