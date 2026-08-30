@@ -9,8 +9,8 @@
    «高さ 1 に正規化したもの» を共有する（scale がそのまま実寸になる）。
    =========================================================== */
 import * as THREE from 'three';
-import { lodForList } from './util.js?v=20260830-zone4';
-export { tintAt } from './util.js?v=20260830-zone4';
+import { lodForList } from './util.js?v=20260830-zone5';
+export { tintAt } from './util.js?v=20260830-zone5';
 
 /* 枠を自動で広げるときの上限（登録時の何倍まで）。
    青天井にするとバグで際限なく確保してしまう */

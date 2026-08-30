@@ -3,7 +3,7 @@
    =========================================================== */
 import * as THREE from 'three';
 import { Environment } from './sky.js?v=20260828-uwgfx18';
-import { Terrain, WATER_REGION, WALK_INLAND } from './terrain.js?v=20260830-zone4';
+import { Terrain, WATER_REGION, WALK_INLAND } from './terrain.js?v=20260830-zone5';
 import { resolveLake } from './lakefield.js';
 import { Water } from './water.js?v=20260828-snellwin2';
 import { FishSchool } from './fish.js?v=20260827-lkwgfx';
@@ -22,7 +22,7 @@ import {
 } from './data.js';
 import {
   clamp, clamp01, lerp, damp, smoothstep, rand, pick, weightedPick, TAU, timeBand, fmt1,
-} from './util.js?v=20260830-zone4';
+} from './util.js?v=20260830-zone5';
 import { iconHtml, iconLabel } from './icons.js';
 import {
   t, joinList, gearName, terrainName, weatherName, achievementName,
@@ -37,6 +37,12 @@ import { FrameProfiler } from './performance.js?v=20260827-lkwgfx';
 const GRAVITY = 9.8;
 const EXPOSURE = 0.78;
 const PLAYER_RADIUS = 0.34;
+/* 追従カメラの当たり半径。ニアクリップぶんの余裕を持たせて、
+   幹の面がカメラの手前を横切らないようにする */
+const CAM_RADIUS = 0.30;
+/* 背後の物で引き寄せるときの下限（m）。これ以上寄せると釣り人の頭に入る。
+   三人称の最短 CAM_MIN(1.6m) より少し内側までは許す（一時的な回避なので） */
+const CAM_PULL_MIN = 1.1;
 /* キャストの狙い */
 /* 最弱キャストの初速。ロッド先端は足元より少し前（約1.25m）にあるので、
    初速を絞ってもそれ未満にはならない。0.5 でおよそ 1.5〜2m まで縮む */
@@ -1766,6 +1772,13 @@ export class Game {
     const want = pivot.clone().addScaledVector(dir, -dist);
     want.y += 0.35;
 
+    /* 背後の木や岩にめり込まないように引き寄せる。
+       これまで地面と水面しか見ていなかったので、木を背にして立つと
+       カメラが幹の «中» へ入った。手前の面はカリングされるので、
+       向こう側の内壁が見えて幹が凹んで見える。 */
+    const clear = this._camClear(pivot, want);
+    if (clear < 1) want.copy(pivot).lerp(want, clear);
+
     // 地面/水面にめり込まないように（デバッグで水中歩行中は湖底に追従）
     const gh = this.terrain.heightAt(want.x, want.z);
     const wh = gh < 0 ? this.water.surfaceY(want.x, want.z) : gh;
@@ -1792,6 +1805,32 @@ export class Game {
     cam.lookAt(look);
     const camSurf = this.water.surfaceY(cam.position.x, cam.position.z);
     this._setUnderwaterFx(debugUw && cam.position.y < camSurf);
+  }
+
+  /**
+   * pivot から want までを辿って、最初にぶつかる手前までの割合を返す。
+   *
+   * 木の幹は当たり判定を持っているので、それをそのまま使う。
+   * 足元の藪で押されないよう «その高さまである物» だけを見る。
+   * @returns {number} 0〜1
+   */
+  _camClear(pivot, want) {
+    const dx = want.x - pivot.x, dy = want.y - pivot.y, dz = want.z - pivot.z;
+    const len = Math.hypot(dx, dy, dz);
+    if (len < 1e-4) return 1;
+    const steps = Math.max(2, Math.ceil(len / 0.25));
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      if (this.terrain.blockedAt(
+        pivot.x + dx * t, pivot.z + dz * t, CAM_RADIUS, pivot.y + dy * t)) {
+        /* ぶつかった 1 つ手前より、さらに気持ち内側で止める。
+           ただし寄せすぎない：林の中では常にどれかの幹に当たるので、
+           0 まで許すとカメラが釣り人の頭に入ってしまう。
+           少し幹に近づくほうが、視点が顔にめり込むよりマシ */
+        return Math.max(CAM_PULL_MIN / len, (i - 1) / steps - 0.05);
+      }
+    }
+    return 1;
   }
 
   /** 一人称：カメラは頭の位置そのまま。視線はマウス（レティクル＝狙い）に完全一致させる */

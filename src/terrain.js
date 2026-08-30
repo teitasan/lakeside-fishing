@@ -2,19 +2,19 @@
    地形・湖底・岸辺の装飾・桟橋
    =========================================================== */
 import * as THREE from 'three';
-import { CAUSTICS_GLSL } from './shaders.js?v=20260830-zone4';
+import { CAUSTICS_GLSL } from './shaders.js?v=20260830-zone5';
 import { waveGLSL } from './waveField.js?v=20260828-lakescale1';
-import { UnderwaterPropScatter, addUnderwaterCaustics, patchUwMaterial } from './underwaterProps.js?v=20260830-zone4';
-import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260830-zone4';
-import { Undergrowth, UNDER_KINDS } from './undergrowth.js?v=20260830-zone4';
-import { RockSet, makeSingleRock } from './rocks.js?v=20260830-zone4';
-import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js?v=20260830-zone4';
-import { buildRadialGrid, DETAIL_BY_QUALITY } from './terrainMesh.js?v=20260830-zone4';
+import { UnderwaterPropScatter, addUnderwaterCaustics, patchUwMaterial } from './underwaterProps.js?v=20260830-zone5';
+import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260830-zone5';
+import { Undergrowth, UNDER_KINDS } from './undergrowth.js?v=20260830-zone5';
+import { RockSet, makeSingleRock } from './rocks.js?v=20260830-zone5';
+import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js?v=20260830-zone5';
+import { buildRadialGrid, DETAIL_BY_QUALITY } from './terrainMesh.js?v=20260830-zone5';
 import { makeTileableHeightField, makeTileablePebbleField, bakeLandDetailMaps }
-  from './tileableNoise.js?v=20260830-zone4';
+  from './tileableNoise.js?v=20260830-zone5';
 import { TreeSet, VARIANTS as TREE_VARIANTS, LOD_DIST as TREE_LOD_DIST, LOD_FADE_BAND as TREE_FADE_BAND }
-  from './trees.js?v=20260830-zone4';
-import { SPECIES_IDS } from './treeSkeleton.js?v=20260830-zone4';
+  from './trees.js?v=20260830-zone5';
+import { SPECIES_IDS } from './treeSkeleton.js?v=20260830-zone5';
 import { WORLD_SIZE, WATER_REGION, MAX_DEPTH, resolveLake } from './lakefield.js';
 
 export { WORLD_SIZE, WATER_REGION, MAX_DEPTH };
@@ -1423,7 +1423,12 @@ export class Terrain {
   }
 
   /** (x,z) が半径 rad の円として障害物にぶつかるか */
-  blockedAt(x, z, rad = 0.32) {
+  /**
+   * @param {number} [y] 指定すると «その高さより上まである» 障害物だけを見る。
+   *   カメラの当たり判定で使う（足元の藪でカメラが押されると鬱陶しい）。
+   *   歩く判定は高さを見ない＝これまでどおり。
+   */
+  blockedAt(x, z, rad = 0.32, y) {
     const cx = Math.floor(x / OBS_CELL), cz = Math.floor(z / OBS_CELL);
     const o = this.obstacles;
     for (let dz = -1; dz <= 1; dz++) {
@@ -1432,6 +1437,7 @@ export class Terrain {
         if (!arr) continue;
         for (let k = 0; k < arr.length; k++) {
           const i = arr[k];
+          if (y !== undefined && o[i + 3] < y) continue;
           const ddx = x - o[i], ddz = z - o[i + 1], rr = o[i + 2] + rad;
           if (ddx * ddx + ddz * ddz < rr * rr) return true;
         }

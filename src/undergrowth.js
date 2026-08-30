@@ -14,12 +14,12 @@
    カードとテクスチャの作りは水草（waterPlants.js）と同じものを使い回す。
    =========================================================== */
 import * as THREE from 'three';
-import { LodInstances, tintAt } from './lodInstances.js?v=20260830-zone4';
+import { LodInstances, tintAt } from './lodInstances.js?v=20260830-zone5';
 import {
   newOut, toGeometry, cardFan, paintBlade, leafGreen,
-} from './waterPlants.js?v=20260830-zone4';
-import { applyPatches, lodDitherFade } from './materialPatch.js?v=20260830-zone4';
-import { makeRng, TAU, lerp, clamp01, spreadOrder } from './util.js?v=20260830-zone4';
+} from './waterPlants.js?v=20260830-zone5';
+import { applyPatches, lodDitherFade } from './materialPatch.js?v=20260830-zone5';
+import { makeRng, TAU, lerp, clamp01, spreadOrder } from './util.js?v=20260830-zone5';
 
 /** 近景 / 中景。これより遠い株は段を持たないので描かれない */
 export const UNDER_LOD = [22, 48];

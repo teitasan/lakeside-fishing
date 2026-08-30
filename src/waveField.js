@@ -5,7 +5,7 @@
    渚の遡上（水面と地形の両方）・湖底コースティクスがすべて同じ波を見る。
    THREE を import しないので Node の回帰テストからも直接呼べる。
    =========================================================== */
-import { TAU, smoothstep } from './util.js?v=20260830-zone4';
+import { TAU, smoothstep } from './util.js?v=20260830-zone5';
 
 /** 波の定義（dir は正規化して使用） */
 export const WAVES = [

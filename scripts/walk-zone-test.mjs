@@ -74,4 +74,25 @@ assert.match(terrain, /this\.addObstacle\(x, z, 0\.55, h \+ height \* 0\.8\);/,
     'クロスフェードの帯ぶんの余裕が無い');
 }
 
+/* 追従カメラの当たり判定。
+   pivot から後ろへ引くだけだと、木を背にして立ったときカメラが幹の «中» へ
+   入る。手前の面はカリングされるので向こう側の内壁が見えて、幹が凹んで
+   見える（実際にそう報告された）。木の当たり判定をそのまま使って止める。 */
+{
+  assert.match(game, /const clear = this\._camClear\(pivot, want\);/,
+    '追従カメラが背後の物を見ていない');
+  assert.match(game, /_camClear\(pivot, want\) \{/, '_camClear が無い');
+  assert.match(game, /const CAM_RADIUS = /, 'カメラの当たり半径が無い');
+  // 足元の藪でカメラが押されないよう、高さを見て弾く
+  assert.match(game, /CAM_RADIUS, pivot\.y \+ dy \* t\)/,
+    'カメラの当たり判定に高さを渡していない');
+  assert.match(terrain, /blockedAt\(x, z, rad = 0\.32, y\) \{/,
+    'blockedAt が高さを取れない');
+  assert.match(terrain, /if \(y !== undefined && o\[i \+ 3\] < y\) continue;/,
+    '高さより低い障害物を弾いていない');
+  // 歩く判定は高さを見ない（これまでどおり）
+  assert.match(game, /this\.terrain\.blockedAt\(nx, nz, PLAYER_RADIUS\)/,
+    '歩く判定に高さが混ざっている');
+}
+
 console.log('walk-zone-test: ok');

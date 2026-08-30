@@ -3,7 +3,7 @@
    =========================================================== */
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { clamp, clamp01, lerp, damp, TAU, lineSagProfile } from './util.js?v=20260830-zone4';
+import { clamp, clamp01, lerp, damp, TAU, lineSagProfile } from './util.js?v=20260830-zone5';
 import { createBaitMesh, disposeBaitMesh, updateBaitMesh, createHookMesh, HOOK } from './baitMesh.js';
 import { t } from './i18n.js';
 
