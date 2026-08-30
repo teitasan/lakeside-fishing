@@ -14,12 +14,12 @@
    カードとテクスチャの作りは水草（waterPlants.js）と同じものを使い回す。
    =========================================================== */
 import * as THREE from 'three';
-import { LodInstances, tintAt } from './lodInstances.js?v=20260830-forest6';
+import { LodInstances, tintAt } from './lodInstances.js?v=20260830-forest7';
 import {
   newOut, toGeometry, cardFan, paintBlade, leafGreen,
-} from './waterPlants.js?v=20260830-forest6';
-import { applyPatches, lodDitherFade } from './materialPatch.js?v=20260830-forest6';
-import { makeRng, TAU, lerp, clamp01 } from './util.js';
+} from './waterPlants.js?v=20260830-forest7';
+import { applyPatches, lodDitherFade } from './materialPatch.js?v=20260830-forest7';
+import { makeRng, TAU, lerp, clamp01, spreadOrder } from './util.js?v=20260830-forest7';
 
 /** 近景 / 中景。これより遠い株は段を持たないので描かれない */
 export const UNDER_LOD = [22, 48];
@@ -30,7 +30,7 @@ export const UNDER_VARIANTS = 3;
 export const UNDER_KINDS = {
   /* 低木。林縁と木の根元に置いて «地面と幹の境目» を隠す。
      これが無いと、いくら木を増やしても地面がそのまま透けて見える */
-  bush: { height: [0.55, 1.15], aspect: 1.15, cards: [5, 2], tex: 512 },
+  bush: { height: [0.55, 1.15], aspect: 1.15, cards: [5, 3], tex: 512 },
   // シダ。林床の主役。傘のように葉を広げる
   fern: { height: [0.4, 0.75], aspect: 1.55, cards: [3, 2], tex: 384 },
   // 草の塊。数で地面を埋める係
@@ -209,23 +209,30 @@ export function makeUndergrowthTexture(kind, variant = 0) {
 export function emitUndergrowth(kind, lod, variant = 0) {
   const cfg = UNDER_KINDS[kind];
   const out = newOut();
+  const nMax = cfg.cards[0];
   const n = cfg.cards[Math.min(lod, cfg.cards.length - 1)];
   const w = cfg.aspect;
   const rng = makeRng(0x77c1 ^ (variant * 0x9e37) ^ kind.charCodeAt(1) * 131);
+  const order = spreadOrder(nMax);
+
+  /** 決めた向きの «先頭 take 枚» を 1 枚ずつ立てる（n=1 の cardFan が 1 枚） */
+  const fan = (take, opt) => {
+    for (const k of order.slice(0, take)) {
+      cardFan(out, { ...opt, n: 1, az0: opt.az0 + (k / nMax) * Math.PI });
+    }
+  };
+
   if (kind === 'bush') {
     // 2 束を少しずらして立てる。1 点から出すと «開いた本» に見える
     for (let s = 0; s < 2; s++) {
-      const a = rng() * TAU, d = 0.14 * s;
-      cardFan(out, {
+      const a = rng() * TAU, d = 0.14 * s, az0 = rng() * Math.PI;
+      fan(Math.max(1, n - s), {
         cx: Math.cos(a) * d, cy: 0, cz: Math.sin(a) * d,
-        w: w * (1 - s * 0.22), h: 1 - s * 0.18,
-        n: Math.max(1, n - s), az0: rng() * Math.PI, lean: 0.10,
+        w: w * (1 - s * 0.22), h: 1 - s * 0.18, lean: 0.10, az0,
       });
     }
   } else {
-    cardFan(out, {
-      cx: 0, cy: 0, cz: 0, w, h: 1, n, az0: rng() * Math.PI, lean: 0.06,
-    });
+    fan(n, { cx: 0, cy: 0, cz: 0, w, h: 1, lean: 0.06, az0: rng() * Math.PI });
   }
   const geo = toGeometry(out);
 

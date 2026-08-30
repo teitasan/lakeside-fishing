@@ -13,7 +13,7 @@
      - 先端が上を向くか垂れるか（gravity）
    で決まるので、樹種の差はこの 3 つに集約している。
    =========================================================== */
-import { TAU, clamp01, lerp, lodForList } from './util.js';
+import { TAU, clamp01, lerp, lodForList } from './util.js?v=20260830-forest7';
 
 /* ---------------- 小さなベクトル演算 ---------------- */
 const v = (x = 0, y = 0, z = 0) => ({ x, y, z });

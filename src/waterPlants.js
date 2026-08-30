@@ -15,9 +15,9 @@
    穂とクロモの輪生葉だけは形が細かすぎるのでカード + テクスチャ。
    =========================================================== */
 import * as THREE from 'three';
-import { LodInstances, tintAt } from './lodInstances.js?v=20260830-forest6';
-import { makeRng, TAU, clamp01, lerp } from './util.js';
-import { applyPatches, lodDitherFade } from './materialPatch.js?v=20260830-forest6';
+import { LodInstances, tintAt } from './lodInstances.js?v=20260830-forest7';
+import { makeRng, TAU, clamp01, lerp, spreadOrder } from './util.js?v=20260830-forest7';
+import { applyPatches, lodDitherFade } from './materialPatch.js?v=20260830-forest7';
 
 /**
  * 抽水植物（ヨシ・マコモ）の LOD しきい値。
@@ -390,12 +390,20 @@ export function planFor(kind, rng) {
 export function emitPlant(plan, lod) {
   const out = newOut();
   const h = plan.kind === 'reed' ? 1.0 : 0.96;
-  cardFan(out, {
-    cx: 0, cy: 0, cz: 0, h,
-    w: h * BLADE_ASPECT[plan.kind],
-    n: CARDS_PER_LOD[Math.min(lod, CARDS_PER_LOD.length - 1)],
-    az0: plan.az, lean: plan.lean,
-  });
+  const nMax = CARDS_PER_LOD[0];
+  const n = CARDS_PER_LOD[Math.min(lod, CARDS_PER_LOD.length - 1)];
+  /* 段ごとに az0 + (i/n)·π と割り直すと、3 枚 → 2 枚で «全部の» カードが
+     別の向きになって、近づいた瞬間に株の形が変わって見える。
+     向きは最大枚数ぶんを先に決め、段はその «先頭何枚» を取る
+     （少ないほうの向きが多いほうの部分集合になる）。
+     3 枚のときの並びは 0,1,2 のままなので、近景の見た目は変わらない */
+  for (const k of spreadOrder(nMax).slice(0, n)) {
+    cardFan(out, {
+      cx: 0, cy: 0, cz: 0, h,
+      w: h * BLADE_ASPECT[plan.kind],
+      n: 1, az0: plan.az + (k / nMax) * Math.PI, lean: plan.lean,
+    });
+  }
   return { card: toGeometry(out) };
 }
 

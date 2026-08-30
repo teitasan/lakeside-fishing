@@ -9,6 +9,7 @@
  */
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
+import { spreadOrder } from '../src/util.js';
 
 const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 const src = read('src/undergrowth.js');
@@ -65,5 +66,39 @@ assert.match(terrain, /this\.undergrowth\?\.update\(dt, cameraPos\)/,
 // 砂浜と崖には生えない
 assert.match(terrain, /if \(h < 0\.9 \|\| this\.slopeAt\(x, z\) > 0\.9\) continue;/,
   '砂浜・崖を除外していない');
+
+/* 段が変わったときにカードの «向き» が変わらないこと。
+   az0 + (i/n)·π と割り直すと 5 枚 → 3 枚で全部の向きが変わって、
+   ディザで混ぜても «形が変わった» のが分かる。これが
+   「近づいたら急に見た目が変わる」の正体だった。 */
+{
+  for (const n of [2, 3, 4, 5, 8]) {
+    const o = spreadOrder(n);
+    assert.strictEqual(o.length, n, `spreadOrder(${n}) の長さ`);
+    assert.strictEqual(new Set(o).size, n, `spreadOrder(${n}) に重複がある`);
+    assert.ok(o.every((k) => k >= 0 && k < n), `spreadOrder(${n}) が範囲外`);
+    // 先頭から取っても散ること：先頭 2 枚が輪の上で 1 歩隣どうしにならない
+    if (n >= 4) {
+      const d = Math.min(Math.abs(o[0] - o[1]), n - Math.abs(o[0] - o[1]));
+      assert.ok(d >= Math.floor(n / 3), `spreadOrder(${n}) の先頭 2 枚が寄っている`);
+    }
+    // 少ない段の向きが、多い段の «部分集合» になっていること
+    for (let take = 1; take < n; take++) {
+      const few = new Set(o.slice(0, take));
+      assert.ok([...few].every((k) => o.includes(k)), '部分集合になっていない');
+    }
+  }
+  // 3 枚のときは 0,1,2 のまま＝近景の見た目を変えずに導入できる
+  assert.deepStrictEqual(spreadOrder(3), [0, 1, 2]);
+}
+assert.match(src, /spreadOrder\(nMax\)/, '段ごとに向きを割り直してはいけない');
+assert.doesNotMatch(src, /n: Math\.max\(1, n - s\), az0: rng\(\)/,
+  '旧実装（段ごとに n で割り直す）が残っている');
+// 水草も同じ作りなので同じ罠を踏む
+{
+  const wp = read('src/waterPlants.js');
+  assert.match(wp, /spreadOrder\(nMax\)\.slice\(0, n\)/,
+    '水草も段ごとに向きを割り直さないこと');
+}
 
 console.log('undergrowth-test: ok');

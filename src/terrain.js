@@ -2,18 +2,18 @@
    地形・湖底・岸辺の装飾・桟橋
    =========================================================== */
 import * as THREE from 'three';
-import { CAUSTICS_GLSL } from './shaders.js?v=20260830-forest6';
+import { CAUSTICS_GLSL } from './shaders.js?v=20260830-forest7';
 import { waveGLSL } from './waveField.js?v=20260828-lakescale1';
-import { UnderwaterPropScatter, addUnderwaterCaustics, patchUwMaterial } from './underwaterProps.js?v=20260830-forest6';
-import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260830-forest6';
-import { Undergrowth, UNDER_KINDS } from './undergrowth.js?v=20260830-forest6';
-import { RockSet, makeSingleRock } from './rocks.js?v=20260830-forest6';
-import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js';
-import { buildRadialGrid, DETAIL_BY_QUALITY } from './terrainMesh.js?v=20260830-forest6';
+import { UnderwaterPropScatter, addUnderwaterCaustics, patchUwMaterial } from './underwaterProps.js?v=20260830-forest7';
+import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260830-forest7';
+import { Undergrowth, UNDER_KINDS } from './undergrowth.js?v=20260830-forest7';
+import { RockSet, makeSingleRock } from './rocks.js?v=20260830-forest7';
+import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js?v=20260830-forest7';
+import { buildRadialGrid, DETAIL_BY_QUALITY } from './terrainMesh.js?v=20260830-forest7';
 import { makeTileableHeightField, makeTileablePebbleField, bakeLandDetailMaps }
-  from './tileableNoise.js?v=20260830-forest6';
-import { TreeSet, VARIANTS as TREE_VARIANTS } from './trees.js?v=20260830-forest6';
-import { SPECIES_IDS } from './treeSkeleton.js?v=20260830-forest6';
+  from './tileableNoise.js?v=20260830-forest7';
+import { TreeSet, VARIANTS as TREE_VARIANTS } from './trees.js?v=20260830-forest7';
+import { SPECIES_IDS } from './treeSkeleton.js?v=20260830-forest7';
 import { WORLD_SIZE, WATER_REGION, MAX_DEPTH, resolveLake } from './lakefield.js';
 
 export { WORLD_SIZE, WATER_REGION, MAX_DEPTH };

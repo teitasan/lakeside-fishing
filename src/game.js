@@ -3,7 +3,7 @@
    =========================================================== */
 import * as THREE from 'three';
 import { Environment } from './sky.js?v=20260828-uwgfx18';
-import { Terrain, WATER_REGION } from './terrain.js?v=20260830-forest6';
+import { Terrain, WATER_REGION } from './terrain.js?v=20260830-forest7';
 import { resolveLake } from './lakefield.js';
 import { Water } from './water.js?v=20260828-snellwin2';
 import { FishSchool } from './fish.js?v=20260827-lkwgfx';
@@ -22,7 +22,7 @@ import {
 } from './data.js';
 import {
   clamp, clamp01, lerp, damp, smoothstep, rand, pick, weightedPick, TAU, timeBand, fmt1,
-} from './util.js';
+} from './util.js?v=20260830-forest7';
 import { iconHtml, iconLabel } from './icons.js';
 import {
   t, joinList, gearName, terrainName, weatherName, achievementName,

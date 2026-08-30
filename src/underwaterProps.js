@@ -2,8 +2,8 @@
    水中プロップ散布：決定論的 InstancedMesh + GPU 揺れ / 距離間引き / コースティクス
    =========================================================== */
 import * as THREE from 'three';
-import { CAUSTICS_GLSL } from './shaders.js?v=20260830-forest6';
-import { makeRng, clamp01, smoothstep, TAU } from './util.js';
+import { CAUSTICS_GLSL } from './shaders.js?v=20260830-forest7';
+import { makeRng, clamp01, smoothstep, TAU } from './util.js?v=20260830-forest7';
 import { fitWeedScale, placeUpToTarget } from './underwaterScatterMath.js?v=20260827-lkwgfx';
 
 const DENSITY = { low: 0.25, mid: 0.6, high: 1.0 };

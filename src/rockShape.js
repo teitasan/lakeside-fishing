@@ -9,7 +9,7 @@
 
    出力は素の配列なので Node の回帰テストから直接呼べる。
    =========================================================== */
-import { clamp01, lerp, smoothstep } from './util.js';
+import { clamp01, lerp, smoothstep } from './util.js?v=20260830-forest7';
 
 /* ---------------- 3D 勾配ノイズ ---------------- */
 

@@ -104,8 +104,16 @@ assert.match(wp, /side: THREE\.FrontSide, alphaTest: 0\.26/, '葉群カードは
 /* LOD をまたいでも同じ株のまま：設計図を 1 回引いて 2 段を起こす */
 assert.match(wp, /const plan = planFor\(name, makeRng\(.*\);\s*\n\s*for \(let lod = 0; lod < tiers; lod\+\+\) \{/,
   'every tier must be emitted from one plan so the plant does not change shape');
-assert.match(wp, /n: CARDS_PER_LOD\[Math\.min\(lod, CARDS_PER_LOD\.length - 1\)\],/,
-  '段で変わるのはカード枚数だけ。大きさや向きは設計図のまま');
+assert.match(wp, /const n = CARDS_PER_LOD\[Math\.min\(lod, CARDS_PER_LOD\.length - 1\)\];/,
+  '段で変わるのはカード枚数だけ。大きさは設計図のまま');
+/* 枚数が変わっても «向き» は変わらないこと。
+   az0 + (i/n)·π と割り直すと 3 枚 → 2 枚で全部の向きが変わり、
+   近づいた瞬間に株の形が変わって見える。最大枚数ぶんの向きを先に決めて、
+   段はその先頭何枚かを取る（少ないほうが多いほうの部分集合になる） */
+assert.match(wp, /spreadOrder\(nMax\)\.slice\(0, n\)/,
+  '段ごとにカードの向きを割り直してはいけない');
+assert.match(wp, /az0: plan\.az \+ \(k \/ nMax\) \* Math\.PI/,
+  '向きは最大枚数で割ること（段の枚数で割ると段ごとにずれる）');
 
 /* クロモは水中プロップと同じマテリアル＝流れの揺れ・caustics・距離間引き */
 assert.match(uwp, /export function patchUwMaterial\(/, 'patchUwMaterial が公開されていること');
@@ -187,6 +195,6 @@ assert.match(li, /if \(l !== it\.lod \|\| l2 !== it\.lod2\) \{ it\.lod = l; it\.
 assert.match(li, /if \(!list\) continue;\s*\/\/ 最終段より遠い＝描かない/,
   '最終段より遠い株は描かない');
 // tintAt は純粋な数学なので THREE 非依存の util.js に置く（テストから呼べる）
-assert.match(li, /export \{ tintAt \} from '\.\/util\.js';/, '株ごとの色ムラ');
+assert.match(li, /export \{ tintAt \} from '\.\/util\.js/, '株ごとの色ムラ');
 
 console.log('water-plant-test: ok');

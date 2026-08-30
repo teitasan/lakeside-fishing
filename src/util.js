@@ -208,3 +208,34 @@ export function tintAt(x, z, valSpan = 0.30, warmSpan = 0.16) {
   const k = 1 / (1 + Math.abs(warm));
   return { r: val * (1 + warm) * k, g: val * k, b: val * (1 - warm) * k };
 }
+
+/**
+ * 0..n-1 を «先頭から取っても散る» 順に並べる。
+ *
+ * 葉群カードを段ごとに az0 + (i/n)·π と割り直すと、3 枚 → 2 枚で «全部の»
+ * カードが別の向きになる。ディザで混ぜても株の形が変わったことは分かるので、
+ * 近づいた瞬間に草がパッと変わって見える。
+ * 向きは最大枚数ぶんを先に決めておいて、段はその «先頭何枚» を取れば、
+ * 少ないほうの向きが多いほうの部分集合になって、そこは動かない。
+ *
+ * @param {number} n
+ * @returns {number[]}
+ */
+export function spreadOrder(n) {
+  const out = [0];
+  while (out.length < n) {
+    let best = -1;
+    let bestD = -1;
+    for (let k = 1; k < n; k++) {
+      if (out.includes(k)) continue;
+      let d = Infinity;
+      for (const o of out) {
+        const raw = Math.abs(k - o);
+        d = Math.min(d, Math.min(raw, n - raw));   // 180° を n 等分した輪の上での距離
+      }
+      if (d > bestD) { bestD = d; best = k; }
+    }
+    out.push(best);
+  }
+  return out;
+}
