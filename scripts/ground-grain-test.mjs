@@ -130,5 +130,16 @@ assert.ok(
   '距離で切るより先に fbm を回している',
 );
 
+/* 視差の «効き終わり» でプレイヤーを中心とした円が出ないこと。
+   遮蔽の式を step で切り替えると 15m のところに輪がはっきり出る。
+   重み（距離フェード）で連続に混ぜ、平均も揃えておく必要がある */
+assert.doesNotMatch(terrain, /step\(0\.001, gPomSink\)/,
+  '遮蔽を step で切り替えている（フェード端に円が出る）');
+assert.match(terrain, /1\.21 - gPomSink \* 0\.52, gPomW\);/,
+  '遮蔽を視差の効き具合で連続に混ぜていない');
+assert.match(terrain, /gPomW = pf;/, '視差の効き具合を持っていない');
+assert.match(terrain, /gPomSink = r\.z;/,
+  '沈み込みに距離フェードを掛けてしまっている（二重に掛かる）');
+
 console.log('ground-grain-test: ok');
 console.log(`  粒の細かさ 砂利 ${cg.toFixed(3)} / 砂 ${cs.toFixed(3)}`);

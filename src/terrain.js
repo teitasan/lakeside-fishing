@@ -939,6 +939,10 @@ export class Terrain {
              ずれはアルベドにも同じだけ掛けないと «形だけ動いて絵が動かない» */
           vec2 gPomOff = vec2(0.0);
           float gPomSink = 0.0;
+          /* 視差の効き具合（距離フェード）。遮蔽の混ぜ方に使う。
+             これを使わずに «沈んだかどうか» で切り替えると、
+             フェードの終わりにプレイヤーを中心とした円が見える */
+          float gPomW = 0.0;
           float gGravelMix = 0.0;
 
           /**
@@ -992,6 +996,7 @@ export class Terrain {
             gGravelMix = -1.0;          // まだ決めていない印
             gPomOff = vec2(0.0);
             gPomSink = 0.0;
+            gPomW = 0.0;
             if (uPom.z < 0.5) return;
             float pf = 1.0 - smoothstep(uPomFade.x, uPomFade.y,
               length(wp - cameraPosition));
@@ -1005,7 +1010,8 @@ export class Terrain {
               ? pomTrace(uGroundGravel, wp.xz, uGroundScale.x, V, uPom.x * pf, steps)
               : pomTrace(uGroundSand, wp.xz, uGroundScale.y, V, uPom.y * pf, steps);
             gPomOff = r.xy;
-            gPomSink = r.z * pf;
+            gPomSink = r.z;
+            gPomW = pf;
           }
 
           void groundDetail(vec3 wp, float bedKind) {
@@ -1118,12 +1124,18 @@ export class Terrain {
             diffuseColor.rgb = shoreDress(diffuseColor.rgb, vBedWorldPos, under);
             /* 粒の遮蔽。石の «あいだ» が締まるので、平らな砂浜が
                «塗った面» に見えなくなる。ここは水中も陸も同じに掛ける。
-               視差が効いている間は «視線がどれだけ沈んだか» を使う。
-               谷ほど深く沈むので、実際の凹凸とずれない。視差の外では
-               高さそのものを代わりに使う */
+               視差が効いている間は «視線がどれだけ沈んだか» を使う
+               （谷ほど深く沈むので実際の凹凸とずれない）。外では高さで代用。
+               2 つの切り替えは «視差の効き具合» で連続に混ぜること。
+               step で切り替えると、フェードが終わる 15m のところに
+               プレイヤーを中心とした円がはっきり出る（実際に出した） */
             groundDetail(vBedWorldPos, vBed);
-            float grainAo = mix(mix(0.80, 1.10, gGround.b), 1.10 - gPomSink * 0.52,
-              step(0.001, gPomSink));
+            /* 2 つの式は «平均» も揃えておく。高さ由来は平均 0.95、
+               沈み込み由来を 1.10 - sink*0.52 にすると平均 0.84 で、
+               連続に混ぜても «手前だけ暗い暈» として残る。
+               1.21 起点にすると両方 0.95 になり、差は «濃淡の強さ» だけ */
+            float grainAo = mix(mix(0.80, 1.10, gGround.b),
+              1.21 - gPomSink * 0.52, gPomW);
             diffuseColor.rgb *= mix(1.0, grainAo * gGravelTint, gGroundW.x);
           }`
         )
@@ -1174,7 +1186,7 @@ export class Terrain {
           totalEmissiveRadiance += causticLight(vBedWorldPos, normal);`
         );
     };
-    mat.customProgramCacheKey = () => 'terrain-bed-tex-v16-pom';
+    mat.customProgramCacheKey = () => 'terrain-bed-tex-v17-pom-ring';
   }
 
   /** 湖底テクスチャが使えない環境でも、頂点色の湖底へコースティクスを載せる。 */
