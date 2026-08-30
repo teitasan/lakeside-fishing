@@ -277,10 +277,25 @@ assert.match(gameSrc, /renderer: this\.renderer,/,
 const lodSrc = read('src/lodInstances.js');
 assert.match(lodSrc, /_demand\(\)\s*\{/, 'rebuild は書き込む前に必要数を数えること');
 assert.match(lodSrc, /_grow\(im, need\)/, '足りない段は枠を張り替えること');
-assert.ok(
-  lodSrc.indexOf('const demand = this._demand();') < lodSrc.indexOf('im.setMatrixAt(n, m);'),
-  '必要数を数えるのは書き込みより前でなければ意味がない',
-);
+{
+  // rebuild() の中だけを見る（buildFixed も setMatrixAt を持つので全文だと誤検出する）
+  const rb = lodSrc.slice(lodSrc.indexOf('  rebuild() {'));
+  assert.ok(
+    rb.indexOf('const demand = this._demand();') < rb.indexOf('im.setMatrixAt(n, m);'),
+    '必要数を数えるのは書き込みより前でなければ意味がない',
+  );
+}
+/* 絶対に近づけない株は静的なバケットへ。毎フレームの距離判定にも
+   行列の作り直しにも乗らないので、遠景の本数を増やしても費用が増えない */
+assert.match(lodSrc, /addFixed\(x, y, z, scale, key, lod/, '静的な株を足す口');
+assert.match(lodSrc, /buildFixed\(\)/, '静的な株を 1 回だけ書き込む');
+assert.match(lodSrc, /StaticDrawUsage/, '動かないものを DynamicDrawUsage で送らない');
+{
+  // update() は静的なぶんを触らないこと（触ったら意味がない）
+  const up = lodSrc.slice(lodSrc.indexOf('  update(dt, cameraPos) {'),
+    lodSrc.indexOf('  /** 各段が今回いくつ抱えるか'));
+  assert.doesNotMatch(up, /this\.fixed/, 'update が静的な株を触っている');
+}
 assert.match(lodSrc, /GROW_LIMIT = \d+/, '青天井に確保しないよう上限を持つこと');
 
 /* 樹皮は «全長を貫く縦縞» を作らないこと。円柱に巻くと縞が陰影に見えて、

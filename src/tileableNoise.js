@@ -2,7 +2,7 @@
    タイル可能な多スケールノイズ（CPU 起動時テクスチャ生成用）
    period 周期のトーラス上で勾配ノイズ + fBm を評価する。
    =========================================================== */
-import { makeRng, lerp, TAU, clamp01, makeNoise2D } from './util.js?v=20260830-forest7';
+import { makeRng, lerp, TAU, clamp01, makeNoise2D } from './util.js?v=20260830-zone4';
 
 function positiveInt(value, label) {
   if (!Number.isInteger(value) || value < 1) throw new RangeError(`${label} must be a positive integer`);

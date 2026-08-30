@@ -3,7 +3,7 @@
    ポーズ画面のボタン、または F3 でトグル
    =========================================================== */
 import * as THREE from 'three';
-import { TAU, clamp01, fmt1, fmt2, fmtClock } from './util.js?v=20260830-forest7';
+import { TAU, clamp01, fmt1, fmt2, fmtClock } from './util.js?v=20260830-zone4';
 import { iconHtml } from './icons.js';
 
 /* 音の種類ごとの色分け */

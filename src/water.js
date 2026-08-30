@@ -3,9 +3,9 @@
    CPU と GPU で同一の波関数を使い、ウキが正しく浮くようにする
    =========================================================== */
 import * as THREE from 'three';
-import { COMMON_GLSL } from './shaders.js?v=20260830-forest7';
+import { COMMON_GLSL } from './shaders.js?v=20260830-zone4';
 import { WATER_REGION } from './lakefield.js';
-import { rand, TAU, clamp, smoothstep } from './util.js?v=20260830-forest7';
+import { rand, TAU, clamp, smoothstep } from './util.js?v=20260830-zone4';
 import { makeTileableHeightField } from './tileableNoise.js?v=20260827-orgnoise4';
 import { reflectCameraMatrixY } from './reflectionMath.js?v=20260827-lkwgfx';
 import {

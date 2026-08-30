@@ -15,10 +15,10 @@
    半透明も細い枝も無いので、超低ポリのメッシュのままで十分。
    =========================================================== */
 import * as THREE from 'three';
-import { makeRockShape, makeRockLods, ROCK_KINDS } from './rockShape.js?v=20260830-forest7';
-import { LodInstances, tintAt } from './lodInstances.js?v=20260830-forest7';
-import { applyPatches, lodDitherFade } from './materialPatch.js?v=20260830-forest7';
-import { makeRng, TAU, lerp } from './util.js?v=20260830-forest7';
+import { makeRockShape, makeRockLods, ROCK_KINDS } from './rockShape.js?v=20260830-zone4';
+import { LodInstances, tintAt } from './lodInstances.js?v=20260830-zone4';
+import { applyPatches, lodDitherFade } from './materialPatch.js?v=20260830-zone4';
+import { makeRng, TAU, lerp } from './util.js?v=20260830-zone4';
 
 /**
  * 大きさの階層。しきい値と、その階層で使う分割数（三角形数 = 20 * 4^detail）。

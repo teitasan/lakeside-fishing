@@ -7,7 +7,7 @@
      - 深い淵が土手を削らない（岸際でフェードアウト）
      - キャストで届く範囲に、全魚種の生息層が必ず存在する
    =========================================================== */
-import { makeNoise2D, makeRng, clamp, clamp01, smoothstep, TAU } from './util.js?v=20260830-forest7';
+import { makeNoise2D, makeRng, clamp, clamp01, smoothstep, TAU } from './util.js?v=20260830-zone4';
 import { REAL_FISH, depthFit, RODS } from './data.js';
 
 export const WORLD_SIZE = 1000;    // 地形メッシュの一辺

@@ -1,7 +1,7 @@
 /* ===========================================================
    エントリポイント
    =========================================================== */
-import { Game, AUTOSTART_KEY } from './game.js?v=20260830-forest7';
+import { Game, AUTOSTART_KEY } from './game.js?v=20260830-zone4';
 import { hasSave } from './save.js';
 import { iconHtml } from './icons.js';
 import { t, setLang } from './i18n.js';

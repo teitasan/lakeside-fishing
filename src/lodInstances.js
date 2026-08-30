@@ -9,8 +9,8 @@
    «高さ 1 に正規化したもの» を共有する（scale がそのまま実寸になる）。
    =========================================================== */
 import * as THREE from 'three';
-import { lodForList } from './util.js?v=20260830-forest7';
-export { tintAt } from './util.js?v=20260830-forest7';
+import { lodForList } from './util.js?v=20260830-zone4';
+export { tintAt } from './util.js?v=20260830-zone4';
 
 /* 枠を自動で広げるときの上限（登録時の何倍まで）。
    青天井にするとバグで際限なく確保してしまう */
@@ -34,8 +34,13 @@ export class LodInstances {
        0 なら従来どおり瞬時に切り替わる */
     this.fadeBand = fadeBand;
     this.items = [];
+    /* 動かない株。カメラがどう動いても段が変わらないと «配置のときに»
+       分かっているものは、こちらへ入れて 1 回だけ書く。以後 update も
+       rebuild も触らないので、何万本あっても毎フレームの費用は増えない */
+    this.fixed = [];
     this.meshes = [];
     this.buckets = new Map();   // `${key}|${lod}` -> InstancedMesh[]
+    this.fixedBuckets = new Map();
     this._dirty = true;
     this._timer = 0;
   }
@@ -74,13 +79,87 @@ export class LodInstances {
 
   /** ある段のパーツを差し替える（遠景インポスターを後から焼いたときなど） */
   replace(key, lod, parts) {
-    const list = this.buckets.get(`${key}|${lod}`);
-    if (!list) return;
-    for (let i = 0; i < list.length && i < parts.length; i++) {
-      if (parts[i].geo) list[i].geometry = parts[i].geo;
-      if (parts[i].mat) list[i].material = parts[i].mat;
+    for (const map of [this.buckets, this.fixedBuckets]) {
+      const list = map.get(`${key}|${lod}`);
+      if (!list) continue;
+      for (let i = 0; i < list.length && i < parts.length; i++) {
+        if (parts[i].geo) list[i].geometry = parts[i].geo;
+        if (parts[i].mat) list[i].material = parts[i].mat;
+      }
     }
     this._dirty = true;
+  }
+
+  /**
+   * 段が決まっている株を足す（プレイヤーが絶対に近づけないもの）。
+   *
+   * 動く株と違って毎フレームの距離判定も行列の作り直しも要らない。
+   * 配置がぜんぶ終わったら buildFixed() を 1 回呼ぶ。
+   */
+  addFixed(x, y, z, scale, key, lod, ry = 0, tint = null) {
+    const s = typeof scale === 'number' ? { x: scale, y: scale, z: scale } : scale;
+    this.fixed.push({
+      x, y, z, sx: s.x, sy: s.y, sz: s.z, key, lod, ry,
+      cr: tint ? tint.r : 1, cg: tint ? tint.g : 1, cb: tint ? tint.b : 1,
+      tinted: !!tint,
+    });
+  }
+
+  /** addFixed で溜めた株を、段ごとにぴったりの枠へ 1 回だけ書き込む */
+  buildFixed() {
+    if (!this.fixed.length) return 0;
+    const need = new Map();
+    for (const it of this.fixed) {
+      const k = `${it.key}|${it.lod}`;
+      need.set(k, (need.get(k) || 0) + 1);
+    }
+    for (const [k, n] of need) {
+      const src = this.buckets.get(k);
+      if (!src) continue;                  // その段を持たない＝描かない
+      const list = [];
+      for (const im of src) {
+        const next = new THREE.InstancedMesh(im.geometry, im.material, n);
+        next.count = 0;
+        next.castShadow = im.castShadow;
+        next.receiveShadow = im.receiveShadow;
+        next.frustumCulled = false;
+        // 動かないので毎フレーム送り直さない
+        next.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+        this.scene.add(next);
+        this.meshes.push(next);
+        list.push(next);
+      }
+      this.fixedBuckets.set(k, list);
+    }
+
+    const m = new THREE.Matrix4();
+    const p = new THREE.Vector3();
+    const q = new THREE.Quaternion();
+    const sc = new THREE.Vector3();
+    const up = new THREE.Vector3(0, 1, 0);
+    const col = new THREE.Color();
+    const counts = new Map();
+    for (const it of this.fixed) {
+      const list = this.fixedBuckets.get(`${it.key}|${it.lod}`);
+      if (!list) continue;
+      p.set(it.x, it.y, it.z);
+      q.setFromAxisAngle(up, it.ry);
+      sc.set(it.sx, it.sy, it.sz);
+      m.compose(p, q, sc);
+      col.setRGB(it.cr, it.cg, it.cb);
+      for (const im of list) {
+        const n = counts.get(im) || 0;
+        im.setMatrixAt(n, m);
+        if (it.tinted) im.setColorAt(n, col);
+        counts.set(im, n + 1);
+      }
+    }
+    for (const [im, n] of counts) {
+      im.count = n;
+      im.instanceMatrix.needsUpdate = true;
+      if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    }
+    return this.fixed.length;
   }
 
   /**
@@ -238,6 +317,7 @@ export class LodInstances {
   counts() {
     const out = new Array(this.lodDist.length + 1).fill(0);
     for (const it of this.items) if (it.lod >= 0) out[it.lod]++;
+    for (const it of this.fixed) if (it.lod >= 0) out[it.lod]++;
     return out;
   }
 
@@ -248,7 +328,9 @@ export class LodInstances {
     }
     this.meshes.length = 0;
     this.buckets.clear();
+    this.fixedBuckets.clear();
     this.items.length = 0;
+    this.fixed.length = 0;
   }
 }
 

@@ -2,21 +2,35 @@
    地形・湖底・岸辺の装飾・桟橋
    =========================================================== */
 import * as THREE from 'three';
-import { CAUSTICS_GLSL } from './shaders.js?v=20260830-forest7';
+import { CAUSTICS_GLSL } from './shaders.js?v=20260830-zone4';
 import { waveGLSL } from './waveField.js?v=20260828-lakescale1';
-import { UnderwaterPropScatter, addUnderwaterCaustics, patchUwMaterial } from './underwaterProps.js?v=20260830-forest7';
-import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260830-forest7';
-import { Undergrowth, UNDER_KINDS } from './undergrowth.js?v=20260830-forest7';
-import { RockSet, makeSingleRock } from './rocks.js?v=20260830-forest7';
-import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js?v=20260830-forest7';
-import { buildRadialGrid, DETAIL_BY_QUALITY } from './terrainMesh.js?v=20260830-forest7';
+import { UnderwaterPropScatter, addUnderwaterCaustics, patchUwMaterial } from './underwaterProps.js?v=20260830-zone4';
+import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260830-zone4';
+import { Undergrowth, UNDER_KINDS } from './undergrowth.js?v=20260830-zone4';
+import { RockSet, makeSingleRock } from './rocks.js?v=20260830-zone4';
+import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js?v=20260830-zone4';
+import { buildRadialGrid, DETAIL_BY_QUALITY } from './terrainMesh.js?v=20260830-zone4';
 import { makeTileableHeightField, makeTileablePebbleField, bakeLandDetailMaps }
-  from './tileableNoise.js?v=20260830-forest7';
-import { TreeSet, VARIANTS as TREE_VARIANTS } from './trees.js?v=20260830-forest7';
-import { SPECIES_IDS } from './treeSkeleton.js?v=20260830-forest7';
+  from './tileableNoise.js?v=20260830-zone4';
+import { TreeSet, VARIANTS as TREE_VARIANTS, LOD_DIST as TREE_LOD_DIST, LOD_FADE_BAND as TREE_FADE_BAND }
+  from './trees.js?v=20260830-zone4';
+import { SPECIES_IDS } from './treeSkeleton.js?v=20260830-zone4';
 import { WORLD_SIZE, WATER_REGION, MAX_DEPTH, resolveLake } from './lakefield.js';
 
 export { WORLD_SIZE, WATER_REGION, MAX_DEPTH };
+
+/**
+ * 歩ける範囲（汀線から内陸へ何 m まで）。
+ *
+ * もとは「原点から 460m」で、汀線から 343m・61.3ha を歩けた。ところが
+ * 飾ってあるのは下草が +110m、岩が +12m までで、それより内陸は木が
+ * 立っているだけの裸の地面だった。61.3ha を全部飾るより、歩ける範囲を
+ * «湖のまわり» に絞って、そこを完成させるほうが釣りゲームとして正しい。
+ *
+ * 絞ると副産物として «絶対に近づけない木» が確定するので、それを静的な
+ * バケットへ回して遠景の本数を増やせる（TreeSet.addFar）。
+ */
+export const WALK_INLAND = 72;
 
 const DOCK_HALF_W = 1.62;   // 床の半幅（見た目 3.4m のうち内側）
 const OBS_CELL = 8;         // 障害物グリッドのセルサイズ(m)
@@ -1477,12 +1491,18 @@ export class Terrain {
     const q = this.quality;
     /* 遠景がインポスター 4 ポリなので、本数は近景の面積だけで決まる。
        900 本だと 20m 間隔の疎林で「植えた公園」に見えるため増やす */
-    /* 撒ける陸は 86ha。実際の温帯林は 300〜1000 本/ha で、70 本/ha だと
-       木の間隔が 12m あって «疎林» にしか見えない（山の斜面が透けて見える）。
-       9000 本（70 本/ha）で測ったら木ぜんぶで GPU 3.8ms しか使っていなかった。
-       遠景はほぼインポスターなので、本数はまだ上げられる。
-       20000 本（林の中に立って）で木ぜんぶ 10.4ms、下草 42500 株は計測誤差 */
-    const treeTarget = q === 'low' ? 8000 : q === 'high' ? 28000 : 16000;
+    /* 本数は «歩ける帯の中» と «その外» で別に決める。
+       一律に増やすと近景の密度まで上がって、林の中に立ったときの
+       近景・中景がそのまま倍になる（60000 本を一律で撒いたら林内で
+       15.2M 三角形・42ms になった）。移動制限は近景を軽くしない。
+
+       外側はほぼインポスターで、27000 本を湖越しに全部映しても
+       GPU 0.8ms・330k 三角形・ドローコール 10 だった。しかも歩ける範囲を
+       絞ったことで «絶対に近づけない» と配置時に確定でき、毎フレームの
+       距離判定からも外せる（TreeSet.addFar）。だから外は好きなだけ増やせる。 */
+    const treeNear = q === 'low' ? 3000 : q === 'high' ? 8000 : 5000;
+    const treeFar = q === 'low' ? 14000 : q === 'high' ? 52000 : 29000;
+    const treeTarget = treeNear + treeFar;
     /* 岩は大きさで作りを分ける。
          大岩 水面をまたぐのでシルエットが景観に効く。3D + LOD
          中石 低ポリ 3D を InstancedMesh で撒く
@@ -1516,7 +1536,7 @@ export class Terrain {
       renderer: this._renderer,
       seed: this.seed ^ 0x7ee5,
       addWindSway,
-      capacity: Math.ceil(treeTarget / SPECIES_IDS.length / TREE_VARIANTS) + 40,
+      capacity: Math.ceil(treeNear / SPECIES_IDS.length / TREE_VARIANTS) + 60,
     });
 
     // 岩・葦の配置でも使い回すスクラッチ
@@ -1529,8 +1549,35 @@ export class Terrain {
        以前は標高 66m で打ち切っていて、陸の 66% が丸ごと裸だった。
        半径も 370m までしか撒いておらず、その外の 58ha が空だった。 */
     const TREE_R_MAX = 715;   // 地形の外周（720m）まで
-    let ti = 0, tries = 0;
-    while (ti < treeTarget && tries < treeTarget * 24) {
+
+    /* 歩ける帯からの距離を見積もる。
+       帯は «汀線 −10m 〜 +WALK_INLAND» の環なので、木から一番近い帯の点は
+       だいたい同じ角度の外縁にある。ただし汀線は 116〜153m と波打っている
+       ので、前後 40° のうち «一番外へ張り出した汀線» を使って距離を短めに
+       見積もる。短めに出す＝静的にする木を減らす方向なので、間違って
+       «近づけるのに遠景のまま» になることはない。 */
+    const SHORE_N = 360;
+    const shoreTab = new Float32Array(SHORE_N);
+    for (let i = 0; i < SHORE_N; i++) {
+      const a = (i / SHORE_N) * TAU;
+      shoreTab[i] = this.shoreRadius(Math.cos(a) * 150, Math.sin(a) * 150);
+    }
+    const WIN = 40;                       // ±40 サンプル ＝ ±40°
+    const shoreMaxNear = (ang) => {
+      const c = Math.round((((ang % TAU) + TAU) % TAU) / TAU * SHORE_N);
+      let m = 0;
+      for (let k = -WIN; k <= WIN; k++) {
+        const v = shoreTab[((c + k) % SHORE_N + SHORE_N) % SHORE_N];
+        if (v > m) m = v;
+      }
+      return m;
+    };
+    /* 最終段のしきい値より遠ければ、どう歩いても遠景のまま。
+       クロスフェードの帯ぶんだけ余裕を足す */
+    const FAR_GATE = TREE_LOD_DIST[TREE_LOD_DIST.length - 1] + TREE_FADE_BAND + 12;
+
+    let near = 0, far = 0, tries = 0;
+    while ((near < treeNear || far < treeFar) && tries < treeTarget * 24) {
       tries++;
       const ang = rng() * TAU;
       const rr = this.shoreRadius(Math.cos(ang) * 150, Math.sin(ang) * 150);
@@ -1561,16 +1608,26 @@ export class Terrain {
         ? lerp(16, 30, rng()) * lerp(1, 0.58, alt)
         : lerp(11, 22, rng()) * lerp(1, 0.62, alt);
 
-      this.treeSet.add(x, h - 0.15, z, height, kind, va, rng() * TAU);
-      /* 幹の当たり判定。歩ける範囲の外はグリッドを太らせるだけなので入れない
-         （半径は樹高から逆算する。ジオメトリは樹高 1 に正規化済み） */
-      if (dist < 260) {
+      const toBand = dist - shoreMaxNear(ang) - WALK_INLAND;
+      if (toBand > FAR_GATE) {
+        // 絶対に近づけない＝ずっと遠景。毎フレームの計算から外す
+        if (far >= treeFar) continue;
+        this.treeSet.addFar(x, h - 0.15, z, height, kind, va, rng() * TAU);
+        far++;
+      } else {
+        if (near >= treeNear) continue;
+        this.treeSet.add(x, h - 0.15, z, height, kind, va, rng() * TAU);
+        /* 幹の当たり判定。歩ける範囲の外はグリッドを太らせるだけなので入れない
+           （半径は樹高から逆算する。ジオメトリは樹高 1 に正規化済み） */
         const trunkR = (this.treeSet.trunkR[kind] || 0.02) * height;
         this.addObstacle(x, z, Math.max(trunkR * 1.15, 0.28), h - 0.15 + height * 0.9);
+        near++;
       }
-      ti++;
     }
-    this.treeCount = ti;
+    this.treeSet.buildFar();
+    this.treeCount = near + far;
+    this.treeNearCount = near;
+    this.treeFarCount = far;
 
     // 水面より上にしか存在しない物（水越しには絶対に写らないので、
     // 水中描画用のシーン取り込みでは省いて負荷を下げる）。
@@ -1617,6 +1674,18 @@ export class Terrain {
       {
         tier: 'pebble', n: ROCK.pebble, inward: 12, outward: 5,
         hMin: -1.1, hMax: 2.2, size: [0.08, 0.26], obstacle: false,
+      },
+      /* 林床の石。これまで岩は汀線 ±26m にしか無く、内陸へ歩くと
+         地面に何も落ちていなかった。歩ける帯（+72m）とその見通しぶんを
+         埋める。水際の «磨かれた丸石» とは違って苔むした転石なので、
+         大きさの幅を広く取る */
+      {
+        tier: 'boulder', n: Math.round(ROCK.boulder * 1.1), inward: -8, outward: 130,
+        hMin: 1.2, hMax: 999, size: [0.9, 3.4], obstacle: true,
+      },
+      {
+        tier: 'cobble', n: Math.round(ROCK.cobble * 1.6), inward: -8, outward: 130,
+        hMin: 1.2, hMax: 999, size: [0.22, 0.9], obstacle: false,
       },
     ];
 
@@ -1794,7 +1863,7 @@ export class Terrain {
       for (let i = 0; i < want[kind] * 6 && placed < want[kind]; i++) {
         const ang = rng() * TAU;
         const rr = this.shoreRadius(Math.cos(ang) * 150, Math.sin(ang) * 150);
-        const dist = rr - 8 + rng() * 118;
+        const dist = rr - 8 + rng() * 138;   // 歩ける +72m ＋ 見通し（描画 48m）ぶん
         const x = Math.cos(ang) * dist, z = Math.sin(ang) * dist;
         const h = this.heightAt(x, z);
         // 砂浜には生えない。崖にも生えない
@@ -1808,6 +1877,29 @@ export class Terrain {
       }
       this.undergrowthCounts[kind] = placed;
     }
+
+    /* 歩ける範囲の境目に藪を植える。
+       見えない壁で止められるより «茂みで進めない» ほうが納得できる。
+       当たり判定を持たせてあるので、実際にはこの藪で止まって、
+       _tryMove の線は保険として後ろに控える形になる */
+    {
+      const want = Math.round(3200 * scale);
+      let placed = 0;
+      for (let i = 0; i < want * 5 && placed < want; i++) {
+        const ang = rng() * TAU;
+        const rr = this.shoreRadius(Math.cos(ang) * 150, Math.sin(ang) * 150);
+        const dist = rr + WALK_INLAND - 5 + rng() * 9;
+        const x = Math.cos(ang) * dist, z = Math.sin(ang) * dist;
+        const h = this.heightAt(x, z);
+        if (h < 0.9 || this.slopeAt(x, z) > 1.2) continue;
+        const height = lerp(1.25, 2.1, Math.pow(rng(), 0.8));
+        this.undergrowth.add('bush', x, h - 0.04, z, height, (rng() * 3) | 0, rng() * TAU);
+        this.addObstacle(x, z, 0.55, h + height * 0.8);
+        placed++;
+      }
+      this.undergrowthCounts.thicket = placed;
+    }
+
     this.overWaterProps.push(...this.undergrowth.meshes);
     this.swayMaterials.push(...this.undergrowth.swayMaterials);
   }

@@ -3,7 +3,7 @@
    =========================================================== */
 import * as THREE from 'three';
 import { Environment } from './sky.js?v=20260828-uwgfx18';
-import { Terrain, WATER_REGION } from './terrain.js?v=20260830-forest7';
+import { Terrain, WATER_REGION, WALK_INLAND } from './terrain.js?v=20260830-zone4';
 import { resolveLake } from './lakefield.js';
 import { Water } from './water.js?v=20260828-snellwin2';
 import { FishSchool } from './fish.js?v=20260827-lkwgfx';
@@ -22,7 +22,7 @@ import {
 } from './data.js';
 import {
   clamp, clamp01, lerp, damp, smoothstep, rand, pick, weightedPick, TAU, timeBand, fmt1,
-} from './util.js?v=20260830-forest7';
+} from './util.js?v=20260830-zone4';
 import { iconHtml, iconLabel } from './icons.js';
 import {
   t, joinList, gearName, terrainName, weatherName, achievementName,
@@ -1689,7 +1689,13 @@ export class Game {
   }
 
   _tryMove(nx, nz) {
-    if (Math.hypot(nx, nz) > 460) return false;
+    /* 歩けるのは湖のまわりの帯だけ。原点から 460m だと汀線から 343m・
+       61.3ha になるが、飾ってあるのは +110m までで、その外は木が立って
+       いるだけの裸の地面だった。帯に絞って «歩けるところは全部完成して
+       いる» ようにする（→ terrain.js WALK_INLAND）。
+       境界には藪を植えてあるので、見えない壁ではなく «抜けられない茂み» */
+    if (!this.debug?.enabled
+      && Math.hypot(nx, nz) > this.terrain.shoreRadius(nx, nz) + WALK_INLAND) return false;
     if (this.terrain.blockedAt(nx, nz, PLAYER_RADIUS)) return false;   // 岩・木・灯篭・小舟
     const dock = this.terrain.onDock(nx, nz);
     if (dock !== null) { this.pos.x = nx; this.pos.z = nz; return true; }

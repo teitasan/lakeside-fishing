@@ -12,13 +12,13 @@
    森全体がチラチラした砂目に見えるため。
    =========================================================== */
 import * as THREE from 'three';
-import { growTree, SPECIES, lodFor, LOD_DIST } from './treeSkeleton.js?v=20260830-forest7';
-import { lodForList } from './util.js?v=20260830-forest7';
-import { boxBlurWrap } from './tileableNoise.js?v=20260830-forest7';
-import { LodInstances, tintAt } from './lodInstances.js?v=20260830-forest7';
-import { makeRng, TAU, lerp, clamp01 } from './util.js?v=20260830-forest7';
+import { growTree, SPECIES, lodFor, LOD_DIST } from './treeSkeleton.js?v=20260830-zone4';
+import { lodForList } from './util.js?v=20260830-zone4';
+import { boxBlurWrap } from './tileableNoise.js?v=20260830-zone4';
+import { LodInstances, tintAt } from './lodInstances.js?v=20260830-zone4';
+import { makeRng, TAU, lerp, clamp01 } from './util.js?v=20260830-zone4';
 import { applyPatches, keepAuthoredNormals, foliageTranslucency, lodDitherFade }
-  from './materialPatch.js?v=20260830-forest7';
+  from './materialPatch.js?v=20260830-zone4';
 
 export { LOD_DIST, lodFor };
 
@@ -704,6 +704,18 @@ export class TreeSet {
        seed が同じならワールドは再現できる */
     this.set.add(x, y, z, height, `${kind}|${variant}`, ry, tintAt(x, z, 0.26, 0.14));
   }
+
+  /**
+   * 歩ける範囲から遠すぎて «絶対に遠景のまま» の木を足す。
+   * 毎フレームの距離判定にも行列の作り直しにも乗らない。
+   */
+  addFar(x, y, z, height, kind, variant, ry) {
+    this.set.addFixed(x, y, z, height, `${kind}|${variant}`,
+      LOD_DIST.length, ry, tintAt(x, z, 0.26, 0.14));
+  }
+
+  /** 配置が終わったら 1 回。addFar したぶんをまとめて書き込む */
+  buildFar() { return this.set.buildFixed(); }
 
   /**
    * まだ焼けていない遠景インポスターを焼いて LOD2 に差し替える。

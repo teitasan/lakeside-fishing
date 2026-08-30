@@ -10,7 +10,7 @@ import {
 import { PROFILES, BODY, profileAt, CRUST_SHAPES, lookOf } from './fish.js';
 import { textureTypeFor, fishTextureImage } from './fishTextures.js';
 import { terrainIconImage } from './terrainIcons.js';
-import { fmtInt, fmt1, fmtWeight, fmtClock, timeBand, timeBandLabel, clamp01, lerp as lerpN, smoothstep } from './util.js?v=20260830-forest7';
+import { fmtInt, fmt1, fmtWeight, fmtClock, timeBand, timeBandLabel, clamp01, lerp as lerpN, smoothstep } from './util.js?v=20260830-zone4';
 import { xpForLevel } from './save.js';
 import { iconHtml, iconLabel, loadIcon, preloadIcons, JUNK_ICONS } from './icons.js';
 import {
