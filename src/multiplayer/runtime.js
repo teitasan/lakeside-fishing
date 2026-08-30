@@ -1,5 +1,6 @@
 import { RemoteFishSchool } from './remoteFish.js?v=20260827-lkwgfx';
 import { MultiplayerFishingSync } from './fishingSync.js';
+import { MultiplayerOthelloSync } from './othelloSync.js';
 import { installFishingSession, isFishingLineState } from '../fishing/session.js';
 import { pickSpecies } from '../fishing/simulation/rules.js';
 import { timeBand } from '../util.js';
@@ -76,7 +77,10 @@ export function installMultiplayerRuntime(Game) {
     mp.onFishHookRejected = (m) => sync.onFishHookRejected(m);
     mp.onFishEscaped = (m) => { const f = this.sharedFish?.get(m.fishId); if (f && f !== this.hookFish) f.state = 'wander'; };
     mp.onFishCaught = (m) => { if (m.playerId !== mp.id) this.sharedFish?.get(m.fishId)?.despawn(); };
-    mp.onWeather = (key) => { if (key) { this.env.setWeather(key); this.env.weatherTimer = 1e9; } }; return r;
+    mp.onWeather = (key) => { if (key) { this.env.setWeather(key); this.env.weatherTimer = 1e9; } };
+    mp.onOthelloState = (m) => this.multiplayerOthello?.onState(m);
+    mp.onOthelloReject = (m) => this.multiplayerOthello?.onReject(m);
+    return r;
   };
   const chooseBiter = Game.prototype._chooseBiter;
   Game.prototype._chooseBiter = function (...args) { if (!this.multiplayer) return chooseBiter.apply(this, args); this.biteTimer = 1.5; };

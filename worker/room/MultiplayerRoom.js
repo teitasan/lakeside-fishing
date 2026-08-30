@@ -1,6 +1,7 @@
 import { SharedWorld } from '../simulation/sharedWorld.js';
 import { PLAYER_VIEW_R, FISH_VIEW_R } from '../simulation/world.js';
 import { formatCatchSystemMessage } from '../../src/fishing/speciesDisplay.js';
+import { OthelloRoom } from './othelloRoom.js';
 
 const PROTO_V3 = 3, PROTO_V4 = 4;
 const MAX_PLAYERS = 8, CLOCK_START = 6, HOURS_PER_SEC = 1 / 60, WORLD_LIMIT = 500;
@@ -50,6 +51,7 @@ export class MultiplayerRoom {
     this.pubLoop = null;
     this.lastWeather = this.world.weather;
     this._publishDirty = true;
+    this.othello = new OthelloRoom();
   }
 
   async fetch(r) {
@@ -477,6 +479,33 @@ export class MultiplayerRoom {
         if (e.removed && caught) this._system(formatCatchSystemMessage(p.name, caught.length, caught.speciesId));
         this._publishDirty = true;
       }
+      return;
+    }
+
+    if (m.t === 'othello_open') {
+      this.othello.open(p.id);
+      this._broadcastOthelloState();
+      return;
+    }
+
+    if (m.t === 'othello_close') {
+      this.othello.close(p.id);
+      return;
+    }
+
+    if (m.t === 'othello_move') {
+      const result = this.othello.move(p.id, m);
+      if (!result.ok) {
+        try { ws.send(JSON.stringify({ t: 'othello_reject', reason: result.reason || 'rejected' })); } catch (e) { }
+        return;
+      }
+      this._broadcastOthelloState();
+    }
+  }
+
+  _broadcastOthelloState() {
+    for (const { sock, p } of this._joined()) {
+      this._send(sock, { t: 'othello_state', ...this.othello.snapshot(p.id) });
     }
   }
 
@@ -488,8 +517,10 @@ export class MultiplayerRoom {
     this.players.delete(ws);
     try { ws.close(); } catch (e) { }
     if (p) {
+      this.othello.dropPlayer(p.id);
       this.world.dropPlayer(p.id);
       this._broadcastLeave(p);
+      this._broadcastOthelloState();
       this._publishDirty = true;
     }
   }

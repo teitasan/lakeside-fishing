@@ -18,6 +18,8 @@ const tests = [
   'scripts/mp-single-parity-test.mjs',
   'scripts/mp-bait-rearm-test.mjs',
   'scripts/mp-chat-test.mjs',
+  'scripts/othello-logic-test.mjs',
+  'scripts/othello-room-test.mjs',
   'scripts/runtime-config-test.mjs',
   'scripts/performance-test.mjs',
   'scripts/underwater-props-test.mjs',

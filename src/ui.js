@@ -1380,6 +1380,7 @@ export class UI {
 
   closeAll() {
     for (const k of ['shop', 'journal', 'pause', 'rigWin', 'map', 'fishDetail']) this.el[k].classList.remove('open');
+    this.game.othello?.close?.();
     if (this.openModal !== 'catch') this.openModal = null;
     this.game.audio.click();
   }

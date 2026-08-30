@@ -580,6 +580,13 @@ export class Game {
         case 'KeyV': this._toggleUnderwater(); break;
         case 'KeyM': this._cancelCharge(); this._exitLock(); this.ui.openMap(); this.audio.click(); break;
         case 'KeyU': this._cycleFightUi(); break;
+        case 'KeyO':
+          if (this.multiplayer && this.mp?.connected && this.othello) {
+            this._cancelCharge();
+            this._exitLock();
+            this.othello.toggle();
+          }
+          break;
       }
     });
 

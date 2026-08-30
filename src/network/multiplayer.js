@@ -15,6 +15,7 @@ export class MultiplayerClient {
     this.onPlayerSnapshot = this.onPlayerOut = this.onFishSnapshot = this.onFishReserved = this.onFishHooked = null;
     this.onFishHookRejected = this.onFishEscaped = this.onFishCaught = this.onWeather = null;
     this.onChat = this.onSystem = this.onClose = this.onError = null;
+    this.onOthelloState = this.onOthelloReject = null;
     this._reconnectTimer = null;
     this._closedByUser = false;
     this._reconnecting = false;
@@ -73,6 +74,7 @@ export class MultiplayerClient {
         fish_reserved: this.onFishReserved, fish_hooked: this.onFishHooked,
         fish_hook_rejected: this.onFishHookRejected, fish_escaped: this.onFishEscaped,
         fish_caught: this.onFishCaught, chat: this.onChat, system: this.onSystem, error: this.onError,
+        othello_state: this.onOthelloState, othello_reject: this.onOthelloReject,
       };
       h[m.t]?.(m);
     };
@@ -183,6 +185,10 @@ export class MultiplayerClient {
   clearBait() { this._send({ t: 'bait_clear' }); }
   hookFish(f) { this._send({ t: 'hook', fishId: f }); }
   endFight(f, result) { this._send({ t: 'fight_end', fishId: f, result }); }
+
+  sendOthelloOpen() { this._send({ t: 'othello_open' }); }
+  sendOthelloClose() { this._send({ t: 'othello_close' }); }
+  sendOthelloMove(payload) { this._send({ t: 'othello_move', ...payload }); }
 
   close() {
     this._closedByUser = true;
