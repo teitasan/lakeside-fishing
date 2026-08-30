@@ -12,13 +12,13 @@
    森全体がチラチラした砂目に見えるため。
    =========================================================== */
 import * as THREE from 'three';
-import { growTree, SPECIES, lodFor, LOD_DIST } from './treeSkeleton.js?v=20260829-radial2';
+import { growTree, SPECIES, lodFor, LOD_DIST } from './treeSkeleton.js?v=20260830-forest6';
 import { lodForList } from './util.js';
-import { boxBlurWrap } from './tileableNoise.js?v=20260829-bark2';
-import { LodInstances, tintAt } from './lodInstances.js?v=20260829-radial2';
+import { boxBlurWrap } from './tileableNoise.js?v=20260830-forest6';
+import { LodInstances, tintAt } from './lodInstances.js?v=20260830-forest6';
 import { makeRng, TAU, lerp, clamp01 } from './util.js';
 import { applyPatches, keepAuthoredNormals, foliageTranslucency, lodDitherFade }
-  from './materialPatch.js?v=20260829-radial2';
+  from './materialPatch.js?v=20260830-forest6';
 
 export { LOD_DIST, lodFor };
 

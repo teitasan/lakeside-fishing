@@ -2,7 +2,7 @@
    空・太陽・時間帯・天候
    =========================================================== */
 import * as THREE from 'three';
-import { COMMON_GLSL } from './shaders.js?v=20260830-caustlight';
+import { COMMON_GLSL } from './shaders.js?v=20260830-forest6';
 import { clamp01, lerp, smoothstep, rand, TAU, damp } from './util.js';
 
 /* 時刻ごとの色キーフレーム（hour, 天頂色, 地平色, 太陽色, 環境光係数） */

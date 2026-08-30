@@ -2,17 +2,18 @@
    地形・湖底・岸辺の装飾・桟橋
    =========================================================== */
 import * as THREE from 'three';
-import { CAUSTICS_GLSL } from './shaders.js?v=20260830-caustlight';
+import { CAUSTICS_GLSL } from './shaders.js?v=20260830-forest6';
 import { waveGLSL } from './waveField.js?v=20260828-lakescale1';
-import { UnderwaterPropScatter, addUnderwaterCaustics, patchUwMaterial } from './underwaterProps.js?v=20260829-radial2';
-import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260829-radial2';
-import { RockSet, makeSingleRock } from './rocks.js?v=20260829-radial2';
+import { UnderwaterPropScatter, addUnderwaterCaustics, patchUwMaterial } from './underwaterProps.js?v=20260830-forest6';
+import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260830-forest6';
+import { Undergrowth, UNDER_KINDS } from './undergrowth.js?v=20260830-forest6';
+import { RockSet, makeSingleRock } from './rocks.js?v=20260830-forest6';
 import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js';
-import { buildRadialGrid, DETAIL_BY_QUALITY } from './terrainMesh.js?v=20260829-radial2';
+import { buildRadialGrid, DETAIL_BY_QUALITY } from './terrainMesh.js?v=20260830-forest6';
 import { makeTileableHeightField, makeTileablePebbleField, bakeLandDetailMaps }
-  from './tileableNoise.js?v=20260829-bark2';
-import { TreeSet, VARIANTS as TREE_VARIANTS } from './trees.js?v=20260829-radial2';
-import { SPECIES_IDS } from './treeSkeleton.js?v=20260829-radial2';
+  from './tileableNoise.js?v=20260830-forest6';
+import { TreeSet, VARIANTS as TREE_VARIANTS } from './trees.js?v=20260830-forest6';
+import { SPECIES_IDS } from './treeSkeleton.js?v=20260830-forest6';
 import { WORLD_SIZE, WATER_REGION, MAX_DEPTH, resolveLake } from './lakefield.js';
 
 export { WORLD_SIZE, WATER_REGION, MAX_DEPTH };
@@ -965,14 +966,14 @@ export class Terrain {
             float wForest = smoothstep(6.5, 9.5, h);
             float wGrass = max(0.0, 1.0 - wBeach - wForest);
             float wRock = smoothstep(0.45, 0.72, vSlope);
-            float wSnow = smoothstep(58.0, 82.0, h) * (1.0 - clamp(vSlope - 0.85, 0.0, 1.0));
+            // 雪は無い（森林限界より下の山）。高い所も林床タイルのまま
             float wSum = max(1e-4, wBeach + wGrass + wForest);
             vec2 xz = wp.xz;
             vec3 col = (sampleLand(LAND_BEACH, xz, uLandScale.x) * wBeach
                       + sampleLand(LAND_GRASS, xz, uLandScale.y) * wGrass
                       + sampleLand(LAND_FOREST, xz, uLandScale.z) * wForest) / wSum;
             col = mix(col, sampleLand(LAND_ROCK, xz, uLandScale.w), wRock * 0.85);
-            gLandAmt = (1.0 - under) * (1.0 - wSnow) * uLandOn * lFade;
+            gLandAmt = (1.0 - under) * uLandOn * lFade;
             gLandW = vec4(wBeach, wGrass, wForest, wRock);
             gLandDet = (sampleLand4(LAND_BEACH, xz, uLandScale.x) * wBeach
                       + sampleLand4(LAND_GRASS, xz, uLandScale.y) * wGrass
@@ -1062,7 +1063,7 @@ export class Terrain {
           totalEmissiveRadiance += causticLight(vBedWorldPos, normal);`
         );
     };
-    mat.customProgramCacheKey = () => 'terrain-bed-tex-v13-land-fade';
+    mat.customProgramCacheKey = () => 'terrain-bed-tex-v14-nosnow';
   }
 
   /** 湖底テクスチャが使えない環境でも、頂点色の湖底へコースティクスを載せる。 */
@@ -1154,9 +1155,10 @@ export class Terrain {
       );
       // 岩肌
       out.lerp(tmpSand.setRGB(0.30 + nl * 0.08, 0.29 + nl * 0.07, 0.27 + nl * 0.06), rocky * 0.85);
-      // 高山の雪
-      const snow = smoothstep(58, 82, h) * (1 - clamp01(slope - 0.85));
-      out.lerp(tmpSand.setRGB(0.92, 0.94, 0.98), clamp01(snow));
+      /* 雪はやめた。ここは森林限界より下の山で、頂上まで木が生えている。
+         標高の高いところは針葉樹が増えるぶん、少しだけ暗く沈ませる */
+      out.lerp(tmpSand.setRGB(0.10 + nl * 0.05, 0.17 + nl * 0.07, 0.11 + nl * 0.04),
+        smoothstep(60, 140, h) * 0.55 * (1 - rocky * 0.6));
     }
   }
 
@@ -1475,7 +1477,12 @@ export class Terrain {
     const q = this.quality;
     /* 遠景がインポスター 4 ポリなので、本数は近景の面積だけで決まる。
        900 本だと 20m 間隔の疎林で「植えた公園」に見えるため増やす */
-    const treeTarget = q === 'low' ? 700 : q === 'high' ? 2000 : 1400;
+    /* 撒ける陸は 86ha。実際の温帯林は 300〜1000 本/ha で、70 本/ha だと
+       木の間隔が 12m あって «疎林» にしか見えない（山の斜面が透けて見える）。
+       9000 本（70 本/ha）で測ったら木ぜんぶで GPU 3.8ms しか使っていなかった。
+       遠景はほぼインポスターなので、本数はまだ上げられる。
+       20000 本（林の中に立って）で木ぜんぶ 10.4ms、下草 42500 株は計測誤差 */
+    const treeTarget = q === 'low' ? 8000 : q === 'high' ? 28000 : 16000;
     /* 岩は大きさで作りを分ける。
          大岩 水面をまたぐのでシルエットが景観に効く。3D + LOD
          中石 低ポリ 3D を InstancedMesh で撒く
@@ -1518,16 +1525,25 @@ export class Terrain {
     const qt = new THREE.Quaternion();
     const s = new THREE.Vector3();
 
+    /* 山は森林限界より «下» なので、頂上まで木を生やす。
+       以前は標高 66m で打ち切っていて、陸の 66% が丸ごと裸だった。
+       半径も 370m までしか撒いておらず、その外の 58ha が空だった。 */
+    const TREE_R_MAX = 715;   // 地形の外周（720m）まで
     let ti = 0, tries = 0;
-    while (ti < treeTarget && tries < treeTarget * 30) {
+    while (ti < treeTarget && tries < treeTarget * 24) {
       tries++;
       const ang = rng() * TAU;
       const rr = this.shoreRadius(Math.cos(ang) * 150, Math.sin(ang) * 150);
-      const dist = rr + 5 + Math.pow(rng(), 0.7) * 230;
+      const rMin = rr + 5;
+      /* 半径で一様に取ると内側に偏るので、面積で一様になるよう平方根で引く。
+         そのうえで手前をわずかに厚くして、湖から見たときの «林縁の壁» を作る */
+      const u = Math.pow(rng(), 0.88);
+      const dist = Math.sqrt(rMin * rMin + u * (TREE_R_MAX * TREE_R_MAX - rMin * rMin));
       const x = Math.cos(ang) * dist, z = Math.sin(ang) * dist;
       const h = this.heightAt(x, z);
-      if (h < 1.6 || h > 66) continue;
-      if (this.slopeAt(x, z) > 0.62) continue;
+      if (h < 1.6) continue;
+      // 崖には生えない。ただし «岩がちの尾根» に少しは残したいので緩めに切る
+      if (this.slopeAt(x, z) > 0.78) continue;
       if (this.distToDock(x, z) < 3.6) continue;
       if (Math.hypot(x - this.spawnPos.x, z - this.spawnPos.z) < 6) continue;
 
@@ -1537,18 +1553,21 @@ export class Terrain {
       const patch = this.noise.fbm(x * 0.011, z * 0.011, 2);
       const cedarBias = clamp01(0.62 - (h - 6) / 46) * 0.85;
       const kind = (patch * 0.5 + 0.5) < cedarBias + (rng() - 0.5) * 0.22 ? 'cedar' : 'beech';
-      const va = rng() < 0.5 ? 0 : 1;
+      const va = Math.floor(rng() * TREE_VARIANTS);
 
       // 樹高（m）。高いところほど風衝で低くなる
-      const alt = clamp01(h / 80);
+      const alt = clamp01(h / 150);
       const height = kind === 'cedar'
-        ? lerp(16, 30, rng()) * lerp(1, 0.62, alt)
-        : lerp(11, 22, rng()) * lerp(1, 0.66, alt);
+        ? lerp(16, 30, rng()) * lerp(1, 0.58, alt)
+        : lerp(11, 22, rng()) * lerp(1, 0.62, alt);
 
       this.treeSet.add(x, h - 0.15, z, height, kind, va, rng() * TAU);
-      // 幹の当たり判定。半径は樹高から逆算する（ジオメトリは樹高 1 に正規化済み）
-      const trunkR = (this.treeSet.trunkR[kind] || 0.02) * height;
-      this.addObstacle(x, z, Math.max(trunkR * 1.15, 0.28), h - 0.15 + height * 0.9);
+      /* 幹の当たり判定。歩ける範囲の外はグリッドを太らせるだけなので入れない
+         （半径は樹高から逆算する。ジオメトリは樹高 1 に正規化済み） */
+      if (dist < 260) {
+        const trunkR = (this.treeSet.trunkR[kind] || 0.02) * height;
+        this.addObstacle(x, z, Math.max(trunkR * 1.15, 0.28), h - 0.15 + height * 0.9);
+      }
       ti++;
     }
     this.treeCount = ti;
@@ -1733,6 +1752,64 @@ export class Terrain {
       this.plantCounts[b.kind] = placed;
     }
     this.swayMaterials.push(...this.waterPlants.swayMaterials);
+    this._buildUndergrowth(q);
+  }
+
+  /**
+   * 下草（低木・シダ・草の塊）。
+   *
+   * 木をいくら増やしても «森の中» には見えない。目の高さから下が空で、
+   * 地面と幹の境目がそのまま見えているからで、そこを埋めるのがこの層。
+   * 描かれるのは 48m まで（それより遠い株は段を持たない）なので、
+   * 撒くのも汀線まわりの帯だけでいい。
+   */
+  _buildUndergrowth(q) {
+    const scale = q === 'low' ? 0.35 : q === 'high' ? 1 : 0.62;
+    /* 描画中 1063 株のとき GPU への上乗せは 0.1ms（計測誤差）だった。
+       «森の中» に見せるには株の間隔を 2m くらいまで詰める必要があるので、
+       ここは思い切って増やす */
+    const want = {
+      herb: Math.round(30000 * scale),
+      fern: Math.round(9000 * scale),
+      bush: Math.round(3500 * scale),
+    };
+    this.undergrowth = new Undergrowth(this.scene, {
+      seed: this.seed ^ 0x3a91,
+      addWindSway,
+      capacity: {
+        herb: [Math.round(2600 * scale), Math.round(9000 * scale)],
+        fern: [Math.round(1000 * scale), Math.round(3400 * scale)],
+        bush: [Math.round(450 * scale), Math.round(1500 * scale)],
+      },
+    });
+    const rng = makeRng(this.seed ^ 0x5c2e);
+    this.undergrowthCounts = {};
+    for (const kind of Object.keys(want)) {
+      const cfg = UNDER_KINDS[kind];
+      /* 種ごとに «塊» の場所をずらす。一様に撒くと 3 種が均一に混ざって
+         «敷き詰めた» 見え方になる */
+      const salt = kind === 'herb' ? 0 : kind === 'fern' ? 31.7 : 64.3;
+      const thr = kind === 'herb' ? -0.45 : kind === 'fern' ? -0.10 : 0.12;
+      let placed = 0;
+      for (let i = 0; i < want[kind] * 6 && placed < want[kind]; i++) {
+        const ang = rng() * TAU;
+        const rr = this.shoreRadius(Math.cos(ang) * 150, Math.sin(ang) * 150);
+        const dist = rr - 8 + rng() * 118;
+        const x = Math.cos(ang) * dist, z = Math.sin(ang) * dist;
+        const h = this.heightAt(x, z);
+        // 砂浜には生えない。崖にも生えない
+        if (h < 0.9 || this.slopeAt(x, z) > 0.9) continue;
+        if (this.distToDock(x, z) < 2.6) continue;
+        if (this.noise.fbm(x * 0.06 + salt, z * 0.06 - salt, 2) < thr) continue;
+        const height = lerp(cfg.height[0], cfg.height[1], Math.pow(rng(), 1.2));
+        this.undergrowth.add(kind, x, h - 0.04, z, height,
+          (rng() * 3) | 0, rng() * TAU);
+        placed++;
+      }
+      this.undergrowthCounts[kind] = placed;
+    }
+    this.overWaterProps.push(...this.undergrowth.meshes);
+    this.swayMaterials.push(...this.undergrowth.swayMaterials);
   }
 
   /** 夜間の灯り更新 */
@@ -1763,7 +1840,7 @@ export class Terrain {
     const k = Math.max(0.1, Math.min(4, scale));
     const sets = [];
     if (this.treeSet) sets.push(this.treeSet);
-    for (const s of [this.waterPlants?.emergent, this.waterPlants?.submerged]) {
+    for (const s of [this.waterPlants?.emergent, this.waterPlants?.submerged, this.undergrowth?.set]) {
       if (s) sets.push(s);
     }
     for (const s of Object.values(this.rockSet?.sets || {})) sets.push(s);
@@ -1780,6 +1857,7 @@ export class Terrain {
   updateTrees(dt, cameraPos) {
     this.treeSet?.update(dt, cameraPos);
     this.waterPlants?.update(dt, cameraPos);
+    this.undergrowth?.update(dt, cameraPos);
     this.rockSet?.update(dt, cameraPos);
   }
 }

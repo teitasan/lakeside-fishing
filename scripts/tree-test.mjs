@@ -88,22 +88,29 @@ assert.ok(stats.beech.minR > 0 && stats.cedar.minR > 0, '枝の半径は必ず�
 }
 
 /* ---------------- LOD ---------------- */
-assert.deepStrictEqual(LOD_DIST, [85, 180], '近景 / 中景 / 遠景のしきい値');
+/* 近景 / 中景 / 遠景のしきい値。
+   木が 28000 本になったので、近景を広く取ると «本気のジオメトリ» の
+   本数が跳ねる（85m だと近景 300 本・中景 1100 本 = 12M 三角形）。
+   足元は下草が埋めるので、ここは詰めて本数へ回す */
+assert.deepStrictEqual(LOD_DIST, [58, 145], '近景 / 中景 / 遠景のしきい値');
 // 初回（cur = -1）は外側の境界で判定される
-assert.strictEqual(lodFor(10, -1), 0);
-assert.strictEqual(lodFor(140, -1), 1);
-assert.strictEqual(lodFor(300, -1), 2);
+const [E0, E1] = LOD_DIST;
+assert.strictEqual(lodFor(E0 * 0.2, -1), 0);
+assert.strictEqual(lodFor((E0 + E1) / 2, -1), 1);
+assert.strictEqual(lodFor(E1 * 2, -1), 2);
 /* ヒステリシス：境界上を往復しても LOD が張り付き、
-   毎フレーム行列を作り直す羽目にならないこと */
-assert.strictEqual(lodFor(89, 0), 0, '境界 +4m ではまだ近景に留まる');
-assert.strictEqual(lodFor(95, 0), 1, '境界 +10m で中景へ落ちる');
-assert.strictEqual(lodFor(81, 1), 1, '中景から近景へ戻るには内側の境界まで近づく必要がある');
-assert.strictEqual(lodFor(75, 1), 0);
+   毎フレーム行列を作り直す羽目にならないこと。
+   しきい値そのものは調整するので、境界からの «相対» で書く */
+assert.strictEqual(lodFor(E0 + 4, 0), 0, '境界 +4m ではまだ近景に留まる');
+assert.strictEqual(lodFor(E0 + 10, 0), 1, '境界 +10m で中景へ落ちる');
+assert.strictEqual(lodFor(E0 - 4, 1), 1, '中景から近景へ戻るには内側の境界まで近づく必要がある');
+assert.strictEqual(lodFor(E0 - 10, 1), 0);
 {
-  // 境界のすぐ外を 1m 刻みで往復させて、切り替わりが 1 回ずつしか起きないこと
+  // 境界のすぐ外を 2m 刻みで往復させて、切り替わりが 1 回ずつしか起きないこと
   let cur = 0, flips = 0;
+  const up = [E0, E0 + 2, E0 + 4, E0 + 6, E0 + 8];
   for (let pass = 0; pass < 6; pass++) {
-    const seq = pass % 2 ? [93, 91, 89, 87, 85] : [85, 87, 89, 91, 93];
+    const seq = pass % 2 ? [...up].reverse() : up;
     for (const d of seq) {
       const l = lodFor(d, cur);
       if (l !== cur) flips++;

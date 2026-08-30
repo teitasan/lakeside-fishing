@@ -2,7 +2,7 @@
    魚：プロシージャル生成メッシュ + 遊泳AI
    =========================================================== */
 import * as THREE from 'three';
-import { CAUSTICS_GLSL } from './shaders.js?v=20260830-caustlight';
+import { CAUSTICS_GLSL } from './shaders.js?v=20260830-forest6';
 import { clamp, clamp01, lerp, rand, smoothstep, TAU, damp } from './util.js';
 import { depthBandAt, colorsOf } from './data.js';
 import { textureTypeFor, fishTexture, FIN_UV } from './fishTextures.js';

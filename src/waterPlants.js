@@ -15,9 +15,9 @@
    穂とクロモの輪生葉だけは形が細かすぎるのでカード + テクスチャ。
    =========================================================== */
 import * as THREE from 'three';
-import { LodInstances, tintAt } from './lodInstances.js?v=20260829-radial2';
+import { LodInstances, tintAt } from './lodInstances.js?v=20260830-forest6';
 import { makeRng, TAU, clamp01, lerp } from './util.js';
-import { applyPatches, lodDitherFade } from './materialPatch.js?v=20260829-radial2';
+import { applyPatches, lodDitherFade } from './materialPatch.js?v=20260830-forest6';
 
 /**
  * 抽水植物（ヨシ・マコモ）の LOD しきい値。
@@ -45,9 +45,9 @@ export const PLANT_VARIANTS = 3;
 
 /* ---------------- ジオメトリの部品 ---------------- */
 
-const newOut = () => ({ pos: [], nor: [], uv: [], idx: [] });
+export const newOut = () => ({ pos: [], nor: [], uv: [], idx: [] });
 
-function toGeometry(out) {
+export function toGeometry(out) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(out.pos, 3));
   g.setAttribute('normal', new THREE.Float32BufferAttribute(out.nor, 3));
@@ -65,7 +65,7 @@ function unit(x, y, z) {
  * 葉群を表すカードを方位を変えて n 枚立てる。原点は下端中央。
  * 1 枚だと真横から消えるので最低 2 枚、近景は 3 枚。
  */
-function cardFan(out, { cx, cy, cz, w, h, n = 3, az0 = 0, lean = 0 }) {
+export function cardFan(out, { cx, cy, cz, w, h, n = 3, az0 = 0, lean = 0 }) {
   for (let i = 0; i < n; i++) {
     const a = az0 + (i / n) * Math.PI;      // 180° ぶんで足りる（両面描画）
     const ax = Math.cos(a), az = Math.sin(a);
@@ -99,7 +99,7 @@ function cardFan(out, { cx, cy, cz, w, h, n = 3, az0 = 0, lean = 0 }) {
  * 巻きの違う三角形を 2 枚入れておけば、どちらから見ても «表» が描かれ、
  * 法線は反転しないまま上を向く（頂点は共有なので索引が増えるだけ）。
  */
-function pushQuad(out, base) {
+export function pushQuad(out, base) {
   out.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
   out.idx.push(base, base + 2, base + 1, base, base + 3, base + 2);
 }
@@ -116,7 +116,7 @@ function pushQuad(out, base) {
    絵で描けば 1 カード 2 三角で 15 枚ぶんの葉が入り、縁も色も柔らかくなる。 */
 
 /** 1 枚の葉を塗る。根元から先端へ細くなり、根元は暗く先端は明るい */
-function paintBlade(g, {
+export function paintBlade(g, {
   x0, y0, len, width, ang, bend, hueBase, hueTip, ribbon: rib = true,
 }) {
   const dx = Math.sin(ang), dy = -Math.cos(ang);
@@ -156,7 +156,7 @@ function paintBlade(g, {
 }
 
 /** 緑を 1 枚ぶん決める。v で明るさ、warm で黄寄り／青寄り */
-function leafGreen(v, warm) {
+export function leafGreen(v, warm) {
   const r = Math.round(v * (0.44 + warm * 0.30));
   const gg = Math.round(v * (0.78 + warm * 0.10));
   const b = Math.round(v * (0.30 - warm * 0.10));
