@@ -158,18 +158,21 @@ vec3 causticLight(vec3 worldPos, vec3 viewNormal) {
 
   /* 2 枚の積を非線形に通すので mipmap の平均では帯域が落ちない。
      遠景をそのまま出すとギラギラした砂目になるため距離で消す
-     （実際の水でも 20m 以上先のコースティクスは見えない） */
+     （この湖の見通しは 40m 前後なので、その手前で畳む） */
   float viewDist = length(worldPos - cameraPosition);
   float fade = (1.0 - smoothstep(uCaustDist.x, uCaustDist.y, viewDist));
-  /* 深いほど波面の焦点はぼけて網目が消える。湖の濁りだと 10m 先には
-     もう届かないので、26m まで引っぱらずに早めに畳む */
+  /* 深いほど波面の焦点はぼけて網目が消える。24m でほぼ湖底（26m）なので、
+     深場のいちばん底だけ網目が溶けて消える */
   fade *= smoothstep(uCaustDepth.x, uCaustDepth.y, depth)
         * (1.0 - smoothstep(uCaustFar.x, uCaustFar.y, depth));
   /* 上を向いた面ほど強い。これが無いと水際の岩の側面まで青白く光り、
      低ポリの岩が氷の塊に見えてしまう */
   vec3 upView = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
   fade *= smoothstep(0.15, 0.72, dot(normalize(viewNormal), upView));
-  fade *= (1.0 - uCaustNight * 0.94) * (1.0 - uCaustRain * 0.72) * (1.0 - uCaustCloud * 0.62);
+  /* 夜も消さない。uCaustSunDir には «いま照らしている光»（夜は月）の向きが
+     入ってくるので、網目の伸びる向きは光源と揃っている。常に満月という
+     世界設定なので、昼の 3 割ほどの明るさで湖底に残す */
+  fade *= mix(1.0, 0.30, uCaustNight) * (1.0 - uCaustRain * 0.72) * (1.0 - uCaustCloud * 0.62);
   /* 太陽高度は 2 段で効かせる。
        ゲート  低い太陽は水面で反射されて水中に届かないので、消す
        光量    それとは別に、高度そのものにも比例させる

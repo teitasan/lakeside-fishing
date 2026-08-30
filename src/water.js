@@ -112,6 +112,10 @@ export class Water {
        水面メッシュ 1 マスぶんの地形補間誤差を吸収できる大きさが必要 */
     const shoreLift = clamp((WATER_REGION / segs) * 0.075, 0.08, 0.22);
 
+    /** 影を作っている光の向き（昼＝太陽・夜＝月）。updateEnv で差し替わる */
+
+    this._keyDir = new THREE.Vector3(0, 1, 0);
+
     this.uniforms = {
       uTime: { value: 0 },
       uWind: { value: 1 },
@@ -143,7 +147,7 @@ export class Water {
       uCamNear: { value: 0.1 },
       uCamFar: { value: 3000 },
       // 1m あたりの吸収（赤から先に消える）
-      uAbsorb: { value: new THREE.Vector3(0.36, 0.15, 0.09) },
+      uAbsorb: { value: new THREE.Vector3(0.18, 0.075, 0.045) },
       uRippleNormal: { value: this.rippleNormalTex },
       /* 渚の泡もランタイムで詰めたいので出しておく
          x,y = 先端の白線の内外幅 / z,w = 後方の泡帯の内外幅 */
@@ -471,9 +475,17 @@ export class Water {
                      + pow(specT, 48.0) * 0.35
                      + pow(specT, 180.0) * glitter * 2.2;
           surf += uSunColor * spec * (1.0 - uNight) * (1.0 - uRain * 0.4);
+          /* 月の道。常に満月なので、これが夜の湖の主役になる。
+             太陽側と同じきらめきノイズを掛けて «一本の筋» ではなく
+             «峰ひとつずつが光る帯» にする */
           vec3 MH = normalize(V - uSunDir);
           float mnd = max(dot(N, MH), 0.0);
-          surf += vec3(0.72, 0.82, 1.0) * (pow(mnd, 300.0) * 1.5 + pow(mnd, 34.0) * 0.10) * uNight;
+          float mGlit = vnoise(vWorld.xz * 7.5 - uSunDir.xz * 4.0 + uTime * 0.15);
+          mGlit = smoothstep(0.55, 0.90, mGlit);
+          surf += vec3(0.80, 0.87, 1.0)
+                * (pow(mnd, 620.0) * 4.4 + pow(mnd, 48.0) * 0.28
+                 + pow(mnd, 180.0) * mGlit * 1.8)
+                * uNight * (1.0 - uRain * 0.4);
 
           /* --- 泡（渚） ---
              遡上（swash）の先端に細い白線を立て、その後ろをレース状に崩す。
@@ -521,7 +533,7 @@ export class Water {
           float sunFoam = pow(max(dot(N, normalize(V + uSunDir)), 0.0), 3.0) * 0.18 * (1.0 - uNight);
           vec3 foamTint = mix(uShallow * 1.35, vec3(0.90, 0.95, 0.97), clamp(tip + band, 0.0, 1.0));
           vec3 foamCol = foamTint * foamBright + uSunColor * sunFoam;
-          foamCol *= mix(0.38, 1.0, 1.0 - uNight * 0.72);
+          foamCol *= mix(0.38, 1.0, 1.0 - uNight * 0.38);
 
           // --- 雨粒 ---
           if (uRain > 0.02) {
@@ -820,7 +832,7 @@ export class Water {
 
   /* ---------------- 水中プランクトン（プール済み） ---------------- */
   _buildPlankton(quality) {
-    const counts = { low: 72, mid: 140, high: 240 };
+    const counts = { low: 210, mid: 420, high: 740 };
     this.planktonMax = counts[quality] || counts.mid;
     this.planktonParts = [];
     const pos = new Float32Array(this.planktonMax * 3);
@@ -929,7 +941,7 @@ export class Water {
         this.uniforms.uReflTexel.value = 1 / want;
       }
     }
-    const counts = { low: 72, mid: 140, high: 240 };
+    const counts = { low: 210, mid: 420, high: 740 };
     const wantN = counts[q] || counts.mid;
     if (wantN !== this.planktonMax) this._resizePlankton(wantN);
   }
@@ -963,7 +975,8 @@ export class Water {
     return {
       strength: this._underwaterView ? 1 : 0,
       time: this.time,
-      sunDir: this.uniforms.uSunDir.value,
+      // 光の柱と散乱ゲートは «いま照らしている光» の向き（夜は月）
+      sunDir: this._keyDir,
       night: this.uniforms.uNight.value,
       rain: this.uniforms.uRain.value,
       cloud: 0,
@@ -986,7 +999,7 @@ export class Water {
     const cx = camera.position.x;
     const cy = camera.position.y;
     const cz = camera.position.z;
-    const spread = this.quality === 'low' ? 7 : this.quality === 'high' ? 11 : 9;
+    const spread = this.quality === 'low' ? 10 : this.quality === 'high' ? 16 : 13;
     let n = 0;
     for (let i = 0; i < this.planktonMax; i++) {
       const p = this.planktonParts[i];
@@ -1063,6 +1076,7 @@ export class Water {
     this.wind = 1 + env.rainIntensity * 0.92 + env.cloudiness * 0.14;
     u.uWind.value = this.wind;
     u.uSunDir.value.copy(env.sunDir);
+    this._keyDir = env.keyDir;
     u.uSunColor.value.copy(env.sunColor);
     u.uZenith.value.copy(env.zenithColor);
     u.uHorizon.value.copy(env.horizonColor);
@@ -1082,7 +1096,8 @@ export class Water {
 
     const cu = this.causticsUniforms;
     cu.uCaustTime.value = this.time;
-    cu.uCaustSunDir.value.copy(env.sunDir);
+    // 昼は太陽、夜は月。網目の伸びる向きが光源と食い違わないように
+    cu.uCaustSunDir.value.copy(env.keyDir);
     cu.uCaustNight.value = env.nightAmount;
     cu.uCaustRain.value = env.rainIntensity;
     cu.uCaustCloud.value = env.cloudiness;

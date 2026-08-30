@@ -130,10 +130,13 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   vec3 sigma = uAbsorb * uTurbidity;
   vec3 trans = exp(-sigma * dist);
 
-  float sunGate = smoothstep(-0.05, 0.35, uSunDir.y) * (1.0 - uNight * 0.88) * (1.0 - uCloud * 0.55);
+  /* uSunDir には «いま照らしている光»（夜は月）の向きが入る。夜の係数は
+     常に満月という世界設定に合わせて、消すのではなく 3 分の 1 に落とす */
+  float sunGate = smoothstep(-0.05, 0.35, uSunDir.y)
+                * (1.0 - uNight * 0.66) * (1.0 - uCloud * 0.55);
   /* 水中の環境光は深さで指数的に落ちる。20m 潜れば同じ湖底でも別の暗さになる */
-  float ambient = exp(-camDepth * 0.085) * mix(0.28, 1.0, sunGate);
-  vec3 scatterCol = mix(vec3(0.085, 0.30, 0.34), vec3(0.020, 0.075, 0.105), uNight);
+  float ambient = exp(-camDepth * 0.043) * mix(0.28, 1.0, sunGate);
+  vec3 scatterCol = mix(vec3(0.085, 0.30, 0.34), vec3(0.048, 0.165, 0.215), uNight);
   vec3 inscatter = scatterCol * ambient * (vec3(1.0) - trans);
 
   col = col * trans + inscatter * uStrength;
@@ -148,24 +151,24 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
     vec3 U = normalize(cross(Lup, vec3(0.0, 0.0, 1.0)));
     vec3 V = cross(Lup, U);
     vec3 rd = normalize(worldAt(uv, depth) - uCamPos);
-    float march = min(dist, 36.0);
+    float march = min(dist, 72.0);
     float acc = 0.0;
     for (int i = 0; i < 3; i++) {
       vec3 p = uCamPos + rd * (march * (float(i) + 0.5) / 3.0);
       float below = uWaterY - p.y;                      // 水面からの深さ
       acc += shaftMask(p, U, V, uTime)
            * smoothstep(0.0, 0.6, below)                // 水面より上には出さない
-           * exp(-max(below, 0.0) * 0.17);              // 深いほど届かない
+           * exp(-max(below, 0.0) * 0.085);             // 深いほど届かない
     }
     acc /= 3.0;
     // 目の前と遠景には乗せない（視界が汚れて「歪んで見える」原因になる）
-    acc *= smoothstep(1.2, 6.0, march) * (1.0 - smoothstep(24.0, 40.0, march));
+    acc *= smoothstep(2.4, 12.0, march) * (1.0 - smoothstep(48.0, 80.0, march));
     col += vec3(0.42, 0.78, 0.86) * acc * sunGate * uStrength * uShaft
          * (1.0 - uRain * 0.4);
   }
 
   /* --- 水面直下の明るみ --- */
-  float surfaceLight = exp(-camDepth * 0.42);
+  float surfaceLight = exp(-camDepth * 0.21);
   col += vec3(0.30, 0.66, 0.76) * surfaceLight * sunGate * uStrength * 0.05
        * mix(0.35, 1.0, uLinear);
 
@@ -191,7 +194,7 @@ class UnderwaterEffect extends Effect {
         ['uNight', new THREE.Uniform(0)],
         ['uRain', new THREE.Uniform(0)],
         ['uCloud', new THREE.Uniform(0)],
-        ['uAbsorb', new THREE.Uniform(new THREE.Vector3(0.36, 0.15, 0.09))],
+        ['uAbsorb', new THREE.Uniform(new THREE.Vector3(0.18, 0.075, 0.045))],
         ['uCamPos', new THREE.Uniform(new THREE.Vector3())],
         ['uCamNear', new THREE.Uniform(0.1)],
         ['uCamFar', new THREE.Uniform(3000)],

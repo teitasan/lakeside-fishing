@@ -302,8 +302,10 @@ assert.doesNotMatch(shadersSrc, /1\.0 - smoothstep\(6\.0, 26\.0, depth\)/,
   'a lake must not keep caustics down to 26m');
 assert.match(gameSrc, /uCaustWarp: \{ value: new THREE\.Vector2\(1\.15, 2\.5\) \}/,
   'the warp depth cap must stay a few metres');
-assert.match(gameSrc, /uCaustFar: \{ value: new THREE\.Vector2\(3\.5, 12\.0\) \}/,
-  'caustics must be gone by ~12m in lake water');
+/* 湖の透明度を倍にした（uAbsorb を半分）ので、網目の生き延びる深さも倍。
+   ただし湖底（26m）まで届かせてはいけない、という上の条件は変えない */
+assert.match(gameSrc, /uCaustFar: \{ value: new THREE\.Vector2\(6\.0, 20\.0\) \}/,
+  'caustics must be gone by ~20m, well above the 26m bed');
 assert.match(shadersSrc, /float sw = sa \/ 1\.333;/,
   'the caustic projection point must be refracted through Snell');
 assert.doesNotMatch(shadersSrc, /caustFbm2\(/, 'the old blobby fbm caustics must be gone');
@@ -355,11 +357,65 @@ assert.match(gameSrc, /uCaustTex: \{ value: createCausticTexture\(\) \}/,
   'the caustic texture must be created once and shared');
 
 /* ---------------- 水中ポストFX ---------------- */
+/* --- 透明度と、それに連動する «深さ方向» の定数 ---
+
+   水の澄み具合は uAbsorb ただ 1 つで決まるが、それに比例すべき定数が
+   3 つ別々の場所に直書きされている。
+
+     ambient       水中の環境光が深さで落ちる速さ
+     shaft         光の柱が深さで消える速さ
+     surfaceLight  水面直下の明るみが消える速さ
+
+   uAbsorb だけ半分にしてこれらを置き忘れると、«横は 40m 見通せるのに
+   26m の湖底は真っ暗» という食い違いが出る。逆にこちらだけ触ると
+   «底まで明るいのに 5m 先が見えない» になる。比を縛っておく。 */
+{
+  const grab = (src, what) => {
+    const m = /uAbsorb: \{ value: new THREE\.Vector3\(([\d.]+), ([\d.]+), ([\d.]+)\) \}/.exec(src)
+      || /'uAbsorb', new THREE\.Uniform\(new THREE\.Vector3\(([\d.]+), ([\d.]+), ([\d.]+)\)\)/.exec(src);
+    assert.ok(m, `${what}: uAbsorb が読めない`);
+    return [+m[1], +m[2], +m[3]];
+  };
+  const a = grab(waterSrc, 'water.js');
+  const b = grab(postfxSrc, 'postfx.js');
+  assert.deepStrictEqual(a, b, 'water.js と postfx.js の uAbsorb が食い違っている');
+
+  // 人間の目が見る減衰。Rec.709 の輝度で重みづけ
+  const sigma = 0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2];
+  // コントラストが 2% まで落ちる距離 ＝ 見通し
+  const visibility = Math.log(1 / 0.02) / sigma;
+
+  const num = (re, what) => {
+    const m = re.exec(postfxSrc);
+    assert.ok(m, `postfx.js: ${what} が読めない`);
+    return +m[1];
+  };
+  const linked = [
+    ['ambient', num(/float ambient = exp\(-camDepth \* ([\d.]+)\)/, 'ambient'), 2.21],
+    ['shaft', num(/exp\(-max\(below, 0\.0\) \* ([\d.]+)\)/, 'shaft'), 1.12],
+    ['surfaceLight', num(/float surfaceLight = exp\(-camDepth \* ([\d.]+)\)/, 'surface'), 0.453],
+  ];
+  for (const [name, k, want] of linked) {
+    const ratio = sigma / k;
+    assert.ok(Math.abs(ratio / want - 1) < 0.06,
+      `${name} の減衰 ${k} が uAbsorb と釣り合っていない`
+      + `（σ/k = ${ratio.toFixed(2)}、あるべき ${want}）。`
+      + ' uAbsorb を変えたら同じ倍率でここも変えること');
+  }
+
+  /* 見通しより «湖の深さ» のほうが浅いこと。逆になると、水中カメラから
+     対岸の岸まで見えてしまって湖が «水槽» に見える */
+  assert.ok(visibility > 26 && visibility < 70,
+    `見通し ${visibility.toFixed(0)}m が湖（水深 26m）に対して極端`);
+  console.log(`  透明度 σ=${sigma.toFixed(3)}/m  見通し ${visibility.toFixed(0)}m`
+    + `  (色が残るのは ${(Math.log(1 / 0.5) / a[0]).toFixed(1)}m まで)`);
+}
+
 assert.match(postfxSrc, /vec3 trans = exp\(-sigma \* dist\);/,
   'underwater extinction must be exponential and wavelength selective');
 assert.match(postfxSrc, /vec3 inscatter = scatterCol \* ambient \* \(vec3\(1\.0\) - trans\);/,
   'the light removed by extinction must come back as in-scattering');
-assert.match(postfxSrc, /float ambient = exp\(-camDepth \* 0\.085\)/,
+assert.match(postfxSrc, /float ambient = exp\(-camDepth \* 0\.043\)/,
   'ambient light must fall off exponentially with camera depth');
 assert.match(postfxSrc, /\['uShaft', new THREE\.Uniform\(0\.30\)\]/,
   'shaft strength must stay restrained');
@@ -373,9 +429,9 @@ assert.match(postfxSrc, /float shaftMask\(vec3 p, vec3 U, vec3 V, float t\)/,
 assert.doesNotMatch(postfxSrc, /atan\(d\.y, d\.x\)/,
   'screen-space polar shafts look like a rising-sun flag and swim with the camera');
 assert.doesNotMatch(postfxSrc, /uSunUv/, 'the screen-space shaft origin must be gone');
-assert.match(postfxSrc, /exp\(-max\(below, 0\.0\) \* 0\.17\)/,
+assert.match(postfxSrc, /exp\(-max\(below, 0\.0\) \* 0\.085\)/,
   'shafts must fade exponentially with depth below the surface');
-assert.match(postfxSrc, /acc \*= smoothstep\(1\.2, 6\.0, march\)/,
+assert.match(postfxSrc, /acc \*= smoothstep\(2\.4, 12\.0, march\)/,
   'shafts must not be painted right in front of the camera');
 assert.match(gameSrc, /_fillUnderwaterOptics\(uwCtx\);/, 'turbidity must still be fed each frame');
 assert.doesNotMatch(gameSrc, /_fillSunScreenPos/, 'the sun screen projection helper must be gone');

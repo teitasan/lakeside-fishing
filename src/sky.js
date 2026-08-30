@@ -6,9 +6,13 @@ import { COMMON_GLSL } from './shaders.js?v=20260830-zone5';
 import { clamp01, lerp, smoothstep, rand, TAU, damp } from './util.js?v=20260830-zone5';
 
 /* 時刻ごとの色キーフレーム（hour, 天頂色, 地平色, 太陽色, 環境光係数） */
+/* 夜の値は «常に満月» の世界設定に合わせて現実より大きく持ち上げてある。
+   月明かりの照度は実際には満月でも太陽の 1/40 万しかないので、現実どおりに
+   すると «何も見えない画面» にしかならない。ここでは «青く、影が柔らかく、
+   彩度が低い» という月夜の見え方の特徴だけ残して、光量は昼の半分ほどに置く */
 const KEYS = [
-  { h: 0.0, zen: 0x020711, hor: 0x081120, sun: 0x16253c, amb: 0.14, dir: 0.05 },
-  { h: 4.2, zen: 0x081527, hor: 0x18203a, sun: 0x2c3550, amb: 0.18, dir: 0.09 },
+  { h: 0.0, zen: 0x0d2244, hor: 0x1a3055, sun: 0x16253c, amb: 0.38, dir: 0.05 },
+  { h: 4.2, zen: 0x122a4c, hor: 0x223a60, sun: 0x2c3550, amb: 0.40, dir: 0.09 },
   { h: 5.4, zen: 0x18375c, hor: 0x7d4f5c, sun: 0xff8f52, amb: 0.40, dir: 0.55 },
   { h: 6.4, zen: 0x2a5c96, hor: 0xf7a068, sun: 0xffb478, amb: 0.66, dir: 1.9 },
   { h: 8.5, zen: 0x2d74be, hor: 0x9fc6e4, sun: 0xffeecd, amb: 0.90, dir: 2.9 },
@@ -16,8 +20,8 @@ const KEYS = [
   { h: 15.5, zen: 0x2a6dbe, hor: 0xb6cee0, sun: 0xfff2d8, amb: 0.95, dir: 2.9 },
   { h: 17.6, zen: 0x24508c, hor: 0xf19256, sun: 0xffa055, amb: 0.68, dir: 1.7 },
   { h: 18.8, zen: 0x17305c, hor: 0xa85a50, sun: 0xf5713c, amb: 0.42, dir: 0.5 },
-  { h: 20.0, zen: 0x0a1832, hor: 0x232743, sun: 0x333b5c, amb: 0.22, dir: 0.11 },
-  { h: 24.0, zen: 0x020711, hor: 0x081120, sun: 0x16253c, amb: 0.14, dir: 0.05 },
+  { h: 20.0, zen: 0x14294c, hor: 0x2a3a5e, sun: 0x333b5c, amb: 0.42, dir: 0.11 },
+  { h: 24.0, zen: 0x0d2244, hor: 0x1a3055, sun: 0x16253c, amb: 0.38, dir: 0.05 },
 ];
 
 export const WEATHERS = {
@@ -25,6 +29,12 @@ export const WEATHERS = {
   cloudy: { key: 'cloudy', name: 'くもり', icon: 'weather-cloudy', cloud: 0.72, rain: 0, bite: 1.12, weight: 34 },
   rain: { key: 'rain', name: '雨', icon: 'weather-rain', cloud: 0.95, rain: 0.85, bite: 1.3, weight: 22 },
 };
+
+/* 満月の色と強さ。実際の月光は太陽光を反射しただけなので «灰色» に近いが、
+   青く寄せておくと «同じ明るさでも夜に見える»。強さは真昼の 3.3 に対して
+   半分ほど。これでも現実の満月より 5 桁明るい */
+const MOON_COLOR = new THREE.Color(0x9fb6e8);
+const MOON_INTENSITY = 1.7;
 
 const c1 = new THREE.Color();
 const c2 = new THREE.Color();
@@ -104,12 +114,34 @@ export class Environment {
           col += uSunColor * pow(sd, 9.0) * 0.30;
           col += uSunColor * pow(sd, 2.2) * 0.09;
 
-          // 月
+          /* --- 月 ---
+             この世界は常に満月。のっぺりした白丸だと «空に開いた穴» に
+             見えるので、海（暗い斑）と縁の減光を入れて球として立たせる。
+             見かけの半径は 2.6°（実物の 10 倍）。空に対して主役なので誇張する */
           vec3 mdir = -uSunDir;
           float md = max(dot(dir, mdir), 0.0);
-          float moonDisc = smoothstep(0.9992, 0.99965, md);
-          col += vec3(0.95, 0.97, 1.0) * moonDisc * 9.0 * uNight;
-          col += vec3(0.45, 0.55, 0.85) * pow(md, 30.0) * 0.26 * uNight;
+          /* 円盤内の座標。mdir.z は常に 0.32 前後なので、真上との外積が
+             縮退することはない */
+          const float MOON_R = 0.0447;                  // sin(2.56°)
+          vec3 mU = normalize(cross(mdir, vec3(0.0, 1.0, 0.0)));
+          vec3 mV = cross(mdir, mU);
+          vec2 mp = vec2(dot(dir, mU), dot(dir, mV)) / MOON_R;
+          float mr = length(mp);
+          float moonDisc = smoothstep(1.03, 0.96, mr);
+          // 縁の減光。満月は «真正面から» 照らされているのでほとんど平ら
+          float limb = pow(max(1.0 - mr * mr, 0.0), 0.13);
+          // 海（マリア）
+          float maria = fbm4(mp * 1.3 + vec2(4.7, 1.9));
+          float face = mix(0.42, 1.0, smoothstep(0.30, 0.70, maria));
+          /* 円盤そのものは «白飽和の一歩手前» に置く。ACES は肩が寝ているので、
+             ここを 7.5 まで上げると海の濃淡が 1% しか残らずただの白丸になる */
+          col += vec3(0.99, 0.98, 0.95) * moonDisc * limb * face * 2.3 * uNight;
+          /* 光冠。円盤より «弱く・広く» でなければならない。pow(md, 300) は
+             半値角 3.4° で円盤（半径 2.6°）とほぼ同じ広さなので、ここを
+             円盤より大きくすると円盤の上に白を塗り重ねることになり、
+             せっかくの海が消えてただの白丸に戻る */
+          col += vec3(0.80, 0.86, 1.0) * pow(md, 300.0) * 0.45 * uNight;
+          col += vec3(0.45, 0.55, 0.85) * pow(md, 30.0) * 0.40 * uNight;
 
           // 星
           if (uNight > 0.02 && hy > -0.02) {
@@ -177,13 +209,19 @@ export class Environment {
     cam.left = -60; cam.right = 60; cam.top = 60; cam.bottom = -60;
     this.sun.shadow.bias = -0.0006;
     this.sun.shadow.normalBias = 0.06;
+    /** 影と陰影を作っている光の向き（昼＝太陽、夜＝月）。コースティクスや
+        光の柱もこれを見る */
+    this.keyDir = new THREE.Vector3(0, 1, 0);
+    this.moonAmount = 0;
     this.sunTarget = new THREE.Object3D();
     this.sun.target = this.sunTarget;
     this.scene.add(this.sun, this.sunTarget);
 
-    this.moon = new THREE.DirectionalLight(0x9fb6e8, 0.0);
-    this.scene.add(this.moon);
-
+    /* 月は «別のライト» にしない。影を落とす平行光が 2 本になると
+       シャドウマップがもう 1 枚要るうえ、castShadow を切り替えた瞬間に
+       three がマテリアルを組み直して画面が止まる。月は太陽のちょうど
+       反対側にあって同時に空へ出ることが無いので、上の平行光 1 本を
+       «昼は太陽・夜は月» として向きと色ごと使い回す */
     this.hemi = new THREE.HemisphereLight(0xa9ccea, 0x3b4a3a, 0.9);
     this.scene.add(this.hemi);
   }
@@ -280,34 +318,54 @@ export class Environment {
     if (this.cloudiness > 0.4) this.fogColor.lerp(c1.setRGB(0.42, 0.46, 0.5), (this.cloudiness - 0.4) * 0.5);
     if (this.underwater) {
       // 水中カメラ用：短距離の青緑フォグ
-      this.fogColor.setRGB(0.055, 0.16, 0.19).multiplyScalar(lerp(1, 0.35, this.nightAmount));
+      this.fogColor.setRGB(0.055, 0.16, 0.19).multiplyScalar(lerp(1, 0.62, this.nightAmount));
       this.scene.fog.color.copy(this.fogColor);
       /* 水中の減衰は PostFX の指数散乱が担当する。ここは標準マテリアル用の
          遠方バックストップに留める。線形フォグを主役にすると、水が波長選択で
          濁っていく感じが出ず「平たい水色の板」になってしまう */
-      this.scene.fog.near = lerp(14, 6, this.nightAmount);
-      this.scene.fog.far = lerp(120, 62, this.nightAmount);
+      this.scene.fog.near = lerp(30, 22, this.nightAmount);
+      this.scene.fog.far = lerp(250, 190, this.nightAmount);
     } else {
       this.scene.fog.color.copy(this.fogColor);
       this.scene.fog.near = lerp(150, 30, this.rainIntensity);
       this.scene.fog.far = lerp(900, 210, this.rainIntensity);
     }
 
-    // --- ライト ---
-    this.sun.color.copy(this.sunColor);
-    this.sun.intensity = dirI * cloudDim;
-    this.moon.intensity = this.nightAmount * 0.34 * cloudDim;
-    this.moon.position.copy(this.sunDir).multiplyScalar(-160);
-    this.hemi.intensity = lerp(0.22, 0.78, ambI) * lerp(1, 1.35, this.cloudiness)
-      + (this.underwater ? 1.15 * lerp(1, 0.3, this.nightAmount) : 0);
+    /* --- ライト ---
+       平行光 1 本を «昼は太陽・夜は月» として使い回す。どちらにも
+       «地平線で消える» ゲートを掛けてあるので、両者がすれ違う瞬間には
+       どちらもほぼ 0 になり、向きが 180° 裏返っても絵は動かない。
+       （以前は sunDir.y < -0.12 になった時点で強度 0.8 の太陽を即座に
+         visible=false にしていたので、日没に照明がパチンと切れていた） */
+    const horizonGate = (y) => smoothstep(-0.02, 0.14, y);
+    const sunI = dirI * cloudDim * horizonGate(this.sunDir.y);
+    // 月は太陽のちょうど反対側。満月なので «沈んでいて出ない» 夜は無い
+    const moonI = MOON_INTENSITY * cloudDim * horizonGate(-this.sunDir.y);
+    this.moonAmount = moonI > sunI ? 1 : 0;
+    if (this.moonAmount) {
+      this.keyDir.copy(this.sunDir).negate();
+      this.sun.color.copy(MOON_COLOR);
+      this.sun.intensity = moonI;
+    } else {
+      this.keyDir.copy(this.sunDir);
+      this.sun.color.copy(this.sunColor);
+      this.sun.intensity = sunI;
+    }
+    /* 日の出・日没の 30 分だけは太陽も月も地平線にいて直射がほとんど無い。
+       «常に満月» の世界でここだけ暗く落ちると事故に見えるので、抜けた直射を
+       半球光で埋める。向きを持たない光なので、キーライトが太陽から月へ
+       裏返るのもちょうどこの谷の底で起き、絵の上では見えない */
+    const twilightFill = clamp01(1 - (sunI + moonI) / 1.6) * 1.15;
+    this.hemi.intensity = (lerp(0.22, 0.78, ambI) + twilightFill) * lerp(1, 1.35, this.cloudiness)
+      + (this.underwater ? 1.15 * lerp(1, 0.55, this.nightAmount) : 0);
     this.hemi.color.copy(this.horizonColor).lerp(this.zenithColor, 0.5);
     this.hemi.groundColor.setRGB(0.10 + 0.12 * ambI, 0.13 + 0.13 * ambI, 0.09 + 0.1 * ambI);
 
     // 影カメラを注視点に追従
     const fx = focus ? focus.x : 0, fz = focus ? focus.z : 0;
     this.sunTarget.position.set(fx, 0, fz);
-    this.sun.position.set(fx + this.sunDir.x * 150, this.sunDir.y * 150 + 6, fz + this.sunDir.z * 150);
-    this.sun.visible = this.sunDir.y > -0.12 && this.sun.intensity > 0.02;
+    this.sun.position.set(fx + this.keyDir.x * 150, this.keyDir.y * 150 + 6, fz + this.keyDir.z * 150);
+    this.sun.visible = this.sun.intensity > 0.015;
 
     // 空ドームをカメラに追従
     if (camera) this.sky.position.copy(camera.position);

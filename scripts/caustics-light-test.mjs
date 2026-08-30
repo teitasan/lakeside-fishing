@@ -23,6 +23,10 @@ assert.doesNotMatch(src, /smoothstep\(-0\.05, 0\.30, sd\.y\)/, '飽和の早い�
 for (const u of ['uCaustNight', 'uCaustRain', 'uCaustCloud']) {
   assert.ok(src.includes(u), `${u} が効いていない`);
 }
+/* «常に満月» の世界なので、夜は消さずに落とすだけ。0 に潰すと
+   夜の水中カメラで湖底がのっぺりした一色になる */
+assert.match(src, /mix\(1\.0, 0\.30, uCaustNight\)/, '夜の網目が残っていない');
+assert.doesNotMatch(src, /1\.0 - uCaustNight \* 0\.94/, '夜に潰す旧式が残っている');
 
 /* --- 日中の形が太陽光と揃うか --- */
 // sky.js の KEYS（h, dir）と cloudDim / sunDir をそのまま写したもの
@@ -40,11 +44,23 @@ function sky(t) {
   const ang = ((t - 6) / 24) * TAU;
   const v = [Math.cos(ang), Math.sin(ang), 0.34];
   const sy = v[1] / Math.hypot(...v);
-  return { sy, dir: A[1] + (B[1] - A[1]) * f, night: cl(1 - ss(-0.16, 0.08, sy)) };
+  /* sky.js と同じ «キーライト» の決め方。平行光は 1 本しかなく、
+     昼は太陽・夜は月（太陽のちょうど反対）として使い回される。
+     コースティクスもその向きを見るので、夜の網目は月の高度で決まる */
+  const gate = (y) => ss(-0.02, 0.14, y);
+  const dir = A[1] + (B[1] - A[1]) * f;
+  const cloudDim = 1 - CLOUD * 0.45;
+  const sunI = dir * cloudDim * gate(sy);
+  const moonI = MOON_INTENSITY * cloudDim * gate(-sy);
+  const moon = moonI > sunI;
+  return {
+    sy, dir, moon, keyY: moon ? -sy : sy, night: cl(1 - ss(-0.16, 0.08, sy)),
+  };
 }
 const CLOUD = 0.14;   // 晴れ
-const caustFade = (s) => (1 - s.night * 0.94) * (1 - CLOUD * 0.62)
-  * ss(-0.05, 0.22, s.sy) * mix(0.55, 1.0, ss(0.10, 0.75, s.sy));
+const MOON_INTENSITY = 1.7;
+const caustFade = (s) => mix(1, 0.30, s.night) * (1 - CLOUD * 0.62)
+  * ss(-0.05, 0.22, s.keyY) * mix(0.55, 1.0, ss(0.10, 0.75, s.keyY));
 
 const rows = [];
 for (let h = 5; h <= 19; h += 0.5) {
@@ -79,8 +95,14 @@ for (const r of graze) {
 }
 const horizon = rows.filter((r) => Math.abs(r.elev) < 1);
 for (const r of horizon) {
-  assert.ok(r.c / maxC < 0.10, `地平線の太陽で網目が残っている (${(r.c / maxC).toFixed(2)})`);
+  assert.ok(r.c / maxC < 0.12, `地平線の太陽で網目が残っている (${(r.c / maxC).toFixed(2)})`);
 }
+
+/* --- 夜 ---
+   満月が高いところにある真夜中は、消えてはいけないが昼と同じでも困る */
+const midnight = caustFade(sky(0)) / maxC;
+assert.ok(midnight > 0.15, `満月の夜に網目が消えている (${midnight.toFixed(2)})`);
+assert.ok(midnight < 0.45, `満月の夜が昼に近すぎる (${midnight.toFixed(2)})`);
 
 // 朝と正午で «同じ明るさ» になっていないこと（これが元の症状）
 const at = (h) => rows.find((r) => r.h === h);
@@ -92,4 +114,5 @@ console.log('caustics-light-test: ok');
 console.log(`  高度15°超の太陽光とのずれ 平均 ${mean.toFixed(3)} 最大 ${worst.toFixed(3)}`);
 console.log(`  ゲート 高度7° 網目 ${(rows.find((r) => Math.abs(r.elev - 7) < 1.5).c / maxC).toFixed(2)}`
   + ` / 太陽光 ${(rows.find((r) => Math.abs(r.elev - 7) < 1.5).sun / maxSun).toFixed(2)}`);
-console.log(`  7時 ${morning.toFixed(2)} / 12時 ${noon.toFixed(2)}（正午を 1.00 とした比）`);
+console.log(`  7時 ${morning.toFixed(2)} / 12時 ${noon.toFixed(2)}`
+  + ` / 満月の真夜中 ${midnight.toFixed(2)}（正午を 1.00 とした比）`);

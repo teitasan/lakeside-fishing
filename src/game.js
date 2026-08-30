@@ -350,8 +350,8 @@ export class Game {
       uCaustShape: { value: new THREE.Vector2(1.0, 1.4) },
       uCaustRange: { value: new THREE.Vector2(1.3, 0.22) },
       uCaustDepth: { value: new THREE.Vector2(0.07, 0.60) },
-      uCaustDist: { value: new THREE.Vector2(16.0, 46.0) },
-      uCaustFar: { value: new THREE.Vector2(3.5, 12.0) },
+      uCaustDist: { value: new THREE.Vector2(28.0, 60.0) },
+      uCaustFar: { value: new THREE.Vector2(6.0, 20.0) },
       // x = 歪める量, y = 横ずれに効かせる深度の上限（m）
       uCaustWarp: { value: new THREE.Vector2(1.15, 2.5) },
       uCaustMag: { value: 0.18 },
