@@ -383,7 +383,13 @@ export function buildBranches(skel, { radial = [8, 5, 4, 3], levelMax = 99, vSca
     for (let i = 0; i < pts.length - 1; i++) {
       for (let j = 0; j < rad; j++) {
         const a = base + i * ring + j, b = a + ring;
-        idx.push(a, b, a + 1, a + 1, b, b + 1);
+        /* 巻きは «外向き» に取る。
+           a=(輪 i, 角 j) / b=(輪 i+1, 角 j) / a+1=(輪 i, 角 j+1) とすると
+             (a, b, a+1) の面法線は (b-a)×(a+1-a) = T×(r dθ dDir) = -dir
+           で内向きになる。FrontSide で描いているので «手前の壁» が
+           カリングされ、向こう側の内壁が見える＝幹が筒の内側に見える。
+           近くで «⊂ のはずが ⊃ に見える» のはこれ。順を入れ替えて外向きにする。 */
+        idx.push(a, a + 1, b, a + 1, b + 1, b);
       }
     }
   }

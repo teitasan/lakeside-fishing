@@ -312,6 +312,17 @@ assert.match(treesSrc, /function flattenBarkShading/);
 assert.match(treesSrc, /boxBlurWrap\(luma, size/,
   'ぼかしはタイル境界をまたぐこと（またがないと縁だけ均され方が変わる）');
 
+/* 幹（チューブ）の巻きは «外向き» であること。
+   a=(輪 i, 角 j) / b=(輪 i+1, 角 j) のとき
+     (a, b, a+1) → 面法線 (b-a)×(a+1-a) = T×(r dθ dDir) = -dir  ＝ 内向き
+   で、FrontSide だと手前の壁がカリングされて向こう側の内壁が見える。
+   近くで «⊂ のはずが ⊃ に見える» のはこれ。実測では幹の三角形 3972 枚
+   すべてで巻きと頂点法線が逆（内積 -0.99）だった。 */
+assert.match(treesSrc, /idx\.push\(a, a \+ 1, b, a \+ 1, b \+ 1, b\);/,
+  '幹の巻きが外向きでない');
+assert.doesNotMatch(treesSrc, /idx\.push\(a, b, a \+ 1, a \+ 1, b, b \+ 1\);/,
+  '内向きの旧い巻きが残っている');
+
 console.log('tree-test: ok');
 console.log(`  ブナ 枝${beech.branches.toFixed(0)} 葉${beech.leaves.toFixed(0)} ` +
   `樹高${beech.height.toFixed(1)}m 樹冠${beech.crownR.toFixed(1)}m (比 ${beechRatio.toFixed(2)})`);
