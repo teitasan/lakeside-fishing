@@ -92,16 +92,43 @@ for (const need of [
   'uGroundSand',
   'void groundDetail(',
   'gView * (gGroundW.x * 0.40)',      // 法線
-  'mix(0.78, 1.12, gGround.b)',       // 遮蔽
+  'grainAo * gGravelTint',            // 遮蔽（視差の沈み込みから）
   'gGround.a, gGroundW.x',            // 粗さ
   'gGravelTint',                      // 石ごとの色味
   'uGroundFade',                      // 遠景でのちらつき止め
+  /* 視差オクルージョン。地面はほぼ水平で模様が world.xz なので、
+     接空間は «接 +X / 従接 +Z / 法線 +Y» と決まる。接線を持たない
+     地形メッシュでも解ける、というのがこの実装の肝 */
+  'vec3 pomTrace(',
+  'void groundParallax(',
+  '-(V.xz / max(V.y, 0.30)) * depth',   // 視線と «逆» へずらす
+  'off -= dOff * (1.0 - t);',           // 最後の 1 歩を詰める（縞防止）
+  'uPomFade',                           // 効かない距離では回さない
 ]) {
   assert.ok(terrain.includes(need), `terrain.js に ${need} がない`);
 }
 // groundDetail は under（水中）で割らずに呼ぶ。陸にも効かせるため
 const call = terrain.slice(terrain.indexOf('groundDetail(vBedWorldPos'), terrain.indexOf('groundDetail(vBedWorldPos') + 60);
 assert.ok(!call.includes('under'), '粒が水中だけに掛かっている');
+
+/* 視差のずれは «アルベドにも» 掛けること。
+   法線だけずらすと «凹凸は動くのに絵が動かない» という一番不自然な絵になる */
+assert.match(terrain, /vec2 pxz = wp\.xz \+ gPomOff;/, '粒に視差が掛かっていない');
+assert.match(terrain, /vec2 xz = wp\.xz \+ gPomOff;/, 'アルベドに視差が掛かっていない');
+/* 順番：視差 → アルベド → 粒。アルベドより後に決めても間に合わない */
+assert.ok(
+  terrain.indexOf('groundParallax(vBedWorldPos, vBed);')
+  < terrain.indexOf('diffuseColor.rgb = applyLandAlbedo('),
+  '視差はアルベドより先に決めること',
+);
+// 品質を落としたら回さない（ステップ 0 で素通り）
+assert.match(terrain, /if \(uPom\.z < 0\.5\) return;/, '低品質で視差を切れない');
+assert.match(terrain, /q === 'low' \? 0 :/, '低品質のステップ数が 0 でない');
+// 効かない距離まで回さない（fbm を含む重い経路に入る前に距離で切る）
+assert.ok(
+  terrain.indexOf('if (pf < 0.01) return;') < terrain.indexOf('float g = gravelMix(wp, bedKind);'),
+  '距離で切るより先に fbm を回している',
+);
 
 console.log('ground-grain-test: ok');
 console.log(`  粒の細かさ 砂利 ${cg.toFixed(3)} / 砂 ${cs.toFixed(3)}`);

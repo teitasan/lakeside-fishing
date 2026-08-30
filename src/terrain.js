@@ -241,7 +241,10 @@ function createGroundDetailTexture(kind, size = 384) {
       const j = y * size + x;
       data[i] = Math.round(clamp01(sx * 0.5 + 0.5) * 255);
       data[i + 1] = Math.round(clamp01(sz * 0.5 + 0.5) * 255);
-      data[i + 2] = Math.round(f.ao[j] * 255);
+      /* B は «高さ»。視差（POM）はこれを辿る。
+         遮蔽はもともとここに入れていたが、視差が «どれだけ沈んだか» を
+         返すので、そちらから取ったほうが実際の凹凸と合う */
+      data[i + 2] = Math.round(f.h[j] * 255);
       /* 砂利は A に «石ごとの色味»（砂は 0）を入れて、粗さはそこから
          シェーダ側で引く。砂には石がないので粗さをそのまま入れる */
       data[i + 3] = Math.round((kind === 'gravel' ? f.tint[j] : f.rough[j]) * 255);
@@ -634,6 +637,9 @@ export class Terrain {
     this.quality = q;
     this.underwaterProps?.setQuality(q);
     const u = this.mesh?.material?.userData?.bedUniforms;
+    if (u?.uPom) {
+      u.uPom.value.z = q === 'high' ? 16 : q === 'low' ? 0 : 10;
+    }
     if (u?.uGroundStrength) {
       u.uGroundStrength.value = q === 'high' ? 1 : q === 'low' ? 0.45 : 0.75;
     }
@@ -845,6 +851,16 @@ export class Terrain {
       /* 遠景では粒が 1px 未満になってチラつくので距離で消す。
          代わりに «実物の 3D 石» が遠景のシルエットを担う */
       uGroundFade: { value: new THREE.Vector2(26, 95) },
+      /* 視差（POM）。x = 砂利の起伏[m], y = 砂の起伏[m], z = 最大ステップ数。
+         砂利は 1.1m タイルに半径 12cm の石なので起伏は 9cm ほど。
+         深くしすぎると浅い角度で模様が «泳ぐ» */
+      uPom: {
+        value: new THREE.Vector3(0.055, 0.004,
+          this.quality === 'high' ? 16 : this.quality === 'low' ? 0 : 10),
+      },
+      /* 視差を効かせる距離。1 画素あたりの起伏が見えなくなったら
+         ステップを回すだけ無駄になる */
+      uPomFade: { value: new THREE.Vector2(3, 15) },
       uGroundStrength: { value: this.quality === 'high' ? 1 : this.quality === 'low' ? 0.45 : 0.75 },
       uBedDetailStrength: { value: this.quality === 'high' ? 0.34 : this.quality === 'low' ? 0.16 : 0.25 },
       uLandAlbedo: { value: landTextures?.albedo || dummyLandArray([160, 150, 130, 255], THREE.SRGBColorSpace) },
@@ -900,6 +916,8 @@ export class Terrain {
           #define LAND_ROCK 3.0
           uniform vec2 uGroundScale;
           uniform vec2 uGroundFade;
+          uniform vec3 uPom;
+          uniform vec2 uPomFade;
           uniform float uGroundStrength;
           uniform float uBedScale;
           uniform float uBedDetailScale;
@@ -912,28 +930,99 @@ export class Terrain {
           varying vec3 vBedWorldPos;
 
           /* 地面の «粒»：砂利と砂を選んで 1 枚にまとめる。
-             RG = 傾き, B = 遮蔽, A = 粗さ。
+             RG = 傾き, B = 高さ, A = 色味（砂利）／粗さ（砂）。
              w.x = 効かせ具合（距離フェード込み）、w.y = 砂利の割合 */
           vec4 gGround = vec4(0.5, 0.5, 0.5, 0.9);
           vec2 gGroundW = vec2(0.0);
           float gGravelTint = 1.0;
+          /* 視差でずらす «世界座標のずれ» と、視線が沈んだ深さ（0〜1）。
+             ずれはアルベドにも同じだけ掛けないと «形だけ動いて絵が動かない» */
+          vec2 gPomOff = vec2(0.0);
+          float gPomSink = 0.0;
+          float gGravelMix = 0.0;
+
+          /**
+           * 視差オクルージョン（POM）。
+           *
+           * 地面はほぼ水平で、模様は world.xz をそのまま UV にしているので、
+           * 接空間は «接 +X / 従接 +Z / 法線 +Y» と決まっている。だから
+           * 接線を持たない地形メッシュでも、視線をそのまま高さ場へ通せる。
+           *
+           * 視線が高さ場に «最初にぶつかる» ところまで辿り、世界座標の
+           * ずれと沈んだ深さを返す。沈んだ深さはそのまま遮蔽に使える
+           * （谷ほど深く沈む）。
+           */
+          vec3 pomTrace(sampler2D tex, vec2 wxz, float invTile,
+                        vec3 V, float depth, float steps) {
+            // 完全に沈んだときの世界座標のずれ。視線と «逆» へ動く
+            vec2 maxOff = -(V.xz / max(V.y, 0.30)) * depth;
+            float dz = 1.0 / steps;
+            vec2 dOff = maxOff * dz;
+            vec2 off = vec2(0.0);
+            float rayH = 1.0;
+            float h = texture2D(tex, wxz * invTile).b;
+            float prevH = h, prevRay = rayH;
+            for (int i = 0; i < 32; i++) {
+              if (float(i) >= steps || h >= rayH) break;
+              prevH = h; prevRay = rayH;
+              off += dOff; rayH -= dz;
+              h = texture2D(tex, (wxz + off) * invTile).b;
+            }
+            /* 最後の 1 歩を線形に詰める。詰めないと段差が縞になって出る */
+            float a = h - rayH, b = prevH - prevRay;
+            float t = clamp(b / max(b - a, 1e-4), 0.0, 1.0);
+            off -= dOff * (1.0 - t);
+            return vec3(off, 1.0 - mix(prevRay, rayH, t));
+          }
+
+          /* 砂利は «汀線まわり» と «岩質の底»。それ以外は砂。
+             まっすぐな帯にならないようノイズで崩す。
+             shoreNoise は fbm なので、必要になるまで呼ばないこと */
+          float gravelMix(vec3 wp, float bedKind) {
+            float g = clamp((1.0 - smoothstep(0.05, 1.10, wp.y))
+                          + smoothstep(0.55, 0.75, bedKind), 0.0, 1.0);
+            return g * (0.30 + 0.70 * smoothstep(0.30, 0.70, shoreNoise(wp.xz * 0.16)));
+          }
+
+          /* 砂利／砂の別と視差のずれを先に決める。
+             アルベド（applyLandAlbedo）より前に呼ぶ必要がある。
+             «遠い» と分かった時点で即戻る：ここで fbm を回すと、地形の
+             全ピクセル（遠くの山まで）に費用が乗る */
+          void groundParallax(vec3 wp, float bedKind) {
+            gGravelMix = -1.0;          // まだ決めていない印
+            gPomOff = vec2(0.0);
+            gPomSink = 0.0;
+            if (uPom.z < 0.5) return;
+            float pf = 1.0 - smoothstep(uPomFade.x, uPomFade.y,
+              length(wp - cameraPosition));
+            if (pf < 0.01) return;
+            float g = gravelMix(wp, bedKind);
+            gGravelMix = g;
+            vec3 V = normalize(cameraPosition - wp);
+            // 真上から見下ろすほどずれは小さいので、ステップも減らせる
+            float steps = mix(uPom.z, 8.0, clamp(V.y * 1.4, 0.0, 1.0));
+            vec3 r = (g > 0.5)
+              ? pomTrace(uGroundGravel, wp.xz, uGroundScale.x, V, uPom.x * pf, steps)
+              : pomTrace(uGroundSand, wp.xz, uGroundScale.y, V, uPom.y * pf, steps);
+            gPomOff = r.xy;
+            gPomSink = r.z * pf;
+          }
+
           void groundDetail(vec3 wp, float bedKind) {
             float fade = 1.0 - smoothstep(uGroundFade.x, uGroundFade.y,
               length(wp - cameraPosition));
             if (fade < 0.002) { gGroundW = vec2(0.0); return; }
-            /* 砂利は «汀線まわり» と «岩質の底»。それ以外は砂。
-               まっすぐな帯にならないようノイズで崩す */
-            float g = clamp((1.0 - smoothstep(0.05, 1.10, wp.y))
-                          + smoothstep(0.55, 0.75, bedKind), 0.0, 1.0);
-            g *= 0.30 + 0.70 * smoothstep(0.30, 0.70, shoreNoise(wp.xz * 0.16));
+            // 視差が «遠い» で戻っていたら、ここで初めて砂利の割合を決める
+            float g = gGravelMix < 0.0 ? gravelMix(wp, bedKind) : gGravelMix;
+            vec2 pxz = wp.xz + gPomOff;      // 視差でずらした位置
             /* 1 枚をそのまま貼ると «同じ石の並び» が 1.1m ごとに現れて
                プチプチに見える。回して縮めた 2 枚目を重ねて周期を殺す。
-               2 枚目は法線だけ弱めに足し、遮蔽と粗さは 1 枚目を主にする */
-            vec2 uv = wp.xz * uGroundScale.x;
+               2 枚目は法線だけ弱めに足し、高さと粗さは 1 枚目を主にする */
+            vec2 uv = pxz * uGroundScale.x;
             /* 2 枚目は «回して 1.63m» にする。1.1 と 1.63 は割り切れないので
                重ねた見た目の周期がとても長くなる。倍率を下げて大きくすると
                今度は 30cm の塊がぼやけて見えるので、石の大きさは揃える */
-            vec2 uv2 = mat2(0.83, -0.56, 0.56, 0.83) * wp.xz * (uGroundScale.x * 0.675);
+            vec2 uv2 = mat2(0.83, -0.56, 0.56, 0.83) * pxz * (uGroundScale.x * 0.675);
             vec4 gv = texture2D(uGroundGravel, uv);
             vec4 gv2 = texture2D(uGroundGravel, uv2);
             gv.xy = (gv.xy + gv2.xy) * 0.5;
@@ -942,7 +1031,7 @@ export class Terrain {
             float stone = smoothstep(0.04, 0.30, gv.a);
             gGravelTint = mix(1.0, 0.80 + gv.a * 0.40, stone);
             gv.a = clamp(0.92 - stone * 0.34, 0.0, 1.0);
-            vec4 sd = texture2D(uGroundSand, wp.xz * uGroundScale.y);
+            vec4 sd = texture2D(uGroundSand, pxz * uGroundScale.y);
             gGround = mix(sd, gv, g);
             gGravelTint = mix(1.0, gGravelTint, g);
             gGroundW = vec2(fade * uGroundStrength, g);
@@ -982,7 +1071,8 @@ export class Terrain {
             float wRock = smoothstep(0.45, 0.72, vSlope);
             // 雪は無い（森林限界より下の山）。高い所も林床タイルのまま
             float wSum = max(1e-4, wBeach + wGrass + wForest);
-            vec2 xz = wp.xz;
+            // 視差のずれはアルベドにも掛ける。掛けないと «凹凸だけ動いて絵が動かない»
+            vec2 xz = wp.xz + gPomOff;
             vec3 col = (sampleLand(LAND_BEACH, xz, uLandScale.x) * wBeach
                       + sampleLand(LAND_GRASS, xz, uLandScale.y) * wGrass
                       + sampleLand(LAND_FOREST, xz, uLandScale.z) * wForest) / wSum;
@@ -1021,13 +1111,20 @@ export class Terrain {
               bedCol *= mix(1.0, 0.38, d);
               diffuseColor.rgb = mix(diffuseColor.rgb, bedCol, under);
             }
+            /* 視差のずれを先に決める。アルベドも粒も同じずれを使う */
+            groundParallax(vBedWorldPos, vBed);
             diffuseColor.rgb = applyLandAlbedo(vBedWorldPos, under, diffuseColor.rgb);
             gShoreWet = shoreWetness(vBedWorldPos);
             diffuseColor.rgb = shoreDress(diffuseColor.rgb, vBedWorldPos, under);
             /* 粒の遮蔽。石の «あいだ» が締まるので、平らな砂浜が
-               «塗った面» に見えなくなる。ここは水中も陸も同じに掛ける */
+               «塗った面» に見えなくなる。ここは水中も陸も同じに掛ける。
+               視差が効いている間は «視線がどれだけ沈んだか» を使う。
+               谷ほど深く沈むので、実際の凹凸とずれない。視差の外では
+               高さそのものを代わりに使う */
             groundDetail(vBedWorldPos, vBed);
-            diffuseColor.rgb *= mix(1.0, mix(0.78, 1.12, gGround.b) * gGravelTint, gGroundW.x);
+            float grainAo = mix(mix(0.80, 1.10, gGround.b), 1.10 - gPomSink * 0.52,
+              step(0.001, gPomSink));
+            diffuseColor.rgb *= mix(1.0, grainAo * gGravelTint, gGroundW.x);
           }`
         )
         .replace(
@@ -1077,7 +1174,7 @@ export class Terrain {
           totalEmissiveRadiance += causticLight(vBedWorldPos, normal);`
         );
     };
-    mat.customProgramCacheKey = () => 'terrain-bed-tex-v14-nosnow';
+    mat.customProgramCacheKey = () => 'terrain-bed-tex-v16-pom';
   }
 
   /** 湖底テクスチャが使えない環境でも、頂点色の湖底へコースティクスを載せる。 */
