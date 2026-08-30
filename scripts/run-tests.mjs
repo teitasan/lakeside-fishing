@@ -30,6 +30,7 @@ const tests = [
   'scripts/ground-grain-test.mjs',
   'scripts/land-texture-test.mjs',
   'scripts/terrain-mesh-test.mjs',
+  'scripts/caustics-light-test.mjs',
 ];
 
 for (const rel of tests) {

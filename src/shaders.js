@@ -170,7 +170,15 @@ vec3 causticLight(vec3 worldPos, vec3 viewNormal) {
   vec3 upView = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
   fade *= smoothstep(0.15, 0.72, dot(normalize(viewNormal), upView));
   fade *= (1.0 - uCaustNight * 0.94) * (1.0 - uCaustRain * 0.72) * (1.0 - uCaustCloud * 0.62);
-  fade *= smoothstep(-0.05, 0.30, sd.y);
+  /* 太陽高度は 2 段で効かせる。
+       ゲート  低い太陽は水面で反射されて水中に届かないので、消す
+       光量    それとは別に、高度そのものにも比例させる
+     ゲート 1 本（smoothstep(-0.05, 0.30, y)）だけだと高度 17.5° で飽和して、
+     7:20〜16:40 の 9 時間ずっと真昼と同じ明るさになっていた。その間
+     太陽光は 0.62〜1.00 で振れるので、地面が朝夕で暗くなるのに湖底の
+     網目だけ真昼のまま、という食い違いが出る。 */
+  fade *= smoothstep(-0.05, 0.22, sd.y)
+        * mix(0.55, 1.0, smoothstep(0.10, 0.75, sd.y));
   vec3 sunView = normalize((viewMatrix * vec4(sd, 0.0)).xyz);
   float facing = max(dot(normalize(viewNormal), sunView), 0.0);
   fade *= smoothstep(0.02, 0.38, facing);
