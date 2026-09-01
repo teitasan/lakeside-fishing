@@ -145,21 +145,102 @@ export const SPECIES = {
 export const SPECIES_IDS = Object.keys(SPECIES);
 
 /**
+ * 1 本ごとの «生え方»。樹種は同じでも、傾き・樹冠の偏り・段（若木/成木）で
+ * シルエットが変わる。参考実装の habit を、骨格生成に載せられる最小形に落とした。
+ * @param {string} kind
+ * @param {() => number} rng
+ */
+export function deriveTreeHabit(kind, rng) {
+  const tierRoll = rng();
+  let tier = 'normal';
+  let heightMul = 1;
+  if (tierRoll < 0.20) {
+    tier = 'suppressed';
+    heightMul = lerp(0.30, 0.48, rng());
+  } else if (tierRoll > 0.89) {
+    tier = 'veteran';
+    heightMul = lerp(1.10, 1.34, rng());
+  }
+
+  const leanLimit = kind === 'cedar' ? 0.055 : 0.095;
+  const lean = rng() < 0.20
+    ? leanLimit * (0.55 + rng() * 0.45)
+    : leanLimit * rng() * 0.28;
+  const leanAzimuth = rng() * TAU;
+
+  const crownBias = rng() < 0.24 ? 0.10 + rng() * 0.20 : rng() * 0.05;
+  const crownBiasAzimuth = rng() * TAU;
+
+  return { tier, heightMul, lean, leanAzimuth, crownBias, crownBiasAzimuth };
+}
+
+/** 傾き：方位 az 方向へ lean だけ倒す */
+function applyLean(p, lean, az) {
+  const ca = Math.cos(az), sa = Math.sin(az);
+  let xr = p.x * ca - p.z * sa;
+  let zr = p.x * sa + p.z * ca;
+  const cl = Math.cos(lean), sl = Math.sin(lean);
+  const yr = p.y * cl - zr * sl;
+  const zt = p.y * sl + zr * cl;
+  return v(xr * ca + zt * sa, yr, -xr * sa + zt * ca);
+}
+
+/** 樹冠を一方向へ寄せる（lopsided crown の近似） */
+function applyCrownBias(leaves, bias, az) {
+  if (bias < 1e-4 || !leaves.length) return;
+  let cx = 0, cy = 0, cz = 0;
+  for (const l of leaves) { cx += l.x; cy += l.y; cz += l.z; }
+  const inv = 1 / leaves.length;
+  cx *= inv; cy *= inv; cz *= inv;
+  const bx = Math.cos(az) * bias, bz = Math.sin(az) * bias;
+  for (const l of leaves) {
+    const dx = l.x - cx, dy = l.y - cy, dz = l.z - cz;
+    const dist = Math.hypot(dx, dy, dz) || 1;
+    const push = bias * dist * 0.55;
+    l.x += bx * push;
+    l.y += dy * push * 0.18;
+    l.z += bz * push;
+    const nd = norm(add(v(l.dx, l.dy, l.dz), mul(v(bx, 0, bz), 0.22)));
+    l.dx = nd.x; l.dy = nd.y; l.dz = nd.z;
+  }
+}
+
+function applyHabitTransform(tree, habit) {
+  for (const b of tree.branches) {
+    for (const p of b.points) {
+      const q = applyLean(p, habit.lean, habit.leanAzimuth);
+      p.x = q.x; p.y = q.y; p.z = q.z;
+    }
+  }
+  for (const l of tree.leaves) {
+    const q = applyLean(l, habit.lean, habit.leanAzimuth);
+    l.x = q.x; l.y = q.y; l.z = q.z;
+    const d = applyLean(v(l.dx, l.dy, l.dz), habit.lean, habit.leanAzimuth);
+    l.dx = d.x; l.dy = d.y; l.dz = d.z;
+  }
+  applyCrownBias(tree.leaves, habit.crownBias, habit.crownBiasAzimuth);
+}
+
+/**
  * 骨格を作る。
  * @param {string} kind SPECIES のキー
  * @param {() => number} rng [0,1) を返す決定論的乱数
- * @param {{levels?: number}} opts levels で枝の再帰段数を打ち切る（LOD 用ではなく形の調整用）
- * @returns {{branches: Array, leaves: Array, height: number, crownR: number, species: object}}
+ * @param {{levels?: number, habit?: object}} opts levels で枝の再帰段数を打ち切る（LOD 用ではなく形の調整用）
+ * @returns {{branches: Array, leaves: Array, height: number, crownR: number, species: object, habit: object}}
  */
-export function growTree(kind, rng, { levels } = {}) {
+export function growTree(kind, rng, { levels, habit } = {}) {
   const sp = SPECIES[kind];
   if (!sp) throw new Error(`unknown species: ${kind}`);
+  const h = habit ?? deriveTreeHabit(kind, rng);
   const maxLevel = Math.min(levels ?? sp.levels.length, sp.levels.length) - 1;
 
   const branches = [];
   const leaves = [];
-  const height = sp.height * (0.85 + rng() * 0.3);
+  const height = sp.height * (0.85 + rng() * 0.3) * h.heightMul;
   const trunkLen = height * (sp.id === 'cedar' ? 0.98 : 0.62);
+  /* 若木は枝段を 1 段落として crown を小さく、古木はそのまま */
+  const levelCut = h.tier === 'suppressed' ? 1 : 0;
+  const effMax = Math.max(0, maxLevel - levelCut);
 
   /**
    * 枝を 1 本伸ばして折れ線にし、子枝と葉を再帰的に付ける。
@@ -185,9 +266,9 @@ export function growTree(kind, rng, { levels } = {}) {
 
     /* 葉は最終段だけでなく 1 段手前にも付ける（leafLevels）。
        最終段だけだと樹冠の内側が空洞になり、外殻に葉を貼った風船に見える */
-    const leafFrom = maxLevel - ((sp.leafLevels ?? 1) - 1);
-    if (level >= leafFrom) placeLeaves(bi, points, level, level === maxLevel ? 1 : 0.5);
-    if (level >= maxLevel) return;
+    const leafFrom = effMax - ((sp.leafLevels ?? 1) - 1);
+    if (level >= leafFrom) placeLeaves(bi, points, level, level === effMax ? 1 : 0.5);
+    if (level >= effMax) return;
 
     const cp = sp.levels[level + 1];
     const n = Math.max(1, Math.round(cp.count * (0.75 + rng() * 0.5)));
@@ -231,6 +312,7 @@ export function growTree(kind, rng, { levels } = {}) {
   }
 
   branchOut(0, v(0, 0, 0), v(0, 1, 0), trunkLen, sp.trunkRadius, 0);
+  applyHabitTransform({ branches, leaves }, h);
 
   let crownR = 0, top = 0;
   for (const l of leaves) {
@@ -240,7 +322,7 @@ export function growTree(kind, rng, { levels } = {}) {
   for (const b of branches) {
     for (const q of b.points) top = Math.max(top, q.y);
   }
-  return { branches, leaves, height: top, crownR, species: sp };
+  return { branches, leaves, height: top, crownR, species: sp, habit: h };
 }
 
 /** 折れ線上の位置 at∈[0,1]（弧長ではなく点の等分）を補間して返す */

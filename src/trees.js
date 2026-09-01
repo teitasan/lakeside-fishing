@@ -12,7 +12,7 @@
    森全体がチラチラした砂目に見えるため。
    =========================================================== */
 import * as THREE from 'three';
-import { growTree, SPECIES, lodFor, LOD_DIST } from './treeSkeleton.js?v=20260830-zone5';
+import { growTree, SPECIES, deriveTreeHabit, lodFor, LOD_DIST } from './treeSkeleton.js?v=20260830-zone5';
 import { lodForList } from './util.js?v=20260830-zone5';
 import { boxBlurWrap } from './tileableNoise.js?v=20260830-zone5';
 import { LodInstances, tintAt } from './lodInstances.js?v=20260830-zone5';
@@ -26,7 +26,7 @@ export { LOD_DIST, lodFor };
 export const LOD_FADE_BAND = 12;
 
 /** 種ごとの見た目のバリエーション数（LOD をまたいでも同じ骨格を使う） */
-export const VARIANTS = 2;
+export const VARIANTS = 4;
 
 /* ---------------- 樹皮テクスチャ ---------------- */
 
@@ -655,7 +655,9 @@ export class TreeSet {
       if (opts.addWindSway) this.swayMaterials.push(barkNear, leafNear, leafMid);
 
       for (let va = 0; va < VARIANTS; va++) {
-        const skel = growTree(k, makeRng(seed ^ (0x9e37 * (this.kinds.indexOf(k) + 1)) ^ (va * 0x51ed)));
+        const vaRng = makeRng(seed ^ (0x9e37 * (this.kinds.indexOf(k) + 1)) ^ (va * 0x51ed));
+        const habit = deriveTreeHabit(k, vaRng);
+        const skel = growTree(k, vaRng, { habit });
         const norm = 1 / Math.max(skel.height, 0.001);   // 樹高 1 に正規化して置く
         this.trunkR[k] = Math.max(this.trunkR[k] || 0, sp.trunkRadius * norm);
 

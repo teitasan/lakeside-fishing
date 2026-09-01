@@ -1709,19 +1709,30 @@ export class Terrain {
       if (this.distToDock(x, z) < 3.6) continue;
       if (Math.hypot(x - this.spawnPos.x, z - this.spawnPos.z) < 6) continue;
 
-      /* 樹種の分布：スギは沢筋〜低い斜面に群れて生え、ブナは尾根まで上がる。
-         完全なランダムだと 2 種が均一に混ざって「植えた林」に見えるので、
-         ゆるいノイズで塊にする */
+      /* 樹種の分布：スギは沢筋〜低い斜面に群れ、ブナは尾根側。
+         参考 preset の closed-canopy 構成を、2 種の世界で近似する。
+         完全なランダムだと «植えた林» に見えるので、多段ノイズで塊と空明を作る */
+      const forestCoarse = this.noise.fbm(x * 0.009, z * 0.009, 3);
+      const forestFine = this.noise.fbm(x * 0.038 + 11.3, z * 0.038 - 11.3, 2);
+      const forestField = forestCoarse * 0.58 + forestFine * 0.42;
+      if (forestField < -0.07) continue;   // 空明（gapRate 相当）
+      const cluster = this.noise.fbm(x * 0.015 + 3.1, z * 0.015 - 3.1, 2);
+      if (cluster < -0.14 && rng() > 0.38) continue;
+
       const patch = this.noise.fbm(x * 0.011, z * 0.011, 2);
-      const cedarBias = clamp01(0.62 - (h - 6) / 46) * 0.85;
-      const kind = (patch * 0.5 + 0.5) < cedarBias + (rng() - 0.5) * 0.22 ? 'cedar' : 'beech';
+      const valley = clamp01(0.70 - (h - 6) / 50) * 0.88;
+      const cedarBias = valley + patch * 0.16;
+      const kind = (patch * 0.5 + 0.5) < cedarBias + (rng() - 0.5) * 0.20 ? 'cedar' : 'beech';
       const va = Math.floor(rng() * TREE_VARIANTS);
 
-      // 樹高（m）。高いところほど風衝で低くなる
+      // 樹高（m）。高いところほど風衝で低く。若木・古木の段を混ぜる
       const alt = clamp01(h / 150);
-      const height = kind === 'cedar'
+      let height = kind === 'cedar'
         ? lerp(16, 30, rng()) * lerp(1, 0.58, alt)
         : lerp(11, 22, rng()) * lerp(1, 0.62, alt);
+      const tierRoll = rng();
+      if (tierRoll < 0.20) height *= lerp(0.30, 0.48, rng());
+      else if (tierRoll > 0.90) height *= lerp(1.08, 1.30, rng());
 
       const toBand = dist - shoreMaxNear(ang) - WALK_INLAND;
       if (toBand > FAR_GATE) {
@@ -1940,6 +1951,17 @@ export class Terrain {
   }
 
   /**
+   * 下草の塊マスク。参考 foliageSpecies の clumping / patchScale を
+   * 既存の fbm ノイズで近似する。
+   */
+  _underClumpMask(x, z, clumping, patchScale, salt = 0) {
+    const s = Math.max(0.004, patchScale * 0.011);
+    const coarse = this.noise.fbm(x * s + salt, z * s - salt, 3);
+    const fine = this.noise.fbm(x * s * 2.6 + salt * 1.9, z * s * 2.6 - salt * 1.9, 2);
+    return coarse * (0.52 + clumping * 0.48) + fine * (0.48 - clumping * 0.28);
+  }
+
+  /**
    * 下草（低木・シダ・草の塊）。
    *
    * 木をいくら増やしても «森の中» には見えない。目の高さから下が空で、
@@ -1953,38 +1975,53 @@ export class Terrain {
        «森の中» に見せるには株の間隔を 2m くらいまで詰める必要があるので、
        ここは思い切って増やす */
     const want = {
-      herb: Math.round(30000 * scale),
-      fern: Math.round(9000 * scale),
-      bush: Math.round(3500 * scale),
+      moss: Math.round(9000 * scale),
+      herb: Math.round(21000 * scale),
+      rush: Math.round(4800 * scale),
+      fern: Math.round(5200 * scale),
+      bracken: Math.round(2600 * scale),
+      bush: Math.round(2600 * scale),
+      bramble: Math.round(1400 * scale),
     };
     this.undergrowth = new Undergrowth(this.scene, {
       seed: this.seed ^ 0x3a91,
       addWindSway,
       capacity: {
-        herb: [Math.round(2600 * scale), Math.round(9000 * scale)],
-        fern: [Math.round(1000 * scale), Math.round(3400 * scale)],
-        bush: [Math.round(450 * scale), Math.round(1500 * scale)],
+        moss: [Math.round(2200 * scale), Math.round(7200 * scale)],
+        herb: [Math.round(2200 * scale), Math.round(7800 * scale)],
+        rush: [Math.round(700 * scale), Math.round(2400 * scale)],
+        fern: [Math.round(750 * scale), Math.round(2500 * scale)],
+        bracken: [Math.round(420 * scale), Math.round(1400 * scale)],
+        bush: [Math.round(380 * scale), Math.round(1200 * scale)],
+        bramble: [Math.round(220 * scale), Math.round(720 * scale)],
       },
     });
     const rng = makeRng(this.seed ^ 0x5c2e);
+    const KIND_SALT = {
+      moss: 0, herb: 19.3, rush: 41.7, fern: 31.7, bracken: 58.2, bush: 64.3, bramble: 77.1,
+    };
     this.undergrowthCounts = {};
     for (const kind of Object.keys(want)) {
       const cfg = UNDER_KINDS[kind];
-      /* 種ごとに «塊» の場所をずらす。一様に撒くと 3 種が均一に混ざって
-         «敷き詰めた» 見え方になる */
-      const salt = kind === 'herb' ? 0 : kind === 'fern' ? 31.7 : 64.3;
-      const thr = kind === 'herb' ? -0.45 : kind === 'fern' ? -0.10 : 0.12;
+      const salt = KIND_SALT[kind] ?? 0;
+      /* clumping が高い種ほどしきい値を上げ、塊の中だけ連続させる */
+      const thr = lerp(-0.52, 0.06, cfg.clumping);
       let placed = 0;
-      for (let i = 0; i < want[kind] * 6 && placed < want[kind]; i++) {
+      for (let i = 0; i < want[kind] * 8 && placed < want[kind]; i++) {
         const ang = rng() * TAU;
         const rr = this.shoreRadius(Math.cos(ang) * 150, Math.sin(ang) * 150);
-        const dist = rr - 8 + rng() * 138;   // 歩ける +72m ＋ 見通し（描画 48m）ぶん
+        const dist = rr - 8 + rng() * 138;
         const x = Math.cos(ang) * dist, z = Math.sin(ang) * dist;
         const h = this.heightAt(x, z);
-        // 砂浜には生えない。崖にも生えない
         if (h < 0.9 || this.slopeAt(x, z) > 0.9) continue;
         if (this.distToDock(x, z) < 2.6) continue;
-        if (this.noise.fbm(x * 0.06 + salt, z * 0.06 - salt, 2) < thr) continue;
+        const clump = this._underClumpMask(x, z, cfg.clumping, cfg.patchScale, salt);
+        if (clump < thr) continue;
+        /* 種ごとの生育帯。苔は日陰寄り、ワラビは空明寄り */
+        const shade = clamp01(1 - h / 95);
+        if (kind === 'moss' && shade < 0.22 && rng() > 0.35) continue;
+        if (kind === 'bracken' && clump > 0.38 && rng() > 0.55) continue;
+        if (kind === 'bramble' && clump < -0.05 && rng() > 0.45) continue;
         const height = lerp(cfg.height[0], cfg.height[1], Math.pow(rng(), 1.2));
         this.undergrowth.add(kind, x, h - 0.04, z, height,
           (rng() * 3) | 0, rng() * TAU);
