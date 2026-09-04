@@ -199,13 +199,17 @@ assert.match(waterSrc, /float rough = clamp\(length\(slope\) \* 1\.55/,
 assert.match(waterSrc, /reflSize = opts\.quality === 'high' \? 1024 : 512/,
   'reflection render target must be larger than the old 512/320');
 
-// 泡：細かいスケール + 先端の白線 + 時間減衰
+// 泡：細かいスケール + 破れた先端 + 引き波レース + 時間減衰
 assert.match(waterSrc, /float tip = smoothstep\(uFoamTip\.x, uFoamTip\.y, wet\);/,
   'the swash tip must produce a tight bright line');
-assert.match(waterSrc, /uFoamTip: \{ value: new THREE\.Vector4\(0\.016, 0\.002, 0\.042, 0\.005\) \}/,
-  'a lake shore only gets a thin lapping line of foam, never a surf band');
-assert.match(waterSrc, /uFoamLace: \{ value: new THREE\.Vector4\(0\.62, 0\.88, 0\.55, 0\.92\) \}/,
+assert.match(waterSrc, /uFoamTip: \{ value: new THREE\.Vector4\(0\.016, 0\.002, 0\.054, 0\.004\) \}/,
+  'a lake shore only gets a thin lapping line and a restrained wash band');
+assert.match(waterSrc, /uFoamLace: \{ value: new THREE\.Vector4\(0\.49, 0\.83, 0\.67, 0\.68\) \}/,
   'lake foam must stay sparse and faint');
+assert.match(waterSrc, /float leading = tip /,
+  'the leading foam must be a separate broken layer');
+assert.match(waterSrc, /float retreat = band /,
+  'the retreat foam must be a separate wash layer');
 assert.match(waterSrc, /float age = smoothstep\(0\.04, 0\.22, wet\);/,
   'foam must fade with age behind the tip');
 assert.match(waterSrc, /vnoise\(sp \* 17\.0/, 'foam must carry a fine lace octave');

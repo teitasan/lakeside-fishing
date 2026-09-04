@@ -151,9 +151,9 @@ export class Water {
       uRippleNormal: { value: this.rippleNormalTex },
       /* 渚の泡もランタイムで詰めたいので出しておく
          x,y = 先端の白線の内外幅 / z,w = 後方の泡帯の内外幅 */
-      uFoamTip: { value: new THREE.Vector4(0.016, 0.002, 0.042, 0.005) },
+      uFoamTip: { value: new THREE.Vector4(0.016, 0.002, 0.054, 0.004) },
       // x = レースの下閾値, y = 上閾値, z = 泡の合成量, w = 古い泡の減衰
-      uFoamLace: { value: new THREE.Vector4(0.62, 0.88, 0.55, 0.92) },
+      uFoamLace: { value: new THREE.Vector4(0.49, 0.83, 0.67, 0.68) },
       /* 水越しの見え方の内訳。切り分け・調整用に uniform で出しておく
          x = 水の色（内向き散乱）, y = 逆光の透け, z = 水面反射 */
       uMixAmt: { value: new THREE.Vector3(1.0, 1.0, 1.0) },
@@ -515,12 +515,21 @@ export class Water {
             float lace = smoothstep(uFoamLace.x, uFoamLace.y, n1)
                        * mix(0.10, 1.0, mix(0.65, smoothstep(0.34, 0.74, n2), foamLod))
                        * mix(0.35, 1.0, mix(0.7, smoothstep(0.34, 0.80, n3), foamLod));
-            // 先端は連続した白線、後方は古くなるほど薄いレース
+            // 汀線に沿った粗い切れ目（n1 の再閾値のみ。追加サンプルなし）
+            float shoreVar = mix(0.40, 1.0, smoothstep(uFoamLace.x + 0.03, uFoamLace.y - 0.05, n1));
+            // 寄せ先端：n2/n3 で白線を割り、runUp 位相で流す
+            float edgeGrain = n2 * 0.55 + n3 * 0.45 + foamLag * 0.10;
+            float edgeBreak = mix(0.22, 1.0, smoothstep(0.34, 0.68, edgeGrain));
+            edgeBreak *= mix(0.48, 1.0, smoothstep(0.30, 0.66, n3 + foamLag * 0.06));
             float age = smoothstep(0.04, 0.22, wet);
-            shoreFoam = clamp(tip * (0.50 + 0.50 * lace)
-                            + band * lace * (1.0 - age * uFoamLace.w), 0.0, 1.0);
+            // 狭い破れた先端と、広い引き波レースを層に分ける
+            float leading = tip * edgeBreak * shoreVar * smoothstep(0.40, 0.82, lace) * 0.78;
+            float retreat = band * lace * shoreVar * (1.0 - age * uFoamLace.w)
+                          * mix(0.26, 0.72, smoothstep(0.36, 0.74, n2))
+                          * (1.0 - tip * 0.52);
+            shoreFoam = clamp(leading + retreat, 0.0, 1.0);
             shoreFoam *= 1.0 - smoothstep(70.0, 230.0, vFogDepth);
-            foamBright = mix(0.60, 1.02, tip) + lace * 0.10;
+            foamBright = mix(0.52, 0.96, leading) + retreat * 0.12 + tip * edgeBreak * 0.07;
           }
 
           float crest = smoothstep(0.58, 0.92, vWaveH / ${MAX_WAVE_AMP.toFixed(3)} / max(uWind, 0.35));
