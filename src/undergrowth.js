@@ -16,14 +16,13 @@
 import * as THREE from 'three';
 import { LodInstances, tintAt } from './lodInstances.js?v=20260830-zone5';
 import {
-  newOut, toGeometry, cardFan, paintBlade, leafGreen,
+  newOut, toGeometry, cardFan, paintBlade, leafGreen, PLANT_FADE_BAND,
 } from './waterPlants.js?v=20260830-zone5';
 import { applyPatches, lodDitherFade } from './materialPatch.js?v=20260830-zone5';
 import { makeRng, TAU, lerp, clamp01, spreadOrder } from './util.js?v=20260830-zone5';
 
 /** 近景 / 中景。これより遠い株は段を持たないので描かれない */
 export const UNDER_LOD = [22, 48];
-export const UNDER_FADE_BAND = 6;
 export const UNDER_VARIANTS = 3;
 
 /** 種ごとの実寸と見た目。clumping / patchScale は terrain の塊配置用 */
@@ -410,7 +409,7 @@ export class Undergrowth {
       lodDist: [...UNDER_LOD],
       hysteresis: 5,
       interval: 0.2,
-      fadeBand: UNDER_FADE_BAND,
+      fadeBand: PLANT_FADE_BAND,
     });
     const caps = opts.capacity || {};
     /* 風。低いものほど揺れは小さく速い */
@@ -441,7 +440,7 @@ export class Undergrowth {
           vertexColors: true,
           /* 段の切り替えはディザでクロスフェードする。入れないと帯の中で
              2 段ぶんが同時に不透明で描かれて、株が二重に見える */
-        }), [wind(WIND[kind]), (m) => lodDitherFade(m, UNDER_FADE_BAND)]);
+        }), [wind(WIND[kind]), (m) => lodDitherFade(m, PLANT_FADE_BAND)]);
         for (let lod = 0; lod < UNDER_LOD.length; lod++) {
           const cap = (caps[kind] || [900, 2600])[lod] ?? 1200;
           this.set.register(key, lod,

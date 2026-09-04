@@ -14,6 +14,20 @@ import { spreadOrder } from '../src/util.js';
 const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 const src = read('src/undergrowth.js');
 const terrain = read('src/terrain.js');
+const wp = read('src/waterPlants.js');
+
+/* 水草と陸草でフェード幅がずれると、同じ距離帯でも陸草だけ薄くなって
+   チカチカして見える。共通定数を使い、切替条件とディザの幅を揃える。 */
+{
+  assert.match(wp, /export const PLANT_FADE_BAND = (\d+);/);
+  assert.match(src, /PLANT_FADE_BAND/, '陸草も水草と共通のフェード幅を使うこと');
+  assert.doesNotMatch(src, /export const UNDER_FADE_BAND/, '陸草専用のフェード幅を残さないこと');
+  assert.match(src, /fadeBand: PLANT_FADE_BAND/);
+  assert.match(src, /lodDitherFade\(m, PLANT_FADE_BAND\)/,
+    '陸草の LOD ディザにも水草と同じフェード幅を使うこと');
+  assert.match(src, /import \{[\s\S]*PLANT_FADE_BAND,[\s\S]*\} from '\.\/waterPlants\.js/,
+    '陸草が水草の共通定数を import していること');
+}
 
 /* vertexColors を立てたら color 属性は必須。
    無いと WebGL の既定値 (0,0,0) が掛かって株が «真っ黒» になる。
@@ -32,8 +46,8 @@ const terrain = read('src/terrain.js');
 /* 段のクロスフェード。fadeBand を渡したらマテリアル側に
    lodDitherFade を入れないと、帯の中で 2 段ぶんが同時に不透明で描かれて
    株が二重に見える */
-assert.match(src, /fadeBand: UNDER_FADE_BAND/);
-assert.match(src, /lodDitherFade\(m, UNDER_FADE_BAND\)/,
+assert.match(src, /fadeBand: PLANT_FADE_BAND/);
+assert.match(src, /lodDitherFade\(m, PLANT_FADE_BAND\)/,
   'fadeBand を使うならディザも入れること');
 
 // カードは表裏 2 枚ぶん索引する作り（水草と共通）。DoubleSide は使わない
@@ -96,7 +110,6 @@ assert.doesNotMatch(src, /n: Math\.max\(1, n - s\), az0: rng\(\)/,
   '旧実装（段ごとに n で割り直す）が残っている');
 // 水草も同じ作りなので同じ罠を踏む
 {
-  const wp = read('src/waterPlants.js');
   assert.match(wp, /spreadOrder\(nMax\)\.slice\(0, n\)/,
     '水草も段ごとに向きを割り直さないこと');
 }
