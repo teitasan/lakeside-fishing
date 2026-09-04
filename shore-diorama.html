@@ -121,7 +121,7 @@ import * as THREE from 'three';
 import { Environment, WEATHERS } from './src/sky.js?v=20260828-uwgfx18';
 import { Terrain } from './src/terrain.js?v=20260830-zone5';
 import { resolveLake } from './src/lakefield.js';
-import { Water } from './src/water.js?v=20260828-snellwin2';
+import { Water } from './src/water.js?v=20260904-shorefoam3';
 import { PostFX } from './src/postfx.js?v=20260828-bloom1';
 import { createCausticTexture } from './src/causticTexture.js?v=20260828-caustnet3';
 
@@ -134,8 +134,8 @@ const PRESETS = {
   close: {
     id: 'close',
     label: '近距離・汀線',
-    eye: { inland: 1.15, along: 0, up: 0.42, lake: -0.55 },
-    target: { inland: 0.35, along: 0, up: 0, lake: 7.2 },
+    eye: { inland: 1.25, along: 0, up: 0.86, lake: -0.80 },
+    target: { inland: 0.25, along: 0, up: 0, lake: 5.2 },
     fov: 42,
     // Environment の本番空ドーム（半径 1500m）を遠平面で切らない。
     far: 3000,

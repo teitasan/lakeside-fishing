@@ -202,10 +202,10 @@ assert.match(waterSrc, /reflSize = opts\.quality === 'high' \? 1024 : 512/,
 // 泡：細かいスケール + 破れた先端 + 引き波レース + 時間減衰
 assert.match(waterSrc, /float tip = smoothstep\(uFoamTip\.x, uFoamTip\.y, wet\);/,
   'the swash tip must produce a tight bright line');
-assert.match(waterSrc, /uFoamTip: \{ value: new THREE\.Vector4\(0\.016, 0\.002, 0\.054, 0\.004\) \}/,
-  'a lake shore only gets a thin lapping line and a restrained wash band');
-assert.match(waterSrc, /uFoamLace: \{ value: new THREE\.Vector4\(0\.49, 0\.83, 0\.67, 0\.68\) \}/,
-  'lake foam must stay sparse and faint');
+assert.match(waterSrc, /uFoamTip: \{ value: new THREE\.Vector4\(0\.016, 0\.002, 0\.036, 0\.004\) \}/,
+  'a lake shore only gets a thin lapping line and a narrow wash band');
+assert.match(waterSrc, /uFoamLace: \{ value: new THREE\.Vector4\(0\.54, 0\.86, 0\.62, 0\.76\) \}/,
+  'lake foam must stay sparse, faint, and not read as an opaque close-up sheet');
 assert.match(waterSrc, /float leading = tip /,
   'the leading foam must be a separate broken layer');
 assert.match(waterSrc, /float retreat = band /,
