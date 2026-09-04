@@ -234,7 +234,7 @@ const ROCK_VERT = /* glsl */ `
 /**
  * 岩の見え方。
  *   水面下      いちばん暗い（濡れ + 水の吸収は水シェーダ側）
- *   水面すぐ上  濡れて暗く、つるつる
+ *   水面すぐ上  濡れて暗く、少し滑らか
  *   その上      乾いた岩。上向きの面と窪みに苔
  */
 const ROCK_FRAG = /* glsl */ `
@@ -268,9 +268,9 @@ const ROCK_FRAG = /* glsl */ `
   float dryUp = uWetParams.x * (0.55 + 0.9 * rockNoise(vRockWorldPos.xz * 1.9));
   float wet = 1.0 - smoothstep(0.0, max(dryUp, 0.02), vRockWorldPos.y);
   wet = max(wet, step(vRockWorldPos.y, 0.0));
-  // 濡れた岩は暗く、そして «つるつる» になる
+  // 濡れた岩は暗く、少し滑らかになる（鏡面反射を出しすぎない）
   rock *= mix(1.0, uWetParams.y, wet);
-  roughnessFactor = mix(roughnessFactor, 0.30, wet * 0.85);
+  roughnessFactor = mix(roughnessFactor, 0.60, wet * 0.85);
 
   diffuseColor.rgb *= rock;
 }

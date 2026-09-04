@@ -216,8 +216,8 @@ assert.match(rocks, /vec3 rn = objectNormal \/ max\(sc \* sc, vec3\(1e-6\)\);/,
 /* 濡れは水面（y=0）基準。水中は完全に濡れ、上は毛管ぶんだけ残す */
 assert.match(rocks, /wet = max\(wet, step\(vRockWorldPos\.y, 0\.0\)\);/,
   'everything below the waterline must read as wet');
-assert.match(rocks, /roughnessFactor = mix\(roughnessFactor, 0\.30, wet \* 0\.85\);/,
-  '濡れた岩はつるつるになる');
+assert.match(rocks, /roughnessFactor = mix\(roughnessFactor, 0\.60, wet \* 0\.85\);/,
+  '濡れた岩も粗さを残してテカりを抑える');
 
 /* 階層ごとに形の種をずらすこと。tier.length を種にしていたときは
    cobble も pebble も 6 文字なので、中石と小石が同じ 5 形状になっていた */
