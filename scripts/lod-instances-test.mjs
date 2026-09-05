@@ -169,4 +169,3 @@ for (const [distances, hysteresis, band, levels] of [
   }
 }
 console.log('lod-instances-test: ok');
-
