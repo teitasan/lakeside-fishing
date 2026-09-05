@@ -24,6 +24,7 @@ const tests = [
   'scripts/performance-test.mjs',
   'scripts/underwater-props-test.mjs',
   'scripts/water-reflection-test.mjs',
+  'scripts/water-spec-test.mjs',
   'scripts/repeat-wrapping-detail-test.mjs',
   'scripts/lake-calm-water-test.mjs',
   'scripts/tree-test.mjs',

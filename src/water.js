@@ -254,6 +254,8 @@ export class Water {
            以前は fbm2 を差分法で 6 回評価していて 1 px あたり hash が 48 回
            走っていた。回転させた 5 枚のタップに寄せると、表情を保ったまま
            テクスチャフェッチ 5 回で済む（帯域は mipmap が面倒を見る）。 */
+        const float PI_W = 3.14159265;
+
         vec2 rippleTexSlope(vec2 uv) {
           return texture2D(uRippleNormal, uv).xy * 2.0 - 1.0;
         }
@@ -272,6 +274,41 @@ export class Water {
           d += rot(rippleTexSlope(rot(xz, 3.44) * 1.480 + vec2(0.62, -0.72) * t * 0.135 + vec2(0.37, 0.81)), -3.44) * 0.060;
           d += rot(rippleTexSlope(rot(xz, 4.77) * 2.850 + vec2(-0.91, -0.28) * t * 0.190 + vec2(0.73, 0.29)), -4.77) * 0.035;
           return d;
+        }
+
+        /* --- 円盤光源のマイクロファセット鏡面（GGX / Cook-Torrance） ---
+           太陽・月の «照り» は «視半径 0.27° の円盤の鏡像» であって、
+           指数を固定した pow(N·H, k) ではない。固定指数だと
+             ・ローブの角幅が水面の状態と無関係に決まる
+             ・広がっても暗くならない（正規化が無い）
+           ので、光源を «見下ろす» 配置（月が天頂・視線が真下）になると
+           N·H が広い範囲で 1 に張り付き、ローブが一枚の板に潰れて
+           水面に膜が浮いたように見えていた。
+
+           GGX なら
+             ・粗さ α に光源の視半径 r を足した α' でローブを広げ
+             ・円盤の立体角 Ω = π·r² を掛ける
+           ので、ピークは Ω·D(0,α') ≒ r²/α'² に収まる。つまり
+           凪（α ≪ r）では «光源そのものの鏡像» としてまぶしい点になり、
+           荒れる（α ≫ r）ほど広く淡く散る。«広がったぶん暗くなる» が
+           自動的に効くので、どの配置でも «光» のまま潰れない。
+
+           フレネルは合成時に fres で一度かけるので、ここでは含めない。 */
+        const float LIGHT_R = 0.00465;             // 太陽・月の視半径（rad）
+        float diskSpec(vec3 N, vec3 V, vec3 L, float rough) {
+          float NoL = dot(N, L);
+          if (NoL <= 0.0) return 0.0;
+          vec3 H = normalize(V + L);
+          float NoH = clamp(dot(N, H), 0.0, 1.0);
+          float NoV = max(dot(N, V), 1e-4);
+          float a2 = rough * rough + LIGHT_R * LIGHT_R;
+          float d = NoH * NoH * (a2 - 1.0) + 1.0;
+          float D = a2 / (PI_W * d * d);
+          // Smith（高さ相関）。G/(4·NoV·NoL) までを含んだ可視性項
+          float lv = NoL * sqrt(NoV * NoV * (1.0 - a2) + a2);
+          float ll = NoV * sqrt(NoL * NoL * (1.0 - a2) + a2);
+          float Vis = 0.5 / max(lv + ll, 1e-5);
+          return D * Vis * NoL * (PI_W * LIGHT_R * LIGHT_R);
         }
 
         /** 深度テクスチャの値 → ビュー空間の z 距離（m） */
@@ -311,6 +348,13 @@ export class Water {
           float ripAmt = (0.34 + uRain * 0.90) * smoothstep(0.0, 1.2, depth) * farRip;
           vec2 slope = vec2(vWaveD.x + rip.x * ripAmt, vWaveD.y + rip.y * ripAmt);
           vec3 N = normalize(vec3(-vWaveD.x - rip.x * ripAmt, 1.0, -vWaveD.y - rip.y * ripAmt));
+
+          /* この 1 px の中で法線がどれだけ暴れているか。«解決できていない
+             粗さ» の主役で、遠景ほど 1 px に多くの波が入るので自動的に
+             大きくなる（閃きのエイリアスもこれで丸まる）。
+             微分は分岐の外で取る。スネルの窓の early return より後ろだと
+             未定義になる */
+          vec2 dN = fwidth(N.xz);
 
           vec3 V = normalize(uCamPos - vWorld);
           bool under = dot(N, V) < 0.0;
@@ -468,48 +512,58 @@ export class Water {
           vec3 sss = uShallow * uSunColor * (hUp * hUp * 0.55) * sssPath
                    * backLit * (1.0 - uNight) * (1.0 - uRain * 0.5);
 
-          /* --- 水面で反射する光（空 + 太陽・月のきらめき） ---
-             きらめきの正体は «波の斜面がたまたま光源を向いた瞬間の閃光» で、
-             (1) 波と一緒に運ばれる (2) 速く明滅する (3) 離散した点になる。
-             以前はワールド固定・低速・広い閾値のノイズ 1 枚だったので、
-             波と無関係にゆっくり漂う乳白色の «連続した膜» になり、光ではなく
-             水面に浮いた油膜に見えていた。 */
+          /* --- 水面で反射する光（空 + 太陽・月） --- */
           vec3 surf = refl;
 
-          /* 手続きノイズは mipmap が効かない。世界スケールを固定すると遠景で
-             粒が 1px 以下へ落ちて «模様» に化けるので、距離で粒を寝かせる */
-          float gScale = 7.6 / (1.0 + vFogDepth * 0.05);
-          /* 位相を波の傾きへ結び付けると、模様が波と一緒に運ばれる。
-             時間項は «漂う» ではなく «明滅する» 速さ（およそ 1〜2Hz）にする */
+          /* 粗さは «1 px の中で解決できていない斜面のばらつき» だけを数える。
+             大波とリップルは法線 N として描けているので粗さではない
+             （二重に数えるとローブが広がりすぎて、また膜になる）。
+             数えるのは
+               (1) 1 px 内での法線の暴れ（dN）
+               (2) 距離 LOD で寝かせたリップルぶん。描かないがばらつきは在る
+               (3) 描いていない毛細波。雨はこれを増やす */
+          float lodRough = 0.050 * (1.0 - farRip);
+          float capRough = 0.018 + 0.045 * uRain;
+          float rough = sqrt(dot(dN, dN) * 0.35
+                           + lodRough * lodRough + capRough * capRough);
+
+          /* --- きらめきのゆらぎ ---
+             rough は «1 px の中に何枚の面があるか» の平均しか持たないので、
+             ローブが狭くても «その中では一様» になる。実際は 1 px ごとに
+             «たまたま光源を向いた面の数» がばらつき、それが閃きになる。
+             とくに浅場は shoalGain で波が消えて鏡のように平らなので、
+             解析的なローブだけだと滑らかな白い染みになってしまう。
+             （ここを距離で切ると、近くの凪いだ浅場が染みのまま残る）
+
+             ノイズは期待値 1 になるよう作るのでエネルギーは増減しない
+             （glitter の期待値は数値積分で 0.052〜0.060、その逆数が 18.6 付近）。
+             遠景では 1 px に多数の面が入って実際に平均化されるので落とす。
+
+             ノイズ自体は波と一緒に運ばれ（位相を vWaveD へ結び付ける）、
+             1〜2Hz で明滅する。世界固定・低速だと «漂う模様» になり、
+             光ではなく水面に浮いた膜に見える。 */
+          float gScale = 16.0 / (1.0 + vFogDepth * 0.06);
           vec2 gp = vWorld.xz * gScale + vWaveD * 6.0 + vec2(uTime * 1.35, uTime * -0.98);
           float g1 = vnoise(gp);
           float g2 = vnoise(gp * 2.63 + vec2(uTime * -2.05, uTime * 1.62) + 13.7);
           // 遠いほど閾値を緩めて、点がちらつき（エイリアス）に化けるのを抑える
           float gSoft = 0.07 + 0.16 * smoothstep(35.0, 170.0, vFogDepth);
-          // 閾値を掛け合わせると、連続した塊ではなくまばらな点になる
           float glitter = smoothstep(0.66 - gSoft, 0.74 + gSoft, g1)
                         * smoothstep(0.60 - gSoft, 0.72 + gSoft, g2);
-          // 昼夜は排他なので、太陽側と月側できらめきの場を使い回す
+          float sparkAmt = 0.80 * (1.0 - smoothstep(60.0, 240.0, vFogDepth));
+          float sparkle = mix(1.0, glitter * 18.6, sparkAmt);
 
-          vec3 H = normalize(V + uSunDir);
-          float specT = max(dot(N, H), 0.0);
-          /* 広いローブは «面ぜんたいの一様なつや» なので、強いとそれ自体が膜に
-             なる。波立っているときだけ最小限に出す */
-          float broad = smoothstep(0.2, 1.4, uWind);
-          float spec = pow(specT, 620.0) * 5.5
-                     + pow(specT, 90.0) * 0.11 * broad
-                     + pow(specT, 240.0) * glitter * 4.2;
-          surf += uSunColor * spec * (1.0 - uNight) * (1.0 - uRain * 0.4);
-          /* 月の道。常に満月なので、これが夜の湖の主役になる。
-             同じきらめきを掛けて «一本の筋» ではなく
-             «峰ひとつずつが光る帯» にする */
-          vec3 MH = normalize(V - uSunDir);
-          float mnd = max(dot(N, MH), 0.0);
-          surf += vec3(0.80, 0.87, 1.0)
-                * (pow(mnd, 620.0) * 4.4
-                 + pow(mnd, 90.0) * 0.09 * broad
-                 + pow(mnd, 240.0) * glitter * 3.4)
-                * uNight * (1.0 - uRain * 0.4);
+          /* 円盤の «輝度»。太陽の実際の輝度は空の 10^5 倍だが、夜は露出が
+             上がるので、月は太陽の 0.8 倍という «見た目の» 比で持つ。
+             凪の水面が光源をまともに映したとき白熱するよう校正してある */
+          const float SUN_RAD  = 1400.0;
+          const float MOON_RAD = 1100.0;
+          // 1 px だけが極端に明るくなる（fireflies）のは Bloom で目立つので抑える
+          float sunSpec  = min(diskSpec(N, V,  uSunDir, rough) * sparkle * SUN_RAD,  60.0);
+          float moonSpec = min(diskSpec(N, V, -uSunDir, rough) * sparkle * MOON_RAD, 60.0);
+          surf += uSunColor * sunSpec * (1.0 - uNight) * (1.0 - uRain * 0.4);
+          // 月の道。常に満月なので、これが夜の湖の主役になる
+          surf += vec3(0.80, 0.87, 1.0) * moonSpec * uNight * (1.0 - uRain * 0.4);
 
           /* --- 泡（渚） ---
              遡上（swash）の先端に細い白線を立て、その後ろをレース状に崩す。
