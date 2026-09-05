@@ -285,7 +285,10 @@ export class Water {
           vec3 c = mix(uHorizon, uZenith, g);
           float sd = max(dot(dir, uSunDir), 0.0);
           c += uSunColor * pow(sd, 9.0) * 0.34;
-          c += uSunColor * pow(sd, 2.2) * 0.10;
+          /* 太陽まわりの広いにじみ。空ドームでは自然でも、水面に «映り込む»
+             と太陽側の半分ぜんたいが一様に白っぽくなり、膜のように見える。
+             水用のこの skyAt では絞る */
+          c += uSunColor * pow(sd, 2.2) * 0.06;
           return c;
         }
 
@@ -465,26 +468,47 @@ export class Water {
           vec3 sss = uShallow * uSunColor * (hUp * hUp * 0.55) * sssPath
                    * backLit * (1.0 - uNight) * (1.0 - uRain * 0.5);
 
-          /* --- 水面で反射する光（空 + 太陽・月のきらめき） --- */
+          /* --- 水面で反射する光（空 + 太陽・月のきらめき） ---
+             きらめきの正体は «波の斜面がたまたま光源を向いた瞬間の閃光» で、
+             (1) 波と一緒に運ばれる (2) 速く明滅する (3) 離散した点になる。
+             以前はワールド固定・低速・広い閾値のノイズ 1 枚だったので、
+             波と無関係にゆっくり漂う乳白色の «連続した膜» になり、光ではなく
+             水面に浮いた油膜に見えていた。 */
           vec3 surf = refl;
+
+          /* 手続きノイズは mipmap が効かない。世界スケールを固定すると遠景で
+             粒が 1px 以下へ落ちて «模様» に化けるので、距離で粒を寝かせる */
+          float gScale = 7.6 / (1.0 + vFogDepth * 0.05);
+          /* 位相を波の傾きへ結び付けると、模様が波と一緒に運ばれる。
+             時間項は «漂う» ではなく «明滅する» 速さ（およそ 1〜2Hz）にする */
+          vec2 gp = vWorld.xz * gScale + vWaveD * 6.0 + vec2(uTime * 1.35, uTime * -0.98);
+          float g1 = vnoise(gp);
+          float g2 = vnoise(gp * 2.63 + vec2(uTime * -2.05, uTime * 1.62) + 13.7);
+          // 遠いほど閾値を緩めて、点がちらつき（エイリアス）に化けるのを抑える
+          float gSoft = 0.07 + 0.16 * smoothstep(35.0, 170.0, vFogDepth);
+          // 閾値を掛け合わせると、連続した塊ではなくまばらな点になる
+          float glitter = smoothstep(0.66 - gSoft, 0.74 + gSoft, g1)
+                        * smoothstep(0.60 - gSoft, 0.72 + gSoft, g2);
+          // 昼夜は排他なので、太陽側と月側できらめきの場を使い回す
+
           vec3 H = normalize(V + uSunDir);
           float specT = max(dot(N, H), 0.0);
-          float glitter = vnoise(vWorld.xz * 7.5 + uSunDir.xz * 4.0 + uTime * 0.18);
-          glitter = smoothstep(0.58, 0.92, glitter);
+          /* 広いローブは «面ぜんたいの一様なつや» なので、強いとそれ自体が膜に
+             なる。波立っているときだけ最小限に出す */
+          float broad = smoothstep(0.2, 1.4, uWind);
           float spec = pow(specT, 620.0) * 5.5
-                     + pow(specT, 48.0) * 0.35
-                     + pow(specT, 180.0) * glitter * 2.2;
+                     + pow(specT, 90.0) * 0.11 * broad
+                     + pow(specT, 240.0) * glitter * 4.2;
           surf += uSunColor * spec * (1.0 - uNight) * (1.0 - uRain * 0.4);
           /* 月の道。常に満月なので、これが夜の湖の主役になる。
-             太陽側と同じきらめきノイズを掛けて «一本の筋» ではなく
+             同じきらめきを掛けて «一本の筋» ではなく
              «峰ひとつずつが光る帯» にする */
           vec3 MH = normalize(V - uSunDir);
           float mnd = max(dot(N, MH), 0.0);
-          float mGlit = vnoise(vWorld.xz * 7.5 - uSunDir.xz * 4.0 + uTime * 0.15);
-          mGlit = smoothstep(0.55, 0.90, mGlit);
           surf += vec3(0.80, 0.87, 1.0)
-                * (pow(mnd, 620.0) * 4.4 + pow(mnd, 48.0) * 0.28
-                 + pow(mnd, 180.0) * mGlit * 1.8)
+                * (pow(mnd, 620.0) * 4.4
+                 + pow(mnd, 90.0) * 0.09 * broad
+                 + pow(mnd, 240.0) * glitter * 3.4)
                 * uNight * (1.0 - uRain * 0.4);
 
           /* --- 泡（渚） ---
