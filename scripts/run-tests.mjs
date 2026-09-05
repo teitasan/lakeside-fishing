@@ -27,6 +27,7 @@ const tests = [
   'scripts/repeat-wrapping-detail-test.mjs',
   'scripts/lake-calm-water-test.mjs',
   'scripts/tree-test.mjs',
+  'scripts/lod-instances-test.mjs',
   'scripts/water-plant-test.mjs',
   'scripts/rock-test.mjs',
   'scripts/ground-grain-test.mjs',

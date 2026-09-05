@@ -188,6 +188,32 @@ export function lodForList(dist, dists, cur = -1, hyst = 8) {
 }
 
 /**
+ * フェード帯の中で «もう一方» の段。主段 l と隣接段を両方描き、
+ * シェーダのディザで入れ替える。
+ *
+ * 帯の «どちら側にいるか» だけで隣段を決めると、ヒステリシスで l が
+ * 帯の向こう側のまま留まったとき l2 === l になり、片方だけが
+ * フェードアウトして消える（近づいたときのポッピングの正体）。
+ * @param {number} dist
+ * @param {number[]} dists
+ * @param {number} lod いまの主段
+ * @param {number} band 帯の半幅（m）
+ * @param {number} maxLod 登録されている最も粗い段（これより先は描かない）
+ * @returns {number} 隣接段、または帯外なら -1
+ */
+export function lodFadeMate(dist, dists, lod, band, maxLod = dists.length) {
+  if (band <= 0 || lod < 0) return -1;
+  for (let i = 0; i < dists.length; i++) {
+    const e = dists[i];
+    if (dist <= e - band || dist >= e + band) continue;
+    if (lod === i) return i + 1 <= maxLod ? i + 1 : -1;
+    if (lod === i + 1) return i;
+    return -1;
+  }
+  return -1;
+}
+
+/**
  * 位置から決める株ごとの色ムラ。
  * 同じ緑が何百株も並ぶと、形をいくら作り込んでも «同じ物を並べた» と分かる。
  * seed ではなく座標から決めるので、ワールドは再現できる。

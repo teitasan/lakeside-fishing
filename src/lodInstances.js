@@ -9,7 +9,7 @@
    «高さ 1 に正規化したもの» を共有する（scale がそのまま実寸になる）。
    =========================================================== */
 import * as THREE from 'three';
-import { lodForList } from './util.js?v=20260830-zone5';
+import { lodForList, lodFadeMate } from './util.js?v=20260830-zone5';
 export { tintAt } from './util.js?v=20260830-zone5';
 
 /* 枠を自動で広げるときの上限（登録時の何倍まで）。
@@ -33,6 +33,8 @@ export class LodInstances {
        それぞれを間引いてクロスフェードする（materialPatch.lodDitherFade）。
        0 なら従来どおり瞬時に切り替わる */
     this.fadeBand = fadeBand;
+    this._lodDistKey = lodDist.join(',');
+    this.maxLod = -1;
     this.items = [];
     /* 動かない株。カメラがどう動いても段が変わらないと «配置のときに»
        分かっているものは、こちらへ入れて 1 回だけ書く。以後 update も
@@ -74,16 +76,21 @@ export class LodInstances {
       list.push(im);
     }
     this.buckets.set(`${key}|${lod}`, list);
+    this.maxLod = Math.max(this.maxLod, lod);
     return list;
   }
 
   /** ある段のパーツを差し替える（遠景インポスターを後から焼いたときなど） */
   replace(key, lod, parts) {
+    const lo = lod === 0 ? -1 : this.lodDist[lod - 1];
+    const hi = lod < this.lodDist.length ? this.lodDist[lod] : -1;
+    const replacements = parts.map(p => p.geo && this.fadeBand > 0
+      ? withLodBand(p.geo, lo, hi) : p.geo);
     for (const map of [this.buckets, this.fixedBuckets]) {
       const list = map.get(`${key}|${lod}`);
       if (!list) continue;
       for (let i = 0; i < list.length && i < parts.length; i++) {
-        if (parts[i].geo) list[i].geometry = parts[i].geo;
+        if (replacements[i]) list[i].geometry = replacements[i];
         if (parts[i].mat) list[i].material = parts[i].mat;
       }
     }
@@ -182,8 +189,30 @@ export class LodInstances {
     this._dirty = true;
   }
 
+  /** setLodScale などで lodDist が変わったあと、頂点属性 aLodBand を同期する */
+  _syncLodBands() {
+    if (this.fadeBand <= 0) return;
+    const key = this.lodDist.join(',');
+    if (key === this._lodDistKey) return;
+    this._lodDistKey = key;
+    this._dirty = true;
+    for (const [bk, list] of this.buckets) {
+      const lod = Number(bk.slice(bk.lastIndexOf('|') + 1));
+      const lo = lod === 0 ? -1 : this.lodDist[lod - 1];
+      const hi = lod < this.lodDist.length ? this.lodDist[lod] : -1;
+      for (const im of list) {
+        const attr = im.geometry.getAttribute('aLodBand');
+        if (!attr) continue;
+        const arr = attr.array;
+        for (let i = 0; i < arr.length; i += 2) { arr[i] = lo; arr[i + 1] = hi; }
+        attr.needsUpdate = true;
+      }
+    }
+  }
+
   /** カメラ距離で段を振り直す。変化があったときだけ行列を作り直す */
   update(dt, cameraPos) {
+    this._syncLodBands();
     this._timer -= dt;
     if (this._timer > 0 && !this._dirty) return;
     this._timer = this.interval;
@@ -193,16 +222,10 @@ export class LodInstances {
     for (const it of this.items) {
       const d = Math.hypot(it.x - cameraPos.x, it.y - cameraPos.y, it.z - cameraPos.z);
       const l = lodForList(d, this.lodDist, it.lod, this.hysteresis);
-      /* 境界の帯に入っている株は隣の段にも入れる。両方が描かれて、
-         ディザで «だんだん入れ替わる»。帯の外なら -1（片方だけ） */
-      let l2 = -1;
-      if (band > 0) {
-        for (let i = 0; i < this.lodDist.length; i++) {
-          const e = this.lodDist[i];
-          if (d > e - band && d < e + band) { l2 = d < e ? i + 1 : i; break; }
-        }
-        if (l2 === l) l2 = -1;
-      }
+      /* 境界の帯では主段 l と隣接段のもう一方を両方描く。
+         帯の内外だけで隣段を決めるとヒステリシスと食い違い、
+         フェード中の片方だけが残ってポッと消える */
+      const l2 = lodFadeMate(d, this.lodDist, l, band, this.maxLod);
       if (l !== it.lod || l2 !== it.lod2) { it.lod = l; it.lod2 = l2; changed = true; }
     }
     if (!changed) return;
