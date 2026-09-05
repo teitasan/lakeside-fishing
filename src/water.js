@@ -95,6 +95,40 @@ function createRippleNormalTexture() {
   return tex;
 }
 
+/**
+ * 渚の泡のマスク。1 タイル ≒ 30cm の «泡そのもの» の写真で、輝度が被覆率。
+ *
+ * 以前はここを fbm2 + vnoise ×2 の手続きで作っていた（hash21 が 1px あたり
+ * 16 回）。手続きノイズは «滑らかな塊» しか作れないので、コメントに
+ * «泡ではなく煙に見える» と書いて 5〜10 倍細かくした経緯がある。写真には
+ * レースの穴・泡の塊・気泡の 3 階層が最初から入っているので、1 枚を 3 つの
+ * スケールで叩けば足りる（テクスチャフェッチ 3 回。mipmap も効く）。
+ *
+ * colorSpace を NoColorSpace にするのが肝。«色» ではなく «被覆率» なので
+ * リニアへ変換されると平均 0.47 が 0.19 まで落ちて、閾値が全部狂う。
+ */
+function loadFoamTexture(onReady) {
+  /* 読めなかったときの 1x1。閾値を通すと «レースの無いべた塗りの帯» に
+     なるだけで、泡そのものは消えない */
+  const fallback = new THREE.DataTexture(
+    new Uint8Array([150, 150, 150, 255]), 1, 1, THREE.RGBAFormat, THREE.UnsignedByteType
+  );
+  fallback.colorSpace = THREE.NoColorSpace;
+  fallback.needsUpdate = true;
+  if (typeof document === 'undefined') return fallback;
+  new THREE.TextureLoader().load('./assets/textures/foam.webp', (tex) => {
+    tex.colorSpace = THREE.NoColorSpace;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.anisotropy = 4;
+    tex.generateMipmaps = true;
+    tex.needsUpdate = true;
+    onReady(tex);
+  }, undefined, () => {});
+  return fallback;
+}
+
 const _m4 = new THREE.Matrix4();
 
 export class Water {
@@ -151,9 +185,12 @@ export class Water {
       uRippleNormal: { value: this.rippleNormalTex },
       /* 渚の泡もランタイムで詰めたいので出しておく
          x,y = 先端の白線の内外幅 / z,w = 後方の泡帯の内外幅 */
+      uFoamTex: { value: loadFoamTexture((tex) => { this.uniforms.uFoamTex.value = tex; }) },
       uFoamTip: { value: new THREE.Vector4(0.016, 0.002, 0.036, 0.004) },
       // x = レースの下閾値, y = 上閾値, z = 泡の合成量, w = 古い泡の減衰
-      uFoamLace: { value: new THREE.Vector4(0.54, 0.86, 0.62, 0.76) },
+      /* x,y = レースの閾値。写真そのものにコントラストがあるので、
+         手続きノイズ時代（0.54〜0.86）より浅く取る。z = 泡の混ぜ量、w = 経年 */
+      uFoamLace: { value: new THREE.Vector4(0.40, 0.68, 0.62, 0.76) },
       /* 水越しの見え方の内訳。切り分け・調整用に uniform で出しておく
          x = 水の色（内向き散乱）, y = 逆光の透け, z = 水面反射 */
       uMixAmt: { value: new THREE.Vector3(1.0, 1.0, 1.0) },
@@ -238,6 +275,7 @@ export class Water {
         uniform vec3 uSunDir, uSunColor, uZenith, uHorizon, uFogColor, uShallow, uDeep, uCamPos, uAbsorb;
         uniform float uTime, uNight, uRain, uFogNear, uFogFar, uExposure, uWind, uCamNear, uCamFar;
         uniform sampler2D uSceneColor, uSceneDepth, uReflColor, uRippleNormal, uHeightTex;
+        uniform sampler2D uFoamTex;
         uniform mat4 uTexMat;
         uniform mat4 uProjView, uInvProjView;
         uniform float uHasRefl, uReflTexel;
@@ -596,29 +634,50 @@ export class Water {
             vec2 sp = vWorld.xz;
             // 泡は水と一緒に運ばれる：遡上量で位相をずらして波に追従させる
             float foamLag = runUp * 2.6 - uTime * 0.05;
-            // 岸に平行へ伸ばした座標。泡の筋が汀線に沿って走る
-            vec2 fa = vec2(dot(sp, wFlow) * 3.4, dot(sp, fPerp) * 9.5);
+            /* 岸に平行へ伸ばした座標。泡の筋が汀線に沿って走る。
+               手続きノイズのときは 9.5 まで潰していたが、写真は潰すと
+               «縞» が見えるので 6.0 に留める（テクスチャ自身が筋を持つ） */
+            vec2 fa = vec2(dot(sp, wFlow) * 3.4, dot(sp, fPerp) * 6.0);
 
-            /* 手続きノイズは mipmap が効かないので、細かい層は距離で寝かせる。
-               そうしないと遠景の泡が 1 px 以下の格子に落ちて斑に化ける */
+            /* 細かい層は距離で寝かせる。テクスチャなので mipmap は効くが、
+               二値に近いマスクを縮小すると平均へ寄って «べた塗り» に化ける。
+               閾値の効きを距離で緩めるのは以前と同じ理由 */
             float foamLod = 1.0 - smoothstep(9.0, 32.0, vFogDepth);
-            float n1 = fbm2(fa + wFlow * foamLag * 3.4 + vec2(uTime * 0.42, uTime * 0.28));
-            float n2 = vnoise(sp * 17.0 + wFlow * (foamLag * 1.5) + vec2(-uTime * 0.31, uTime * 0.24));
-            float n3 = vnoise(sp * 38.0 - wFlow * (foamLag * 2.2) + vec2(uTime * 0.44, -uTime * 0.37));
-            float lace = smoothstep(uFoamLace.x, uFoamLace.y, n1)
-                       * mix(0.06, 1.0, mix(0.65, smoothstep(0.34, 0.74, n2), foamLod))
-                       * mix(0.24, 1.0, mix(0.7, smoothstep(0.34, 0.80, n3), foamLod));
+            /* fa は «1 単位 = 1 タイル» になっている（3.4 tiles/m ≒ 29cm）。
+               テクスチャの実寸 30cm とほぼ一致するので、そのまま UV に使える。
+               2 枚目・3 枚目はスケールを上げ、さらに回してタイルの格子が
+               重ならないようにする（rippleSlope と同じ手） */
+            float n1 = texture2D(uFoamTex,
+              fa + wFlow * foamLag * 3.4 + vec2(uTime * 0.42, uTime * 0.28)).r;
+            float n2 = texture2D(uFoamTex,
+              rot(fa, 1.94) * 2.7 + wFlow * (foamLag * 1.5) + vec2(-uTime * 0.31, uTime * 0.24)).r;
+            float n3 = texture2D(uFoamTex,
+              rot(fa, 3.71) * 6.1 - wFlow * (foamLag * 2.2) + vec2(uTime * 0.44, -uTime * 0.37)).r;
+            /* 閾値を画素の足跡で緩める。
+               二値に近いマスクは mip が効くほど平均（0.47）へ寄るので、
+               固定の閾値で切ると «寄った先» が閾値の下に入って泡がまるごと
+               消える。汀線は斜めから見ることが多く、そこは 1 画素の足跡が
+               長いので、距離ではなく fwidth で測らないと当たらない
+               （手続きノイズ時代の foamLod は距離での近似だった）。
+               足跡が伸びるほど閾値を平均へ寄せる ＝ 被覆率を保ったまま
+               レースが «霞んだ帯» へ連続に落ちる */
+            float fw = clamp(max(fwidth(fa.x), fwidth(fa.y)) * 0.5, 0.0, 1.0);
+            float lo = mix(uFoamLace.x, 0.44, fw);
+            float hi = mix(uFoamLace.y, 0.53, fw);
+            float lace = smoothstep(lo, hi, n1)
+                       * mix(0.10, 1.0, mix(0.72, smoothstep(lo - 0.06, hi + 0.06, n2), foamLod))
+                       * mix(0.30, 1.0, mix(0.78, smoothstep(lo - 0.06, hi + 0.10, n3), foamLod));
             // 汀線に沿った粗い切れ目（n1 の再閾値のみ。追加サンプルなし）
-            float shoreVar = mix(0.40, 1.0, smoothstep(uFoamLace.x + 0.03, uFoamLace.y - 0.05, n1));
+            float shoreVar = mix(0.40, 1.0, smoothstep(lo + 0.03, hi - 0.02, n1));
             // 寄せ先端：n2/n3 で白線を割り、runUp 位相で流す
             float edgeGrain = n2 * 0.55 + n3 * 0.45 + foamLag * 0.10;
-            float edgeBreak = mix(0.22, 1.0, smoothstep(0.34, 0.68, edgeGrain));
-            edgeBreak *= mix(0.48, 1.0, smoothstep(0.30, 0.66, n3 + foamLag * 0.06));
+            float edgeBreak = mix(0.30, 1.0, smoothstep(lo - 0.10, hi + 0.02, edgeGrain));
+            edgeBreak *= mix(0.55, 1.0, smoothstep(lo - 0.14, hi - 0.02, n3 + foamLag * 0.06));
             float age = smoothstep(0.04, 0.22, wet);
             // 狭い破れた先端と、広い引き波レースを層に分ける
-            float leading = tip * edgeBreak * shoreVar * smoothstep(0.40, 0.82, lace) * 0.78;
+            float leading = tip * edgeBreak * shoreVar * smoothstep(0.16, 0.66, lace) * 0.78;
             float retreat = band * lace * shoreVar * (1.0 - age * uFoamLace.w)
-                          * mix(0.18, 0.48, smoothstep(0.36, 0.74, n2))
+                          * mix(0.22, 0.52, smoothstep(lo - 0.04, hi + 0.04, n2))
                           * (1.0 - tip * 0.62);
             shoreFoam = clamp(leading + retreat, 0.0, 1.0);
             shoreFoam *= 1.0 - smoothstep(70.0, 230.0, vFogDepth);

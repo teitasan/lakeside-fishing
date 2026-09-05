@@ -204,16 +204,32 @@ assert.match(waterSrc, /float tip = smoothstep\(uFoamTip\.x, uFoamTip\.y, wet\);
   'the swash tip must produce a tight bright line');
 assert.match(waterSrc, /uFoamTip: \{ value: new THREE\.Vector4\(0\.016, 0\.002, 0\.036, 0\.004\) \}/,
   'a lake shore only gets a thin lapping line and a narrow wash band');
-assert.match(waterSrc, /uFoamLace: \{ value: new THREE\.Vector4\(0\.54, 0\.86, 0\.62, 0\.76\) \}/,
-  'lake foam must stay sparse, faint, and not read as an opaque close-up sheet');
+assert.match(waterSrc, /uFoamLace: \{ value: new THREE\.Vector4\(0\.40, 0\.68, 0\.62, 0\.76\) \}/,
+  'lake foam must stay sparse and faint. the thresholds are shallower than the '
+  + 'procedural era because the foam photo already carries its own contrast');
 assert.match(waterSrc, /float leading = tip /,
   'the leading foam must be a separate broken layer');
 assert.match(waterSrc, /float retreat = band /,
   'the retreat foam must be a separate wash layer');
 assert.match(waterSrc, /float age = smoothstep\(0\.04, 0\.22, wet\);/,
   'foam must fade with age behind the tip');
-assert.match(waterSrc, /vnoise\(sp \* 17\.0/, 'foam must carry a fine lace octave');
-assert.match(waterSrc, /vnoise\(sp \* 38\.0/, 'foam must carry a bubble-scale octave');
+// 泡は写真タイル（1 タイル 30cm）を 3 スケールで叩く
+assert.equal((waterSrc.match(/texture2D\(uFoamTex,/g) || []).length, 3,
+  'foam must be three taps of the foam photo, not procedural noise');
+assert.match(waterSrc, /rot\(fa, 1\.94\) \* 2\.7/, 'the mid foam tap must be rotated and scaled up');
+assert.match(waterSrc, /rot\(fa, 3\.71\) \* 6\.1/, 'the fine foam tap must be rotated and scaled up');
+assert.doesNotMatch(waterSrc, /vnoise\(sp \* 17\.0/, 'the procedural lace octave must be gone');
+assert.doesNotMatch(waterSrc, /vnoise\(sp \* 38\.0/, 'the procedural bubble octave must be gone');
+/* 二値に近いマスクは mip が効くほど平均へ寄る。汀線は斜めから見るので
+   1 画素の足跡が長く、固定の閾値だと «寄った先» が閾値の下に落ちて
+   泡がまるごと消える。距離ではなく fwidth で測ること */
+assert.match(waterSrc, /float fw = clamp\(max\(fwidth\(fa\.x\), fwidth\(fa\.y\)\)/,
+  'the foam threshold must follow the pixel footprint, not distance');
+assert.match(waterSrc, /float lo = mix\(uFoamLace\.x, 0\.44, fw\);/,
+  'a blurred foam sample must pull the threshold toward the tile mean (0.47)');
+assert.match(waterSrc, /tex\.colorSpace = THREE\.NoColorSpace;/,
+  'the foam mask is coverage, not colour: converting it to linear would drop the '
+  + 'mean from 0.47 to 0.19 and put every threshold off');
 assert.doesNotMatch(waterSrc, /shoreP \* 3\.6/, 'the old metre-scale smoky foam must be gone');
 assert.doesNotMatch(waterSrc, /float shoreBand = smoothstep\(0\.68, 0\.0, shoreDepth\)/,
   'the old depth-band foam must be gone');

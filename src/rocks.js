@@ -277,6 +277,28 @@ const ROCK_FRAG = /* glsl */ `
 `;
 
 /**
+ * 写真タイルを読み込んで、手続き生成のものと差し替える。
+ * 読めなければ何もしない（手続き生成のまま）。
+ * @param {(tex: THREE.Texture) => void} onRock
+ * @param {(tex: THREE.Texture) => void} onMoss
+ */
+export function loadRockTextures(onRock, onMoss) {
+  if (typeof document === 'undefined') return;
+  const loader = new THREE.TextureLoader();
+  const setup = (tex) => {
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.anisotropy = 4;
+    tex.needsUpdate = true;
+    return tex;
+  };
+  loader.load('./assets/textures/rock-albedo.webp', (t) => onRock(setup(t)), undefined, () => {});
+  loader.load('./assets/textures/rock-moss.webp', (t) => onMoss(setup(t)), undefined, () => {});
+}
+
+/**
  * 岩のマテリアルに triplanar / 苔 / 濡れを注入する。
  * @param {THREE.Material} mat
  * @param {{rockTex: THREE.Texture, mossTex: THREE.Texture, tint?: number,
@@ -343,6 +365,9 @@ export class RockSet {
   constructor(scene, opts = {}) {
     const seed = (opts.seed ?? 1) >>> 0;
     this.quality = opts.quality || 'mid';
+    /* 岩肌と苔は写真タイル（1 タイル 50cm）。読み終わるまでは手続き生成の
+       ものを出しておいて、届いたら uniform を差し替える。triplanar なので
+       UV は無く、差し替えても継ぎ目の張り直しは要らない */
     this.rockTex = makeRockTexture();
     this.mossTex = makeMossTexture();
     this.materials = [];
@@ -378,6 +403,9 @@ export class RockSet {
       ]);
       this.materials.push(mat);
       this.mats[tier] = mat;
+      /* 写真が届いたときの差し替え先。addRockLook が uniform を
+         userData へ置いてくれている */
+      (this._swap ||= []).push(mat.userData.rockUniforms);
 
       const set = new LodInstances(scene, {
         lodDist: cfg.lodDist, hysteresis: 5, interval: 0.2, fadeBand: ROCK_FADE_BAND,
@@ -400,6 +428,11 @@ export class RockSet {
         }
       }
     }
+    /* 写真タイルが届いたら、全階層のマテリアルの uniform を差し替える */
+    loadRockTextures(
+      (tex) => { this.rockTex = tex; for (const u of this._swap || []) u.uRockTex.value = tex; },
+      (tex) => { this.mossTex = tex; for (const u of this._swap || []) u.uMossTex.value = tex; },
+    );
   }
 
   /**

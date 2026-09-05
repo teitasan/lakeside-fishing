@@ -7,7 +7,7 @@ import { waveGLSL } from './waveField.js?v=20260828-lakescale1';
 import { UnderwaterPropScatter, addUnderwaterCaustics, patchUwMaterial } from './underwaterProps.js?v=20260830-zone5';
 import { WaterPlants, buildSubmergedTuft } from './waterPlants.js?v=20260830-zone5';
 import { Undergrowth, UNDER_KINDS } from './undergrowth.js?v=20260830-zone5';
-import { RockSet, makeSingleRock } from './rocks.js?v=20260830-zone5';
+import { RockSet, makeSingleRock } from './rocks.js?v=20260906-rocktex1';
 import { makeRng, clamp, clamp01, lerp, smoothstep, TAU, lineSagProfile } from './util.js?v=20260830-zone5';
 import { buildRadialGrid, DETAIL_BY_QUALITY } from './terrainMesh.js?v=20260830-zone5';
 import { makeTileableHeightField, makeTileablePebbleField, bakeLandDetailMaps }
