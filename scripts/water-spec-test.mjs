@@ -39,7 +39,13 @@ const MOON_RAD   = num(/const float MOON_RAD\s*=\s*([\d.]+);/, 'MOON_RAD');
 const CAP_ROUGH  = num(/float capRough = ([\d.]+)/, 'capRough');
 const LOD_ROUGH  = num(/float lodRough = ([\d.]+)/, 'lodRough');
 const SPARK_AMT  = num(/float sparkAmt = ([\d.]+)/, 'sparkAmt');
-const SPARK_GAIN = num(/float sparkle = mix\(1\.0, glitter \* ([\d.]+)/, 'sparkle gain');
+const [GG_A, GG_B, GG_C] =
+  (() => {
+    const m = src.match(/float gGain = 1\.0 \/ \(([\d.]+) \+ \(gSoft - ([\d.]+)\) \* ([\d.]+)\);/);
+    if (!m) throw new Error('water.js から gGain を読めない');
+    return m.slice(1).map(Number);
+  })();
+const gainAt = (gSoft) => 1 / (GG_A + (gSoft - GG_B) * GG_C);
 const CLAMP      = num(/diskSpec\(N, V,  uSunDir, rough\) \* sparkle \* SUN_RAD,\s*([\d.]+)\)/, 'クランプ値');
 const G_SOFT0    = num(/float gSoft = ([\d.]+)/, 'gSoft');
 const G_THR = (() => {
@@ -80,7 +86,7 @@ function glitterAt(gSoft) {
   return smoothstep(G_THR[0] - gSoft, G_THR[1] + gSoft, vnoise(x, y))
        * smoothstep(G_THR[2] - gSoft, G_THR[3] + gSoft, vnoise(x * 2.63 + 13.7, y * 2.63 + 13.7));
 }
-const sparkleAt = (gSoft) => (1 - SPARK_AMT) + SPARK_AMT * glitterAt(gSoft) * SPARK_GAIN;
+const sparkleAt = (gSoft) => (1 - SPARK_AMT) + SPARK_AMT * glitterAt(gSoft) * gainAt(gSoft);
 
 /* --- シェーダの diskSpec を JS へ移した実装 --- */
 const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -182,10 +188,11 @@ function glitterMean(gSoft, n = 250000) {
 let worst = { d: 0, mean: 1 };
 for (const d of [3, 10, 25, 50, 80, 120, 170, 240]) {
   const amt = sparkAmtAt(d);
-  const mean = (1 - amt) + amt * glitterMean(gSoftAt(d), 120000) * SPARK_GAIN;
+  const gs = gSoftAt(d);
+  const mean = (1 - amt) + amt * glitterMean(gs, 220000) * gainAt(gs);
   if (Math.abs(mean - 1) > Math.abs(worst.mean - 1)) worst = { d, mean };
 }
-check('きらめきの校正', Math.abs(worst.mean - 1) < 0.05,
+check('きらめきの校正', Math.abs(worst.mean - 1) < 0.04,
   `sparkle の期待値が 1 から最も外れるのは ${worst.d}m で ${worst.mean.toFixed(3)}`);
 
 /* 5. 月は太陽より暗いこと、粗さの内訳が正の値であること */

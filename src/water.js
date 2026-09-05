@@ -172,12 +172,18 @@ export class Water {
       transparent: false,
       side: THREE.DoubleSide,
       depthWrite: true,
+      /* three のクリッピング面を効かせる（渚ディオラマの «立方体に切り取る»
+         モードで使う）。組み込みマテリアルと違い ShaderMaterial は自分で
+         チャンクを入れる必要がある。面を 1 枚も渡さなければ
+         NUM_CLIPPING_PLANES が 0 になり、何も生成されない */
+      clipping: true,
       /* 渚で地形とほぼ同一平面になるので、深度の綴じ込みを一段ずらす */
       polygonOffset: true,
       polygonOffsetFactor: -1,
       polygonOffsetUnits: -2,
       vertexShader: /* glsl */ `
         ${waveGLSL()}
+        #include <clipping_planes_pars_vertex>
         uniform float uTime, uWind, uRegion, uShoreLift;
         uniform sampler2D uHeightTex;
         varying vec3 vWorld;
@@ -217,6 +223,9 @@ export class Water {
 
           vWorld = wp.xyz;
           vec4 mv = viewMatrix * wp;
+          #if NUM_CLIPPING_PLANES > 0
+            vClipPosition = -mv.xyz;
+          #endif
           vFogDepth = -mv.z;
           // 静水面（y=0）までの視距離。水の厚みはこちらを基準にする
           vFlatDepth = -(viewMatrix * vec4(wp.x, 0.0, wp.z, 1.0)).z;
@@ -238,6 +247,7 @@ export class Water {
         uniform float uDebug;
         uniform float uLinearOut;
         uniform float uRegion;
+        #include <clipping_planes_pars_fragment>
         varying vec3 vWorld;
         varying vec2 vWaveD;
         varying float vDepth;
@@ -330,6 +340,9 @@ export class Water {
         }
 
         void main() {
+          /* 立方体に切り取るモード用。水中側の early return より前に置く */
+          #include <clipping_planes_fragment>
+
           /* --- 汀線 ---
              水深は頂点補間ではなくフラグメントで高さテクスチャから直接引く。
              頂点補間だと閾値が粗い三角形の上で折れて、浅場に等高線図のような
@@ -535,8 +548,9 @@ export class Water {
              解析的なローブだけだと滑らかな白い染みになってしまう。
              （ここを距離で切ると、近くの凪いだ浅場が染みのまま残る）
 
-             ノイズは期待値 1 になるよう作るのでエネルギーは増減しない
-             （glitter の期待値は数値積分で 0.052〜0.060、その逆数が 18.6 付近）。
+             ノイズは期待値 1 になるよう作るのでエネルギーは増減しない。
+             glitter の期待値は閾値の緩さ gSoft で 0.052（近景）〜0.060（遠景）
+             と動くので、ゲインもそれに合わせて引く（数値積分の線形近似）。
              遠景では 1 px に多数の面が入って実際に平均化されるので落とす。
 
              ノイズ自体は波と一緒に運ばれ（位相を vWaveD へ結び付ける）、
@@ -551,7 +565,8 @@ export class Water {
           float glitter = smoothstep(0.66 - gSoft, 0.74 + gSoft, g1)
                         * smoothstep(0.60 - gSoft, 0.72 + gSoft, g2);
           float sparkAmt = 0.80 * (1.0 - smoothstep(60.0, 240.0, vFogDepth));
-          float sparkle = mix(1.0, glitter * 18.6, sparkAmt);
+          float gGain = 1.0 / (0.0518 + (gSoft - 0.07) * 0.0513);
+          float sparkle = mix(1.0, glitter * gGain, sparkAmt);
 
           /* 円盤の «輝度»。太陽の実際の輝度は空の 10^5 倍だが、夜は露出が
              上がるので、月は太陽の 0.8 倍という «見た目の» 比で持つ。

@@ -113,7 +113,7 @@ html, body {
 </div>
 
 <div id="hint" hidden>
-  <b>1/2/3</b> カメラ　<b>T/H</b> 時刻 ±　<b>W</b> 天候　<b>Q</b> 品質　<b>F</b> 停止　<b>O</b> UI　<b>P</b> PNG
+  <b>1/2/3/4</b> カメラ　<b>←/→</b> 立方体を回す　<b>R</b> 自動回転　<b>T/H</b> 時刻 ±　<b>W</b> 天候　<b>Q</b> 品質　<b>F</b> 停止　<b>O</b> UI　<b>P</b> PNG
 </div>
 
 <script type="module">
@@ -121,8 +121,9 @@ import * as THREE from 'three';
 import { Environment, WEATHERS } from './src/sky.js?v=20260828-uwgfx18';
 import { Terrain } from './src/terrain.js?v=20260830-zone5';
 import { resolveLake } from './src/lakefield.js';
-import { Water } from './src/water.js?v=20260905-ggxdisk1';
+import { Water } from './src/water.js?v=20260905-clip3';
 import { PostFX } from './src/postfx.js?v=20260828-bloom1';
+import { DioramaCube } from './src/dioramaCube.js?v=20260905-cube10';
 import { createCausticTexture } from './src/causticTexture.js?v=20260828-caustnet3';
 
 const EXPOSURE = 0.78;
@@ -154,6 +155,15 @@ const PRESETS = {
     eye: { inland: 1.6, along: 0, up: 11.5, lake: 2.0 },
     target: { inland: 0.5, along: 0, up: 0, lake: 6.0 },
     fov: 36,
+    far: 3000,
+  },
+  /* 立方体に切り取ったジオラマ。カメラは DioramaCube 側が持つので
+     eye/target は使わない（applyPreset で分岐する） */
+  cube: {
+    id: 'cube',
+    label: '立方体',
+    cube: true,
+    fov: 34,
     far: 3000,
   },
 };
@@ -223,6 +233,7 @@ let postfx = null;
 let lake = null;
 let lakeStats = null;
 let shoreFocus = null;
+let cube = null;
 let ready = false;
 
 function fmtClock(h) {
@@ -319,6 +330,14 @@ function applyPreset(id) {
   const preset = PRESETS[id];
   if (!preset || !shoreFocus || !water || !terrain) return;
   state.preset = id;
+  if (preset.cube) {
+    cube.enable(renderer);
+    cube.applyCamera(camera);
+    syncPresetButtons();
+    updateReadout();
+    return;
+  }
+  cube?.disable();
   const target = offsetFromFocus(shoreFocus, preset.target, water.surfaceY(0, 0));
   target.y = water.surfaceY(target.x, target.z);
   const eyePos = offsetFromFocus(shoreFocus, preset.eye, 0);
@@ -348,6 +367,17 @@ function setHudVisible(visible) {
 function updateReadout() {
   if (!shoreFocus) return;
   const p = camera.position;
+  if (cube?.enabled) {
+    ui.readout.textContent = [
+      `seed ${state.seed}  preset ${state.preset}  品質 ${state.quality}`,
+      `岸焦点 (${shoreFocus.shore.x.toFixed(1)}, ${shoreFocus.shore.z.toFixed(1)})`,
+      cube.describe(),
+      `カメラ (${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)})`,
+      `時刻 ${fmtClock(state.clock)}  天候 ${WEATHERS[state.weather]?.name || state.weather}`,
+      `simTime ${state.simTime.toFixed(2)}s  frozen ${state.frozen ? 'on' : 'off'}`,
+    ].join('\n');
+    return;
+  }
   const t = offsetFromFocus(shoreFocus, PRESETS[state.preset].target, water.surfaceY(0, 0));
   t.y = water.surfaceY(t.x, t.z);
   ui.readout.textContent = [
@@ -398,6 +428,10 @@ function renderFrame(dt) {
   const flowStrength = 0.035 + water.wind * 0.018;
   terrain.updateUnderwaterProps(state.simTime, camera, terrain.dockDir, flowStrength);
   terrain.updateShore(water.time, water.wind);
+  if (cube?.enabled) {
+    cube.update(state.frozen ? 0 : dt);
+    cube.applyCamera(camera);
+  }
 
   const uwPropGroup = terrain.underwaterProps?.group;
   const uwPropWasVisible = uwPropGroup?.visible;
@@ -465,9 +499,16 @@ async function build() {
     exposure: EXPOSURE,
   });
 
-  water.setCaptureHidden([env.sky, env.rain, ...(terrain.overWaterProps || [])]);
+  cube = new DioramaCube(scene, terrain, water, { exclude: [env.sky] });
+  cube.setFocus(shoreFocus);
+
+  /* 水柱は «水面から下» を横から見せる面なので、水面の屈折・映り込みへ
+     入れると水の色が二重にかかる。地層の壁は «水の向こうにある物» なので残す */
+  water.setCaptureHidden([env.sky, env.rain, ...cube.captureHidden,
+    ...(terrain.overWaterProps || [])]);
   water.setReflectionHidden([
     env.rain,
+    ...cube.captureHidden,
     terrain.underwaterProps?.group,
     ...(terrain.waterPlants?.submergedMeshes || []),
   ]);
@@ -517,6 +558,7 @@ function bindUi() {
     terrain?.setQuality(state.quality);
     water?.setQuality?.(state.quality);
     postfx?.setQuality(state.quality);
+    cube?.refreshClipping();
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, state.quality === 'high' ? 2 : 1.5));
     syncUrl();
     updateReadout();
@@ -534,6 +576,13 @@ function bindUi() {
     if (ev.key === '1') { applyPreset('close'); syncUrl(); }
     else if (ev.key === '2') { applyPreset('oblique'); syncUrl(); }
     else if (ev.key === '3') { applyPreset('top'); syncUrl(); }
+    else if (ev.key === '4') { applyPreset('cube'); syncUrl(); }
+    else if (cube?.enabled && (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight')) {
+      ev.preventDefault();
+      cube.autoOrbit = false;
+      cube.orbit += (ev.key === 'ArrowLeft' ? -1 : 1) * (ev.shiftKey ? 0.02 : 0.09);
+    }
+    else if (cube?.enabled && (ev.key === 'r' || ev.key === 'R')) cube.autoOrbit = !cube.autoOrbit;
     else if (ev.key === 't' || ev.key === 'T') { state.clock = (state.clock + 0.5) % 24; ui.clock.value = String(state.clock); ui.clockOut.textContent = fmtClock(state.clock); syncUrl(); }
     else if (ev.key === 'h' || ev.key === 'H') { state.clock = (state.clock + 23.5) % 24; ui.clock.value = String(state.clock); ui.clockOut.textContent = fmtClock(state.clock); syncUrl(); }
     else if (ev.key === 'w' || ev.key === 'W') {
@@ -577,6 +626,7 @@ const api = {
   get lake() { return lake; },
   get stats() { return lakeStats; },
   get shoreFocus() { return shoreFocus; },
+  get cube() { return cube; },
   get terrain() { return terrain; },
   get water() { return water; },
   get env() { return env; },
