@@ -75,6 +75,8 @@ export class Environment {
       uSunDir: { value: this.sunDir.clone() },
       uNight: { value: 0 },
       uCloud: { value: 0.2 },
+      // 1 = 点星を描く。水面の映り込みを焼くときだけ 0 にする
+      uStars: { value: 1 },
       uTime: { value: 0 },
       uExposure: { value: this.exposure },
       uLinearOut: { value: 0 },
@@ -93,12 +95,26 @@ export class Environment {
       fragmentShader: /* glsl */ `
         ${COMMON_GLSL}
         uniform vec3 uZenith, uHorizon, uSunColor, uSunDir;
-        uniform float uNight, uCloud, uTime, uExposure, uLinearOut;
+        uniform float uNight, uCloud, uTime, uExposure, uLinearOut, uStars;
         varying vec3 vDir;
 
         void main() {
           vec3 dir = normalize(vDir);
           float hy = dir.y;
+
+          /* --- 星の下ごしらえ ---
+             ランベルト正積方位図法。この平面では 1 セルの面積が立体角に
+             比例するので、天頂でも水平でも星の «密度» が変わらない。
+             もとの dir.xz/(|dir.y|+0.25) は天頂と水平で 4 倍も歪んでいた。
+
+             fwidth は «画面 1 ピクセルが何セルぶんか» を返す。星は点光源で、
+             見かけの大きさは距離ではなく目やレンズで決まるから、画面上では
+             どこを向いても同じピクセル数でなければならない。これで割れば
+             図法の歪みごと吸収できる。分岐の中で fwidth を取ると値が
+             保証されないので、ここで先に求めておく */
+          vec2 sUv = dir.xz * sqrt(2.0 / (1.0 + clamp(dir.y, -0.9, 1.0)));
+          vec2 sGrid = sUv * 220.0;
+          float sPx = max(fwidth(sGrid.x), fwidth(sGrid.y));
 
           // 基本グラデーション
           float g = pow(clamp(hy, 0.0, 1.0), 0.62);
@@ -145,25 +161,74 @@ export class Environment {
 
           // 星
           if (uNight > 0.02 && hy > -0.02) {
-            vec2 suv = dir.xz / (abs(dir.y) + 0.25);
-            vec2 cell = floor(suv * 120.0);
-            float n = hash21(cell);
-            float bright = smoothstep(0.9962, 0.9995, n);
-            float tw = 0.55 + 0.45 * sin(uTime * 2.4 + n * 240.0);
-            float horizonFade = smoothstep(-0.02, 0.22, hy);
-            col += vec3(0.85, 0.9, 1.0) * bright * tw * 1.7 * uNight * horizonFade;
-
             /* --- 天の川 ---
-               星空の帯を、ふくらみを持たせたノイズで表す。中心線は
-               大円（軸を少し傾けた銀河面）で、そこからの距離で明るさを決める */
+               中心線は大円（軸を少し傾けた銀河面）。そこからの距離で
+               明るさを決め、暗黒帯（ダストレーン）を 1 本抜く。
+               帯の «濃さ» は星の密度にも渡して、光ってはいるが
+               «数えられる星の集まり» にも見えるようにする */
             vec3 gal = normalize(vec3(0.42, 1.0, 0.26));
-            float gd = abs(dot(dir, gal));
-            float band = exp(-gd * gd * 34.0);
-            float dust = fbm4(suv * 2.6 + vec2(3.1, -7.4));
-            float milky = band * (0.35 + 0.65 * smoothstep(0.25, 0.75, fbm4(suv * 5.2 + 11.0)));
-            milky *= mix(0.45, 1.15, dust) * horizonFade;
-            col += vec3(0.62, 0.70, 0.92) * milky * 0.30
-                 + vec3(0.85, 0.80, 0.95) * band * 0.12;
+            float gd = dot(dir, gal);
+            float band = exp(-gd * gd * 30.0);
+            float dust = fbm4(sUv * 6.5 + vec2(3.1, -7.4));
+            // 暗黒帯。中心線からわずかにずらして、ゆらぎを与える
+            float riftD = gd + 0.030 + (fbm4(sUv * 3.1 + 21.0) - 0.5) * 0.055;
+            float rift = 1.0 - 0.62 * exp(-riftD * riftD * 900.0);
+            float milky = band * (0.35 + 0.65 * smoothstep(0.25, 0.75, fbm4(sUv * 13.0 + 11.0)));
+            milky *= mix(0.45, 1.15, dust) * rift;
+
+            /* --- 星 ---
+               1 セルにつき最大 1 個の点を打つ。セルの端に落ちた星が
+               欠けないよう隣まで見る（3x3）。位置は fwidth でピクセルに
+               直してから測るので、どこを向いても同じ大きさになる */
+            float sharp = 1.0 - smoothstep(0.30, 0.75, sPx);
+            /* 大気による減光。低い星ほど暗く、赤くなる。地平線で
+               ばっさり切ると «空に蓋» の縁が見えるので指数で落とす */
+            float airmass = 1.0 / max(hy + 0.07, 0.07);
+            float ext = exp(-(airmass - 1.0) * 0.22);
+            // 満月のそばは空が明るく、暗い星は負ける
+            float wash = 1.0 - 0.55 * pow(max(dot(dir, -uSunDir), 0.0), 6.0);
+            // 低い星ほど大気が揺れて瞬く
+            float twAmp = mix(0.10, 0.62, clamp((airmass - 1.0) * 0.5, 0.0, 1.0));
+            float thr = 1.0 - (0.0075 + milky * 0.055);
+
+            vec3 stars = vec3(0.0);
+            vec2 sBase = floor(sGrid);
+            for (int j = -1; j <= 1; j++) {
+              for (int i = -1; i <= 1; i++) {
+                vec2 c = sBase + vec2(float(i), float(j));
+                float h = hash21(c);
+                if (h < thr) continue;
+                /* 等級。暗い星が圧倒的に多く、明るい星はごくわずか、
+                   という実際の分布に寄せる（一様にすると «粒が均一に
+                   撒かれた紙» になって安っぽく見える） */
+                float mag = 0.10 + 0.90 * pow(hash21(c + 3.7), 3.2);
+                vec2 jit = vec2(hash21(c + 11.3), hash21(c + 29.1)) * 0.6 + 0.2;
+                vec2 d = (sGrid - (c + jit)) / max(sPx, 1e-5);   // ピクセル単位
+                float r2 = dot(d, d);
+                // 芯と、明るい星だけが持つにじみ
+                float core = exp(-r2 * 1.6) + mag * 0.55 * exp(-r2 * 0.30);
+                // いちばん明るい星には十字のにじみ（これがあると «星» に見える）
+                float spike = smoothstep(0.88, 1.0, mag);
+                if (spike > 0.0) {
+                  core += (exp(-abs(d.x) * 0.62 - d.y * d.y * 2.4)
+                         + exp(-abs(d.y) * 0.62 - d.x * d.x * 2.4)) * spike * 0.22;
+                }
+                // 色温度。青白 → 白 → 橙
+                float t = hash21(c + 5.1);
+                vec3 tint = t < 0.60
+                  ? mix(vec3(0.70, 0.81, 1.00), vec3(1.0), smoothstep(0.0, 0.60, t))
+                  : mix(vec3(1.0), vec3(1.00, 0.76, 0.55), smoothstep(0.60, 1.0, t));
+                float tw = 1.0 + twAmp * sin(uTime * (1.6 + fract(h * 37.0) * 2.6) + h * 240.0);
+                stars += tint * core * mag * tw;
+              }
+            }
+            // 減光は色も変える（低い星は赤い）
+            stars *= mix(vec3(1.0), vec3(1.12, 0.84, 0.62), clamp(1.0 - ext, 0.0, 1.0)) * ext;
+            col += stars * 2.6 * sharp * wash * uNight * uStars;
+
+            col += (vec3(0.62, 0.70, 0.92) * milky * 0.30
+                  + vec3(0.85, 0.80, 0.95) * band * rift * 0.12)
+                 * smoothstep(-0.02, 0.22, hy) * uNight;
           }
 
           // 雲

@@ -34,6 +34,7 @@ const tests = [
   'scripts/land-texture-test.mjs',
   'scripts/terrain-mesh-test.mjs',
   'scripts/caustics-light-test.mjs',
+  'scripts/night-sky-test.mjs',
   'scripts/undergrowth-test.mjs',
   'scripts/walk-zone-test.mjs',
 ];

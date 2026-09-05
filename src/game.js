@@ -373,6 +373,7 @@ export class Game {
     await onProgress(t('ui.loadingWater'));
     this.water = new Water(this.scene, this.terrain, {
       quality: q, exposure: EXPOSURE, causticsUniforms,
+      skyUniforms: this.env.skyUniforms,
     });
 
     // 後処理（Bloom は high のみ）。water/sky はリニア出力へ切り替わる

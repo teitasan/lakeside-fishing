@@ -613,6 +613,8 @@ export class Water {
     this._buildSplash();
     this._buildPlankton(opts.quality || 'mid');
     this.quality = opts.quality || 'mid';
+    /** 空ドームの uniform。映り込みを焼くあいだ点星を切るのに使う */
+    this.skyUniforms = opts.skyUniforms || null;
     this._underwaterView = false;
 
     /* 湖底・魚シェーダが参照するコースティクス uniform */
@@ -745,6 +747,16 @@ export class Water {
     hidden.push(...(this._reflectionHidden || []).filter(Boolean));
     const vis = hidden.map((o) => o.visible);
     for (const o of hidden) o.visible = false;
+    /* 点星だけは映り込みに焼かない。
+       星は «画面 1 ピクセル» の光点として描いているが、この RT は 1024px
+       しかないうえ、貼るときに縦へぼかす。だから RT の 1 px がそのまま
+       画面の数 px へ引き伸ばされて、水面にだけ «巨大な星» が並ぶ。
+       物理的にも、さざ波の立った水面は 1 つの星の光を長く引き延ばして
+       散らすので、点として見えるのは鏡のような凪のときだけ。
+       天の川や月のような «広がった光» はそのまま映してよい */
+    const skyU = this.skyUniforms;
+    const starsWas = skyU ? skyU.uStars.value : 0;
+    if (skyU) skyU.uStars.value = 0;
     const prevTarget = renderer.getRenderTarget();
     renderer.setRenderTarget(this.reflRT);
     renderer.setClearColor(this.reflClearColor, 1);
@@ -756,6 +768,7 @@ export class Water {
     renderer.shadowMap.autoUpdate = prevShadowAuto;
     renderer.setClearColor(null, 0);
     renderer.setRenderTarget(prevTarget);
+    if (skyU) skyU.uStars.value = starsWas;
     hidden.forEach((o, i) => { o.visible = vis[i]; });
   }
 
